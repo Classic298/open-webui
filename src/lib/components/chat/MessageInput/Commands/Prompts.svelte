@@ -130,7 +130,7 @@
 		}
 
 		if ($settings?.richTextInput ?? true) {
-			const htmlToInsert = plainTextPromptContent
+			const htmlToInsert = command.content
 				.split('\n')
 				.map((line) => {
 					const escapedLine = line
@@ -168,7 +168,7 @@
 			const lastCurrentInputLine = currentInputLines.pop() || '';
 			const lastCurrentInputLineWords = lastCurrentInputLine.split(' ');
 			lastCurrentInputLineWords.pop();
-			lastCurrentInputLineWords.push(plainTextPromptContent); 
+			lastCurrentInputLineWords.push(command.content); 
 			currentInputLines.push(lastCurrentInputLineWords.join(' '));
 			prompt = currentInputLines.join('\n');
 		}
