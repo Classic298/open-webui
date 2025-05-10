@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, tick, getContext } from 'svelte';
 
-	import Textarea from '$lib/components/common/Textarea.svelte';
+	import RichTextInput from '$lib/components/common/RichTextInput.svelte';
 	import { toast } from 'svelte-sonner';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import AccessControl from '../common/AccessControl.svelte';
@@ -149,12 +149,11 @@
 
 			<div class="mt-2">
 				<div>
-					<Textarea
-						className="text-sm w-full bg-transparent outline-hidden overflow-y-hidden resize-none"
+					<RichTextInput
+						className="input-prose-sm text-sm w-full bg-transparent outline-hidden" 
 						placeholder={$i18n.t('Write a summary in 50 words that summarizes [topic or keyword].')}
 						bind:value={content}
-						rows={6}
-						required
+						preserveBreaks={false} 
 					/>
 				</div>
 
