@@ -179,7 +179,7 @@
 						return false;
 					},
 					replacement: function (content, node) {
-						return '\n \n';
+						 return '\n&nbsp;\n';
 					}
 				});
 			}
