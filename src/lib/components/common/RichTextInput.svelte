@@ -244,10 +244,9 @@
 							.turndown(
 								editor
 									.getHTML()
-									.replace(/<p><\/p>/g, '<br/>')
 									.replace(/ {2,}/g, (m) => m.replace(/ /g, '\u00a0'))
 							)
-							.replace(/\u00a0/g, ' ');
+							.replace(/\u00a0/g, ' '); // Converts &nbsp; back to spaces in the final Markdown
 
 						if (!preserveBreaks) {
 							newValue = newValue.replace(/<br\/>/g, '');
