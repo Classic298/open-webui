@@ -154,32 +154,30 @@
 					}
 				});
 
-				turndownService.addRule('preserveEmptyParagraphs', {
-					filter: function (node) {
-						if (node.nodeName === 'P') {
-							const innerHTML = node.innerHTML.trim(); // Get the trimmed inner HTML of the P tag
-
-							// Case 1: Paragraph is completely empty (e.g., <p></p>)
-							if (innerHTML === '') {
-								return true;
-							}
-							// Case 2: Paragraph contains only a non-breaking space (e.g., <p>&nbsp;</p>)
-							if (innerHTML === '&nbsp;') {
-								return true;
-							}
-							// Case 3: Paragraph contains only a <br> tag.
-							if (innerHTML.toLowerCase().startsWith('<br')) {
-								const tempDiv = document.createElement('div');
-								tempDiv.innerHTML = node.innerHTML;
-								if (tempDiv.children.length === 1 && tempDiv.children[0].nodeName === 'BR') {
-									return true;
-								}
-							}
-						}
-						return false;
+				// Override Turndown's default handling for <p> tags when preserveBreaks is true
+				turndownService.keep(['p']) // Tell Turndown to keep <p> tags initially
+				turndownService.addRule('customParagraphHandlingForPreserveMode', {
+					filter: function(node, options) {
+						return node.nodeName === 'P';
 					},
-					replacement: function (content, node) {
-						 return '\n&nbsp;\n';
+					replacement: function (content, nodeAst, options) {
+						// content here is the raw innerHTML because we 'kept' the p tag
+						const innerHTML = nodeAst.innerHTML.trim(); // Use nodeAst from Turndown
+						const isEffectivelyEmpty = innerHTML === '' ||
+												 innerHTML === '&nbsp;' ||
+												 (innerHTML.toLowerCase().startsWith('<br') &&
+													 (() => {
+														 const tempDiv = document.createElement('div');
+														 tempDiv.innerHTML = nodeAst.innerHTML;
+														 return tempDiv.children.length === 1 && tempDiv.children[0].nodeName === 'BR';
+													 })());
+
+						if (isEffectivelyEmpty) {
+							return '\n&nbsp;\n'; // Our desired output for empty lines
+						} else {
+							const processedInnerContent = turndownService.turndown(nodeAst.innerHTML);
+							return '\n\n' + processedInnerContent + '\n\n';
+						}
 					}
 				});
 			}
@@ -273,9 +271,8 @@
 					if (!raw) {
 						let newValue = turndownService
 							.turndown(
-								editor
-									.getHTML()
-									.replace(/ {2,}/g, (m) => m.replace(/ /g, '\u00a0'))
+								html
+									.replace(/ {2,}/g, (m) => m.replace(/ /g, '\u00a0')) // This converts multiple spaces to &nbsp;
 							)
 							.replace(/\u00a0/g, ' ');
 
