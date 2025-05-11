@@ -148,7 +148,7 @@
 		if (!json) {
 			if (preserveBreaks) {
 				turndownService.addRule('preserveBreaks', {
-					filter: 'br',
+					filter: 'br', // Target <br> elements
 					replacement: function (content) {
 						return '<br/>';
 					}
@@ -158,10 +158,10 @@
 			if (!raw) {
 				async function tryParse(value, attempts = 3, interval = 100) {
 					try {
+						// Try parsing the value
 						return marked.parse(value.replaceAll(`\n<br/>`, `<br/>`), {
 							breaks: false
-						}
-					}
+						});
 					} catch (error) {
 						// If no attempts remain, fallback to plain text
 						if (attempts <= 1) {
@@ -181,6 +181,8 @@
 				content = html;
 			}
 		}
+
+		console.log('content', content);
 
 		editor = new Editor({
 			element: element,
@@ -214,7 +216,9 @@
 			content: content,
 			autofocus: messageInput ? true : false,
 			onTransaction: () => {
+				// force re-render so `editor.isActive` works as expected
 				editor = editor;
+
 				html = editor.getHTML();
 
 				onChange({
@@ -229,8 +233,9 @@
 					if (!raw) {
 						let newValue = turndownService
 							.turndown(
-								html
-									.replace(/ {2,}/g, (m) => m.replace(/ /g, '\u00a0'))
+								editor
+									.getHTML()
+									.replace(/<p><\/p>/g, '<br/>')
 							)
 							.replace(/\u00a0/g, ' ');
 
@@ -407,29 +412,19 @@
 					turndownService
 						.turndown(
 							(preserveBreaks
-								? editor.getHTML()
+								? editor.getHTML().replace(/<p><\/p>/g, '<br/>')
 								: editor.getHTML()
 							).replace(/ {2,}/g, (m) => m.replace(/ /g, '\u00a0'))
 						)
 						.replace(/\u00a0/g, ' ')
 				) {
-					if (preserveBreaks) {
-						const normalizedValue = (value || '').replace(/\r\n|\r/g, '\n');
-						// Parse Markdown with breaks:true to convert \n to <br> for Tiptap
-						let htmlToSet = marked.parse(normalizedValue, { breaks: true, gfm: true });
-						if (htmlToSet) {
-							// htmlToSet = htmlToSet.replace(/<p><\/p>/g, '<p>&nbsp;</p>'); // Old way
-							htmlToSet = htmlToSet.replace(/<p>(?:&nbsp;|<br\s*\/?>)?<\/p>/gi, '<p>&#8203;</p>');
-						}
-						editor.commands.setContent(
-							marked.parse(normalizedValue, { breaks: true, gfm: true })
-						);
-					} else {
-						const normalizedValue = (value || '').replace(/\r\n|\r/g, '\n');
-						editor.commands.setContent(
-							marked.parse(normalizedValue, { breaks: false, gfm: true })
-						);
-					}
+					preserveBreaks
+						? editor.commands.setContent(value)
+						: editor.commands.setContent(
+								marked.parse(value.replaceAll(`\n<br/>`, `<br/>`), {
+									breaks: false
+								})
+							); // Update editor content
 					selectTemplate();
 				}
 			}
