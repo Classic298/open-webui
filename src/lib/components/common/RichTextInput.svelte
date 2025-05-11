@@ -154,16 +154,31 @@
 					}
 				});
 
-				// New rule to handle paragraphs that are visually empty
 				turndownService.addRule('preserveEmptyParagraphs', {
 					filter: function (node) {
 						if (node.nodeName === 'P') {
-							const innerHTML = node.innerHTML.trim().toLowerCase();
-							return innerHTML === '' || innerHTML === '&nbsp;' || innerHTML.toLowerCase() === '<br>' || innerHTML.toLowerCase() === '<br class="prosemirror-trailingbreak">';
+							const innerHTML = node.innerHTML.trim(); // Get the trimmed inner HTML of the P tag
+
+							// Case 1: Paragraph is completely empty (e.g., <p></p>)
+							if (innerHTML === '') {
+								return true;
+							}
+							// Case 2: Paragraph contains only a non-breaking space (e.g., <p>&nbsp;</p>)
+							if (innerHTML === '&nbsp;') {
+								return true;
+							}
+							// Case 3: Paragraph contains only a <br> tag.
+							if (innerHTML.toLowerCase().startsWith('<br')) {
+								const tempDiv = document.createElement('div');
+								tempDiv.innerHTML = node.innerHTML;
+								if (tempDiv.children.length === 1 && tempDiv.children[0].nodeName === 'BR') {
+									return true; // It's a P tag containing only a BR element.
+								}
+							}
 						}
 						return false;
 					},
-					replacement: function (contentNode, node) {
+					replacement: function (content, node) {
 						return '\n \n';
 					}
 				});
