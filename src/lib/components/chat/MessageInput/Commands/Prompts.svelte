@@ -156,57 +156,54 @@
 
 			promptPrefix = promptPrefix.trim();
 
-			if (promptPrefix && command.content) {
-				prompt = promptPrefix + (promptPrefix ? ' ' : '') + command.content;
-			} else if (htmlToInsert) {
-				prompt = command.content;
+			if ($settings?.richTextInput ?? true) {
+				lastLineWords.push(
+					`${text.replace(/</g, '&lt;').replace(/>/g, '&gt;').replaceAll('\n', '<br/>')}`
+				);
+
 			} else {
-				prompt = promptPrefix;
+				const currentInputLines = prompt.split('\n');
+				const lastCurrentInputLine = currentInputLines.pop() || '';
+				const lastCurrentInputLineWords = lastCurrentInputLine.split(' ');
+				lastCurrentInputLineWords.pop();
+				lastCurrentInputLineWords.push(command.content); 
+				currentInputLines.push(lastCurrentInputLineWords.join(' '));
+				prompt = currentInputLines.join('\n');
 			}
 
-		} else {
-			const currentInputLines = prompt.split('\n');
-			const lastCurrentInputLine = currentInputLines.pop() || '';
-			const lastCurrentInputLineWords = lastCurrentInputLine.split(' ');
-			lastCurrentInputLineWords.pop();
-			lastCurrentInputLineWords.push(command.content); 
-			currentInputLines.push(lastCurrentInputLineWords.join(' '));
-			prompt = currentInputLines.join('\n');
-		}
+			const chatInputContainerElement = document.getElementById('chat-input-container');
+			const chatInputElement = document.getElementById('chat-input');
 
-		const chatInputContainerElement = document.getElementById('chat-input-container');
-		const chatInputElement = document.getElementById('chat-input');
-
-		await tick();
-		if (chatInputContainerElement) {
-			chatInputContainerElement.scrollTop = chatInputContainerElement.scrollHeight;
-		}
-
-		await tick();
-		if (chatInputElement) {
-			chatInputElement.focus();
-			chatInputElement.dispatchEvent(new Event('input'));
-
-			const words = extractCurlyBraceWords(prompt);
-
-			if (words.length > 0) {
-				const word = words.at(0);
-				const fullPrompt = prompt;
-
-				prompt = prompt.substring(0, word?.endIndex + 1);
-				await tick();
-
-				chatInputElement.scrollTop = chatInputElement.scrollHeight;
-
-				prompt = fullPrompt;
-				await tick();
-
-				chatInputElement.setSelectionRange(word?.startIndex, word.endIndex + 1);
-			} else {
-				chatInputElement.scrollTop = chatInputElement.scrollHeight;
+			await tick();
+			if (chatInputContainerElement) {
+				chatInputContainerElement.scrollTop = chatInputContainerElement.scrollHeight;
 			}
-		}
-	};
+
+			await tick();
+			if (chatInputElement) {
+				chatInputElement.focus();
+				chatInputElement.dispatchEvent(new Event('input'));
+
+				const words = extractCurlyBraceWords(prompt);
+
+				if (words.length > 0) {
+					const word = words.at(0);
+					const fullPrompt = prompt;
+
+					prompt = prompt.substring(0, word?.endIndex + 1);
+					await tick();
+
+					chatInputElement.scrollTop = chatInputElement.scrollHeight;
+
+					prompt = fullPrompt;
+					await tick();
+
+					chatInputElement.setSelectionRange(word?.startIndex, word.endIndex + 1);
+				} else {
+					chatInputElement.scrollTop = chatInputElement.scrollHeight;
+				}
+			}
+		};
 </script>
 
 {#if filteredPrompts.length > 0}
