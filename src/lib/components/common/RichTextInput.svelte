@@ -159,13 +159,13 @@
 				async function tryParse(textValue, attempts = 3, interval = 100, useMarkdownBreaks = false) {
 					try {
 						// Try parsing the value
-						return marked.parse(textValue.replaceAll(`\n<br/>`, `<br/>`), {
+						return marked.parse(textValue || '', { // Pass textValue directly, ensure gfm is implicitly true for paragraph parsing
 							breaks: useMarkdownBreaks
 						});
 					} catch (error) {
 						// If no attempts remain, fallback to plain text
 						if (attempts <= 1) {
-							return textValue;
+							return textValue || '';
 						}
 						// Wait for the interval, then retry
 						await new Promise((resolve) => setTimeout(resolve, interval));
