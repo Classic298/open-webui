@@ -159,7 +159,7 @@
 					filter: function (node) {
 						if (node.nodeName === 'P') {
 							const innerHTML = node.innerHTML.trim().toLowerCase();
-							return innerHTML === '' || innerHTML === '<br>' || innerHTML === '&nbsp;';
+							return innerHTML === '' || innerHTML === '&nbsp;' || innerHTML.toLowerCase() === '<br>' || innerHTML.toLowerCase() === '<br class="prosemirror-trailingbreak">';
 						}
 						return false;
 					},
