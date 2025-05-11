@@ -130,31 +130,31 @@
 		}
 
 		if ($settings?.richTextInput ?? true) {
-			const htmlToInsert = command.content
-				.split('\n')
-				.map((line) => {
-					const escapedLine = line
-						.replace(/&/g, '&amp;')
-						.replace(/</g, '&lt;')
-						.replace(/>/g, '&gt;');
-					return `<p>${escapedLine || '<br>'}</p>`;
-				})
-				.join('');
+			const allPromptLines = prompt.split('\n');
+			const lastLineWithTrigger = allPromptLines.pop() || ''; // Line where command was typed
+			const wordsInLastLine = lastLineWithTrigger.split(' ');
+			wordsInLastLine.pop(); // Remove the command trigger itself (e.g., /mycommand)
 
-			const currentInputLines = prompt.split('\n');
-			const lastCurrentInputLine = currentInputLines.pop() || '';
-			
-			const lastCurrentInputLineWords = lastCurrentInputLine.split(' ');
-			lastCurrentInputLineWords.pop();
+			let fullPromptPrefix = '';
+			if (allPromptLines.length > 0) {
+			fullPromptPrefix = allPromptLines.join('\n');
+			}
+			if (wordsInLastLine.length > 0) {
+			if (fullPromptPrefix.length > 0) {
+				fullPromptPrefix += '\n';
+			}
+			fullPromptPrefix += wordsInLastLine.join(' ');
+			}
+			fullPromptPrefix = fullPromptPrefix.trimEnd();
 
-			let promptPrefix = lastCurrentInputLineWords.join(' ');
-
-			if (promptPrefix && command.content) {
-			prompt = promptPrefix + ' ' + htmlToInsert;
-			} else if (htmlToInsert) {
-				prompt = htmlToInsert;
+			if (text && text.trim().length > 0) { // If 'text' (the command's content) is not empty
+			if (fullPromptPrefix.length > 0) {
+				prompt = fullPromptPrefix + '\n\n' + text;
 			} else {
-				prompt = promptPrefix;
+				prompt = text;
+			}
+			} else {
+			prompt = fullPromptPrefix;
 			}
 
 		} else {
