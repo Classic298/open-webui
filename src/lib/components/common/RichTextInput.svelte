@@ -153,6 +153,20 @@
 						return '\n';
 					}
 				});
+
+				// New rule to handle paragraphs that are visually empty
+				turndownService.addRule('preserveEmptyParagraphs', {
+					filter: function (node) {
+						if (node.nodeName === 'P') {
+							const innerHTML = node.innerHTML.trim().toLowerCase();
+							return innerHTML === '' || innerHTML === '<br>' || innerHTML === '&nbsp;';
+						}
+						return false;
+					},
+					replacement: function (contentNode, node) {
+						return '\n \n';
+					}
+				});
 			}
 
 			if (!raw) {
@@ -244,7 +258,6 @@
 							.turndown(
 								editor
 									.getHTML()
-									.replace(/<p><\/p>/g, '<br/>')
 									.replace(/ {2,}/g, (m) => m.replace(/ /g, '\u00a0'))
 							)
 							.replace(/\u00a0/g, ' ');
