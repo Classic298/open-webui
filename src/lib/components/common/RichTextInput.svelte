@@ -158,14 +158,17 @@
 			if (!raw) {
 				async function tryParse(textValue, attempts = 3, interval = 100, useMarkdownBreaks = false) {
 					try {
+						// Normalize all types of newlines to \n
+						const normalizedTextValue = (textValue || '').replace(/\r\n|\r/g, '\n');
 						// Try parsing the value
-						return marked.parse(textValue || '', { // Pass textValue directly, ensure gfm is implicitly true for paragraph parsing
-							breaks: useMarkdownBreaks
+						return marked.parse(normalizedTextValue, {
+							breaks: useMarkdownBreaks,
+							gfm: true // Ensure GFM is active for paragraph handling
 						});
 					} catch (error) {
 						// If no attempts remain, fallback to plain text
 						if (attempts <= 1) {
-							return textValue || '';
+							return (textValue || '').replace(/\r\n|\r/g, '\n');
 						}
 						// Wait for the interval, then retry
 						await new Promise((resolve) => setTimeout(resolve, interval));
@@ -420,16 +423,16 @@
 						.replace(/\u00a0/g, ' ')
 				) {
 					if (preserveBreaks) {
+						const normalizedValue = (value || '').replace(/\r\n|\r/g, '\n');
 						editor.commands.setContent(value);
 						// Parse Markdown with breaks:true to convert \n to <br> for Tiptap
 						editor.commands.setContent(
-							marked.parse(value || '', { breaks: true })
+							marked.parse(normalizedValue, { breaks: true, gfm: true })
 						);
                     } else {
+						const normalizedValue = (value || '').replace(/\r\n|\r/g, '\n');
                         editor.commands.setContent(
-                            marked.parse(value || '', {
-                                breaks: false
-                            })
+                            marked.parse(normalizedValue, { breaks: false, gfm: true })
                         );
                     }
 					selectTemplate();
