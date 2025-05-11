@@ -154,30 +154,16 @@
 					}
 				});
 
-				// Override Turndown's default handling for <p> tags when preserveBreaks is true
-				turndownService.keep(['p']) // Tell Turndown to keep <p> tags initially
-				turndownService.addRule('customParagraphHandlingForPreserveMode', {
-					filter: function(node, options) {
-						return node.nodeName === 'P';
-					},
-					replacement: function (content, nodeAst, options) {
-						// content here is the raw innerHTML because we 'kept' the p tag
-						const innerHTML = nodeAst.innerHTML.trim(); // Use nodeAst from Turndown
-						const isEffectivelyEmpty = innerHTML === '' ||
-												 innerHTML === '&nbsp;' ||
-												 (innerHTML.toLowerCase().startsWith('<br') &&
-													 (() => {
-														 const tempDiv = document.createElement('div');
-														 tempDiv.innerHTML = nodeAst.innerHTML;
-														 return tempDiv.children.length === 1 && tempDiv.children[0].nodeName === 'BR';
-													 })());
-
-						if (isEffectivelyEmpty) {
-							return '\n&nbsp;\n'; // Our desired output for empty lines
-						} else {
-							const processedInnerContent = turndownService.turndown(nodeAst.innerHTML);
-							return '\n\n' + processedInnerContent + '\n\n';
+				turndownService.addRule('emptyParagraphToPreservedLine', {
+					filter: function(node) {
+						if (node.nodeName === 'P') {
+							const innerHTML = node.innerHTML.trim().toLowerCase();
+							return innerHTML === '' || innerHTML === '<br>' || innerHTML === '&nbsp;';
 						}
+						return false;
+					},
+					replacement: function (content, node) {
+						return '\n&nbsp;\n';
 					}
 				});
 			}
