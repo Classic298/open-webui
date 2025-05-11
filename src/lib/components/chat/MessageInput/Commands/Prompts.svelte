@@ -49,6 +49,7 @@
 
 	const confirmPrompt = async (command) => {
 		let text = command.content;
+		text = text.replace(/\n\n/g, '\n \n');
 
 		if (command.content.includes('{{CLIPBOARD}}')) {
 			const clipboardText = await navigator.clipboard.readText().catch((err) => {
@@ -131,9 +132,9 @@
 
 		if ($settings?.richTextInput ?? true) {
 			const allPromptLines = prompt.split('\n');
-			const lastLineWithTrigger = allPromptLines.pop() || ''; // Line where command was typed
+			const lastLineWithTrigger = allPromptLines.pop() || '';
 			const wordsInLastLine = lastLineWithTrigger.split(' ');
-			wordsInLastLine.pop(); // Remove the command trigger itself (e.g., /mycommand)
+			wordsInLastLine.pop();
 
 			let fullPromptPrefix = '';
 			if (allPromptLines.length > 0) {
@@ -162,7 +163,7 @@
 			const lastCurrentInputLine = currentInputLines.pop() || '';
 			const lastCurrentInputLineWords = lastCurrentInputLine.split(' ');
 			lastCurrentInputLineWords.pop();
-			lastCurrentInputLineWords.push(command.content); 
+			lastCurrentInputLineWords.push(text);
 			currentInputLines.push(lastCurrentInputLineWords.join(' '));
 			prompt = currentInputLines.join('\n');
 		}
