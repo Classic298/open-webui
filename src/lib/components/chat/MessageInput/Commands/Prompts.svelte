@@ -22,18 +22,9 @@
 	let selectedPromptIdx = 0;
 	let filteredPrompts = [];
 
-	$: {
-		if (command && command.length > 1) {
-			const commandName = command.substring(1).toLowerCase();
-			const cleanedCommandName = commandName.replace(/<\/?p>/gi, '').trim();
-
-			filteredPrompts = $prompts
-				.filter((p) => p.command.toLowerCase().includes(cleanedCommandName))
-				.sort((a, b) => a.title.localeCompare(b.title));
-		} else {
-			filteredPrompts = [];
-		}
-	}
+	$: filteredPrompts = $prompts
+		.filter((p) => p.command.toLowerCase().includes(command.toLowerCase()))
+		.sort((a, b) => a.title.localeCompare(b.title));
 
 	$: if (command) {
 		selectedPromptIdx = 0;
@@ -129,43 +120,23 @@
 			text = text.replaceAll('{{CURRENT_WEEKDAY}}', weekday);
 		}
 
+		const lines = prompt.split('\n');
+		const lastLine = lines.pop();
+
+		const lastLineWords = lastLine.split(' ');
+		const lastWord = lastLineWords.pop();
+
 		if ($settings?.richTextInput ?? true) {
-			const htmlToInsert = command.content
-				.split('\n')
-				.map((line) => {
-					const escapedLine = line
-						.replace(/&/g, '&amp;')
-						.replace(/</g, '&lt;')
-						.replace(/>/g, '&gt;');
-					return `<p>${escapedLine || '<br>'}</p>`;
-				})
-				.join('');
+			lastLineWords.push(
+				`${text.replace(/</g, '&lt;').replace(/>/g, '&gt;').replaceAll('\n', '<br/>')}`
+			);
 
-			const currentInputLines = prompt.split('\n');
-			const lastCurrentInputLine = currentInputLines.pop() || '';
-			
-			const lastCurrentInputLineWords = lastCurrentInputLine.split(' ');
-			lastCurrentInputLineWords.pop();
-
-			let promptPrefix = '';
-			promptPrefix += lastCurrentInputLineWords.join(' ');
-
-			if (promptPrefix && command.content) {
-				prompt = promptPrefix + (promptPrefix ? ' ' : '') + command.content;
-			} else if (htmlToInsert) {
-				prompt = command.content;
-			} else {
-				prompt = promptPrefix;
-			}
-
+			lines.push(lastLineWords.join(' '));
+			prompt = lines.join('<br/>');
 		} else {
-			const currentInputLines = prompt.split('\n');
-			const lastCurrentInputLine = currentInputLines.pop() || '';
-			const lastCurrentInputLineWords = lastCurrentInputLine.split(' ');
-			lastCurrentInputLineWords.pop();
-			lastCurrentInputLineWords.push(command.content); 
-			currentInputLines.push(lastCurrentInputLineWords.join(' '));
-			prompt = currentInputLines.join('\n');
+			lastLineWords.push(text);
+			lines.push(lastLineWords.join(' '));
+			prompt = lines.join('\n');
 		}
 
 		const chatInputContainerElement = document.getElementById('chat-input-container');
