@@ -149,16 +149,17 @@
 
 			let promptPrefix = '';
 			if (currentInputLines.length > 0) {
-				promptPrefix = currentInputLines.join('<br/>') + '<br/>';
+				promptPrefix = currentInputLines.join('\n'); // Join with Markdown newlines
+				if (promptPrefix) promptPrefix += '\n'; // Add a newline if there was prefix content
 			}
 			promptPrefix += lastCurrentInputLineWords.join(' ');
 
 			promptPrefix = promptPrefix.trim();
 
-			if (promptPrefix && htmlToInsert) {
-				prompt = promptPrefix + ' ' + htmlToInsert;
+			if (promptPrefix && command.content) {
+				prompt = promptPrefix + (promptPrefix ? ' ' : '') + command.content;
 			} else if (htmlToInsert) {
-				prompt = htmlToInsert;
+				prompt = command.content;
 			} else {
 				prompt = promptPrefix;
 			}
