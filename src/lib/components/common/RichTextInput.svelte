@@ -148,33 +148,33 @@
 		if (!json) {
 			if (preserveBreaks) {
 				turndownService.addRule('preserveBreaks', {
-					filter: 'br', // Target <br> elements
-					replacement: function (content) {
-						return '<br/>';
+					filter: 'br',
+					replacement: function () {
+						return '\n';
 					}
 				});
 			}
 
 			if (!raw) {
-				async function tryParse(value, attempts = 3, interval = 100) {
+				async function tryParse(textValue, attempts = 3, interval = 100, useMarkdownBreaks = false) {
 					try {
 						// Try parsing the value
-						return marked.parse(value.replaceAll(`\n<br/>`, `<br/>`), {
-							breaks: false
+						return marked.parse(textValue.replaceAll(`\n<br/>`, `<br/>`), {
+							breaks: useMarkdownBreaks
 						});
 					} catch (error) {
 						// If no attempts remain, fallback to plain text
 						if (attempts <= 1) {
-							return value;
+							return textValue;
 						}
 						// Wait for the interval, then retry
 						await new Promise((resolve) => setTimeout(resolve, interval));
-						return tryParse(value, attempts - 1, interval); // Recursive call
+						return tryParse(textValue, attempts - 1, interval, useMarkdownBreaks);
 					}
 				}
 
 				// Usage example
-				content = await tryParse(value);
+				content = await tryParse(value, 3, 100, preserveBreaks);
 			}
 		} else {
 			if (html && !content) {
@@ -419,14 +419,19 @@
 						)
 						.replace(/\u00a0/g, ' ')
 				) {
-					preserveBreaks
-						? editor.commands.setContent(value)
-						: editor.commands.setContent(
-								marked.parse(value.replaceAll(`\n<br/>`, `<br/>`), {
-									breaks: false
-								})
-							); // Update editor content
-
+					if (preserveBreaks) {
+						editor.commands.setContent(value);
+						// Parse Markdown with breaks:true to convert \n to <br> for Tiptap
+						editor.commands.setContent(
+							marked.parse(value || '', { breaks: true })
+						);
+                    } else {
+                        editor.commands.setContent(
+                            marked.parse(value || '', {
+                                breaks: false
+                            })
+                        );
+                    }
 					selectTemplate();
 				}
 			}
