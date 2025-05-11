@@ -148,7 +148,7 @@
 		if (!json) {
 			if (preserveBreaks) {
 				turndownService.addRule('preserveBreaks', {
-					filter: 'br',
+					filter: 'br', // Target <br> elements
 					replacement: function (content) {
 						return '<br/>';
 					}

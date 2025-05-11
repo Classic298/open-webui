@@ -148,13 +148,7 @@
 			lastCurrentInputLineWords.pop();
 
 			let promptPrefix = '';
-			if (currentInputLines.length > 0) {
-				promptPrefix = currentInputLines.join('\n'); // Join with Markdown newlines
-				if (promptPrefix) promptPrefix += '\n'; // Add a newline if there was prefix content
-			}
 			promptPrefix += lastCurrentInputLineWords.join(' ');
-
-			promptPrefix = promptPrefix.trim();
 
 			if (promptPrefix && command.content) {
 				prompt = promptPrefix + (promptPrefix ? ' ' : '') + command.content;
