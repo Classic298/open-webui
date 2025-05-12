@@ -611,8 +611,6 @@
 												bind:this={chatInputElement}
 												bind:value={prompt}
 												id="chat-input"
-												className="input-prose-sm prose-sm dark:prose-invert max-w-full"
-												preserveBreaks={true}
 												messageInput={true}
 												shiftEnter={!($settings?.ctrlEnterToSend ?? false) &&
 													(!$mobile ||
