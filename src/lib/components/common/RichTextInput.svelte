@@ -191,6 +191,8 @@
 			}
 		}
 
+		console.log('content', content);
+
 		editor = new Editor({
 			element: element,
 			extensions: [
@@ -223,7 +225,9 @@
 			content: content,
 			autofocus: messageInput ? true : false,
 			onTransaction: () => {
+				// force re-render so `editor.isActive` works as expected
 				editor = editor;
+
 				html = editor.getHTML();
 
 				onChange({
@@ -416,7 +420,7 @@
 					turndownService
 						.turndown(
 							(preserveBreaks
-								? editor.getHTML()
+								? editor.getHTML().replace(/<p><\/p>/g, '<p><br/><\/p>')
 								: editor.getHTML()
 							).replace(/ {2,}/g, (m) => m.replace(/ /g, '\u00a0'))
 						)
