@@ -11,15 +11,8 @@
 	} from '$lib/utils';
 	import { tick, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
-	import TurndownService from 'turndown';
 
 	const i18n = getContext('i18n');
-
-	const turndownService = new TurndownService({ codeBlockStyle: 'fenced', headingStyle: 'atx', hr: '---', bulletListMarker: '*', emDelimiter: '_', strongDelimiter: '**' });
-	turndownService.addRule('emptyOrBreakParagraph', {
-		filter: (node) => node.nodeName === 'P' && (node.innerHTML.trim() === '' || node.innerHTML.trim() === '<br>' || node.innerHTML.trim() === '<br/>'),
-		replacement: () => '\n&nbsp;\n'
-	});
 
 	export let files;
 
@@ -137,12 +130,10 @@
 		}
 
 		if ($settings?.richTextInput ?? true) {
-			const markdownTextToInsert = turndownService.turndown(text || ""); // MODIFIED: Convert HTML 'text' to Markdown
-
 			const allPromptLines = prompt.split('\n');
-			const lastLineWithTrigger = allPromptLines.pop() || ''; // Line where command was typed
+			const lastLineWithTrigger = allPromptLines.pop() || '';
 			const wordsInLastLine = lastLineWithTrigger.split(' ');
-			wordsInLastLine.pop(); // Remove the command trigger itself (e.g., /mycommand)
+			wordsInLastLine.pop();
 
 			let fullPromptPrefix = '';
 			if (allPromptLines.length > 0) {
@@ -156,24 +147,22 @@
 			}
 			fullPromptPrefix = fullPromptPrefix.trimEnd();
 
-			if (markdownTextToInsert && markdownTextToInsert.trim().length > 0) {
-				if (fullPromptPrefix.length > 0) {
-					prompt = fullPromptPrefix + '\n\n' + markdownTextToInsert;
-				} else {
-					prompt = markdownTextToInsert;
-				}
+			if (text && text.trim().length > 0) { // If 'text' (the command's content) is not empty
+			if (fullPromptPrefix.length > 0) {
+				prompt = fullPromptPrefix + '\n\n' + text;
 			} else {
-				prompt = fullPromptPrefix;
+				prompt = text;
+			}
+			} else {
+			prompt = fullPromptPrefix;
 			}
 
 		} else {
-			const plainTextToInsert = turndownService.turndown(text || "");
-
 			const currentInputLines = prompt.split('\n');
 			const lastCurrentInputLine = currentInputLines.pop() || '';
 			const lastCurrentInputLineWords = lastCurrentInputLine.split(' ');
 			lastCurrentInputLineWords.pop();
-			lastCurrentInputLineWords.push(plainTextToInsert);
+			lastCurrentInputLineWords.push(text);
 			currentInputLines.push(lastCurrentInputLineWords.join(' '));
 			prompt = currentInputLines.join('\n');
 		}
