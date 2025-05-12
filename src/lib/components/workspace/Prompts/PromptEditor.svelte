@@ -150,9 +150,11 @@
 			<div class="mt-2">
 				<div>
 					<Textarea
-						className="text-sm w-full bg-transparent outline-hidden" 
+						className="text-sm w-full bg-transparent outline-hidden overflow-y-hidden resize-none"" 
 						placeholder={$i18n.t('Write a summary in 50 words that summarizes [topic or keyword].')}
 						bind:value={content}
+						rows={6}
+						required
 						preserveBreaks={true} 
 					/>
 				</div>
