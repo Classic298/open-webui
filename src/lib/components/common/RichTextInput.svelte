@@ -335,13 +335,12 @@
 							// Extract plain text from clipboard and paste it without formatting
 							const plainText = event.clipboardData.getData('text/plain');
 							if (plainText) {
-								if (largeTextAsFile) {
-									if (plainText.length > PASTED_TEXT_CHARACTER_LIMIT) {
-										// Dispatch paste event to parent component
-										eventDispatch('paste', { event });
-										event.preventDefault();
-										return true;
-									}
+								const isBypass = event.shiftKey && (event.ctrlKey || event.metaKey);
+
+								if (largeTextAsFile && !isBypass && plainText.length > PASTED_TEXT_CHARACTER_LIMIT) {
+									eventDispatch('paste', { event });
+									event.preventDefault();
+									return true;
 								}
 								return false;
 							}
