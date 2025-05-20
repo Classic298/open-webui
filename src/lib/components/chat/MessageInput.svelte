@@ -839,7 +839,7 @@
 
 																reader.readAsDataURL(blob);
 															} else if (item.type === 'text/plain') {
-																if ($settings?.largeTextAsFile ?? false) {
+																if (($settings?.largeTextAsFile ?? false) && !(e.shiftKey && (e.ctrlKey || e.metaKey))) {
 																	const text = clipboardData.getData('text/plain');
 
 																	if (text.length > PASTED_TEXT_CHARACTER_LIMIT) {
@@ -1070,7 +1070,7 @@
 
 															reader.readAsDataURL(blob);
 														} else if (item.type === 'text/plain') {
-															if ($settings?.largeTextAsFile ?? false) {
+															if (($settings?.largeTextAsFile ?? false) && !(e.shiftKey && (e.ctrlKey || e.metaKey))) {
 																const text = clipboardData.getData('text/plain');
 
 																if (text.length > PASTED_TEXT_CHARACTER_LIMIT) {
