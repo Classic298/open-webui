@@ -112,6 +112,9 @@
 	let inputFiles;
 	let dragged = false;
 
+	let isShiftPressed = false;
+	let isCtrlMetaPressed = false;
+
 	let user = null;
 	export let placeholder = '';
 
@@ -157,6 +160,26 @@
 			top: element.scrollHeight,
 			behavior: 'smooth'
 		});
+	};
+
+	const handleGlobalKeyDown = (event: KeyboardEvent) => {
+		if (event.key === 'Shift') {
+			isShiftPressed = true;
+		}
+		if (event.key === 'Control' || event.key === 'Meta') {
+			isCtrlMetaPressed = true;
+		}
+	};
+
+	const handleGlobalKeyUp = (event: KeyboardEvent) => {
+		if (event.key === 'Shift') {
+			isShiftPressed = false;
+		}
+		if (event.key === 'Control' || event.key === 'Meta') {
+			isCtrlMetaPressed = false;
+		}
+		if (!event.ctrlKey && !event.metaKey) isCtrlMetaPressed = false;
+		if (!event.shiftKey) isShiftPressed = false;
 	};
 
 	const screenCaptureHandler = async () => {
@@ -365,6 +388,8 @@
 
 		window.addEventListener('keydown', handleKeyDown);
 
+		window.addEventListener('keydown', handleGlobalKeyDown, true);
+		window.addEventListener('keyup', handleGlobalKeyUp, true);
 		await tick();
 
 		const dropzoneElement = document.getElementById('chat-container');
@@ -378,6 +403,8 @@
 		console.log('destroy');
 		window.removeEventListener('keydown', handleKeyDown);
 
+		window.removeEventListener('keydown', handleGlobalKeyDown, true);
+		window.removeEventListener('keyup', handleGlobalKeyUp, true);
 		const dropzoneElement = document.getElementById('chat-container');
 
 		if (dropzoneElement) {
@@ -844,7 +871,7 @@
 														}
 
 														if (textContentToProcess !== null) {
-															const isBypass = tiptapEvent.shiftKey && (tiptapEvent.ctrlKey || tiptapEvent.metaKey);
+															const isBypass = isShiftPressed && isCtrlMetaPressed;
 
 															if (($settings?.largeTextAsFile ?? false) && textContentToProcess.length > PASTED_TEXT_CHARACTER_LIMIT) {
 																if (isBypass) {
@@ -859,6 +886,8 @@
 																	await uploadFileHandler(file, true);
 																}
 															}
+															isShiftPressed = false;
+															isCtrlMetaPressed = false;
 														}
 													}
 												}}
