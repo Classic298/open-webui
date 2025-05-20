@@ -331,17 +331,21 @@
 						return false;
 					},
 					paste: (view, event) => {
+						console.log('[RichTextInput] Paste Event Keys: Shift=' + event.shiftKey + ', Ctrl=' + event.ctrlKey + ', Meta=' + event.metaKey);
 						if (event.clipboardData) {
 							// Extract plain text from clipboard and paste it without formatting
 							const plainText = event.clipboardData.getData('text/plain');
 							if (plainText) {
 								const isBypass = event.shiftKey && (event.ctrlKey || event.metaKey);
+								console.log('[RichTextInput] isBypass:', isBypass, 'largeTextAsFile:', largeTextAsFile, 'textLength:', plainText.length, 'LIMIT:', PASTED_TEXT_CHARACTER_LIMIT);
 
 								if (largeTextAsFile && !isBypass && plainText.length > PASTED_TEXT_CHARACTER_LIMIT) {
+									console.log('[RichTextInput] Dispatching to parent for text-to-file.');
 									eventDispatch('paste', { event });
 									event.preventDefault();
 									return true;
 								}
+								console.log('[RichTextInput] Letting Tiptap handle plain text paste directly or conditions not met for file dispatch.');
 								return false;
 							}
 
@@ -354,22 +358,15 @@
 							const hasImageItem = Array.from(event.clipboardData.items).some((item) =>
 								item.type.startsWith('image/')
 							);
-							if (hasImageFile) {
-								// If there's an image, dispatch the event to the parent
-								eventDispatch('paste', { event });
-								event.preventDefault();
-								return true;
-							}
 
-							if (hasImageItem) {
-								// If there's an image item, dispatch the event to the parent
+							if (hasImageFile || hasImageItem) {
+								console.log('[RichTextInput] Dispatching to parent for image paste.');
 								eventDispatch('paste', { event });
 								event.preventDefault();
 								return true;
 							}
 						}
-
-						// For all other cases (text, formatted text, etc.), let ProseMirror handle it
+						console.log('[RichTextInput] No relevant clipboard data or unhandled, letting Tiptap try.');
 						view.dispatch(view.state.tr.scrollIntoView()); // Move viewport to the cursor after pasting
 						return false;
 					}
