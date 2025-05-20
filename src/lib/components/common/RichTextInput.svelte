@@ -341,10 +341,13 @@
 							// Extract plain text from clipboard and paste it without formatting
 							const plainText = event.clipboardData.getData('text/plain');
 							if (plainText) {
-								if (largeTextAsFile && plainText.length > PASTED_TEXT_CHARACTER_LIMIT) {
-									eventDispatch('paste', { event });
-									event.preventDefault();
-									return true;
+								if (largeTextAsFile) {
+									if (plainText.length > PASTED_TEXT_CHARACTER_LIMIT) {
+										// Dispatch paste event to parent component
+										eventDispatch('paste', { event });
+										event.preventDefault();
+										return true;
+									}
 								}
 								return false;
 							}
@@ -360,7 +363,7 @@
 							);
 
 							if (hasImageFile || hasImageItem) {
-								console.log('[RichTextInput] Dispatching to parent for image paste.');
+								// If there's an image, dispatch the event to the parent
 								eventDispatch('paste', { event });
 								event.preventDefault();
 								return true;
