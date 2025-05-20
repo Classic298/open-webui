@@ -126,6 +126,12 @@
 		editor.commands.setContent(content);
 	};
 
+	export const insertPlainText = (textToInsert: string) => {
+		if (editor) {
+			editor.chain().focus().insertContent(textToInsert).run();
+		}
+	};
+
 	const selectTemplate = () => {
 		if (value !== '') {
 			// After updating the state, try to find and select the next template
@@ -331,21 +337,15 @@
 						return false;
 					},
 					paste: (view, event) => {
-						console.log('[RichTextInput] Paste Event Keys: Shift=' + event.shiftKey + ', Ctrl=' + event.ctrlKey + ', Meta=' + event.metaKey);
 						if (event.clipboardData) {
 							// Extract plain text from clipboard and paste it without formatting
 							const plainText = event.clipboardData.getData('text/plain');
 							if (plainText) {
-								const isBypass = event.shiftKey && (event.ctrlKey || event.metaKey);
-								console.log('[RichTextInput] isBypass:', isBypass, 'largeTextAsFile:', largeTextAsFile, 'textLength:', plainText.length, 'LIMIT:', PASTED_TEXT_CHARACTER_LIMIT);
-
-								if (largeTextAsFile && !isBypass && plainText.length > PASTED_TEXT_CHARACTER_LIMIT) {
-									console.log('[RichTextInput] Dispatching to parent for text-to-file.');
+								if (largeTextAsFile && plainText.length > PASTED_TEXT_CHARACTER_LIMIT) {
 									eventDispatch('paste', { event });
 									event.preventDefault();
 									return true;
 								}
-								console.log('[RichTextInput] Letting Tiptap handle plain text paste directly or conditions not met for file dispatch.');
 								return false;
 							}
 
@@ -366,7 +366,6 @@
 								return true;
 							}
 						}
-						console.log('[RichTextInput] No relevant clipboard data or unhandled, letting Tiptap try.');
 						view.dispatch(view.state.tr.scrollIntoView()); // Move viewport to the cursor after pasting
 						return false;
 					}
