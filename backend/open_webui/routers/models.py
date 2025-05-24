@@ -26,18 +26,29 @@ router = APIRouter()
 
 @router.get("/", response_model=list[ModelUserResponse])
 async def get_models(id: Optional[str] = None, user=Depends(get_verified_user)):
-    if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS:
-        models_read_raw = Models.get_models_by_user_id(user.id, "read")
-        models_write_raw = Models.get_models_by_user_id(user.id, "write")
-        
-        combined_map = {}
-        for model_raw in models_read_raw:
-            combined_map[model_raw.id] = model_raw 
-        for model_raw in models_write_raw:
-            if model_raw.id not in combined_map:
-                combined_map[model_raw.id] = model_raw
-            models = list(combined_map.values())
-        return models
+    if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS: # Use direct boolean value
+        all_models = Models.get_models()
+        filtered_models = []
+        for model in all_models:
+            is_private_other_user = (
+                model.access_control == {} and model.user_id != user.id
+            )
+            if not is_private_other_user:
+                is_owned_by_admin = model.user_id == user.id
+                is_public = model.access_control is None
+
+                shared_directly_for_read = False
+                shared_with_any_group_for_read = False
+                if model.access_control is not None:
+                    read_permissions = model.access_control.get('read', {})
+                    if user.id in read_permissions.get('user_ids', []):
+                        shared_directly_for_read = True
+                    if read_permissions.get('group_ids'):
+                        shared_with_any_group_for_read = True
+                
+                if is_owned_by_admin or is_public or shared_directly_for_read or shared_with_any_group_for_read:
+                    filtered_models.append(model)
+        return filtered_models
     elif user.role == "admin":
         return Models.get_models()
     else:
