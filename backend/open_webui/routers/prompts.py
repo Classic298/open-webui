@@ -42,15 +42,7 @@ async def get_prompts(user=Depends(get_verified_user)):
 @router.get("/list", response_model=list[PromptUserResponse])
 async def get_prompt_list(user=Depends(get_verified_user)):
     if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS:
-        items_read = Prompts.get_prompts_by_user_id(user.id, "read")
-        items_write = Prompts.get_prompts_by_user_id(user.id, "write")
-        
-        combined_map = {item.id: item for item in items_read}
-        for item in items_write:
-            if item.id not in combined_map:
-                combined_map[item.id] = item
-        prompts = list(combined_map.values())
-        return prompts
+        prompts = Prompts.get_prompts_by_user_id(user.id, "write")
     elif user.role == "admin":
         prompts = Prompts.get_prompts()
     else:
