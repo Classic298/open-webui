@@ -70,90 +70,84 @@ async def get_tools(request: Request, user=Depends(get_verified_user)):
             )
         )
 
-    # Apply admin workspace access control first to DB tools
+    final_tools = []
+
     if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS:
-        db_tools_from_db = Tools.get_tools() # Renamed to avoid confusion
-        filtered_db_tools = []
-        for tool in db_tools_from_db: # Iterate over DB tools
-            if (
-                tool.user_id == user.id
-                or tool.access_control is None
-                or has_access(user.id, "read", tool.access_control)
-            ):
-                filtered_db_tools.append(tool)
-            tools = filtered_db_tools
-        else:
-            # Original logic for fetching DB tools if not admin or flag is true
-            tools = Tools.get_tools()
+        # Admin with workspace restrictions
+        db_tools = Tools.get_tools()
+        for t in db_tools:
+            is_private_other_user = (t.access_control == {} and t.user_id != user.id)
+            if not is_private_other_user:
+                is_owned_by_admin = t.user_id == user.id
+                is_public = t.access_control is None
+                shared_directly = False
+                shared_with_any_group = False
+                if t.access_control is not None:
+                    read_permissions = t.access_control.get('read', {})
+                    if user.id in read_permissions.get('user_ids', []):
+                        shared_directly = True
+                    if read_permissions.get('group_ids'):
+                        shared_with_any_group = True
+                if is_owned_by_admin or is_public or shared_directly or shared_with_any_group:
+                    final_tools.append(t)
 
-    # Combine with server tools
-    combined_tools = list(tools) # Start with potentially filtered DB tools or all DB tools
-    for server in request.app.state.TOOL_SERVERS:
-        server_tool_access_control = request.app.state.config.TOOL_SERVER_CONNECTIONS[
-            server["idx"]
-        ].get("config", {}).get("access_control", None)
-
-        server_tool_user_id = f"server:{server['idx']}" # Synthesized user_id for server tools
-
-        # If admin and flag is false, filter server tools too
-        if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS:
-            if server_tool_access_control is None or has_access(user.id, "read", server_tool_access_control):
-                combined_tools.append(
-                    ToolUserResponse(
-                        **{
-                            "id": f"server:{server['idx']}",
-                            "user_id": server_tool_user_id,
-                            "name": server["openapi"]
-                            .get("info", {})
-                            .get("title", "Tool Server"),
-                            "meta": {
-                                "description": server["openapi"]
-                                .get("info", {})
-                                .get("description", ""),
-                            },
-                            "access_control": server_tool_access_control,
-                            "updated_at": int(time.time()),
-                            "created_at": int(time.time()),
-                        }
-                    )
-                )
-        else: # Original logic for adding server tools (applies if user is not admin or flag is true)
-             combined_tools.append(
-                ToolUserResponse(
-                    **{
-                        "id": f"server:{server['idx']}",
-                        "user_id": server_tool_user_id,
-                        "name": server["openapi"]
-                        .get("info", {})
-                        .get("title", "Tool Server"),
-                        "meta": {
-                            "description": server["openapi"]
-                            .get("info", {})
-                            .get("description", ""),
-                        },
-                        "access_control": server_tool_access_control,
-                        "updated_at": int(time.time()),
-                        "created_at": int(time.time()),
-                    }
-                )
-            )
-    
-    # Final filtering pass for non-admins (or admins if flag is true, effectively becoming no-op on already filtered admin list)
-    if user.role != "admin":
-         # This ensures non-admins only see what they are supposed to from the combined list
-        final_tools = [
-            tool
-            for tool in combined_tools
-            if tool.user_id == user.id # Checks ownership (for DB tools)
-            or (tool.user_id.startswith("server:") and (tool.access_control is None or has_access(user.id, "read", tool.access_control))) # Server tools accessible if public or shared
-            or (not tool.user_id.startswith("server:") and has_access(user.id, "read", tool.access_control)) # DB tools accessible if shared
-        ]
+        for server_idx, server_config_conn in enumerate(request.app.state.config.TOOL_SERVER_CONNECTIONS):
+            server_openapi = request.app.state.TOOL_SERVERS[server_idx]["openapi"]
+            server_tool_ac = server_config_conn.get("config", {}).get("access_control", None)
+            
+            is_public_server_tool = server_tool_ac is None
+            shared_directly_server_tool = False
+            shared_with_any_group_server_tool = False
+            if server_tool_ac is not None:
+                read_permissions = server_tool_ac.get('read', {})
+                if user.id in read_permissions.get('user_ids', []):
+                    shared_directly_server_tool = True
+                if read_permissions.get('group_ids'):
+                    shared_with_any_group_server_tool = True
+            
+            if is_public_server_tool or shared_directly_server_tool or shared_with_any_group_server_tool:
+                final_tools.append(ToolUserResponse(
+                    id=f"server:{server_idx}", user_id=f"server:{server_idx}",
+                    name=server_openapi.get("info", {}).get("title", "Tool Server"),
+                    meta={"description": server_openapi.get("info", {}).get("description", "")},
+                    access_control=server_tool_ac,
+                    updated_at=int(time.time()), created_at=int(time.time())
+                ))
         return final_tools
+        
     elif user.role == "admin" and ENABLE_ADMIN_WORKSPACE_ACCESS:
-        # If admin and flag is true, they see all combined tools (DB tools were not pre-filtered)
-        return combined_tools
-    else: # Admin and flag is false: combined_tools already contains pre-filtered DB tools and filtered server tools
-        return combined_tools
+        # Admin without restrictions
+        final_tools.extend(Tools.get_tools())
+        for server_idx, server_config_conn in enumerate(request.app.state.config.TOOL_SERVER_CONNECTIONS):
+            server_openapi = request.app.state.TOOL_SERVERS[server_idx]["openapi"]
+            final_tools.append(ToolUserResponse(
+                id=f"server:{server_idx}", user_id=f"server:{server_idx}",
+                name=server_openapi.get("info", {}).get("title", "Tool Server"),
+                meta={"description": server_openapi.get("info", {}).get("description", "")},
+                access_control=server_config_conn.get("config", {}).get("access_control", None),
+                updated_at=int(time.time()), created_at=int(time.time())
+            ))
+        return final_tools
+    else:
+        # Non-admin user
+        db_tools = Tools.get_tools() # Get all to filter using has_access
+        combined_tools_for_user = []
+        for t in db_tools:
+            if t.user_id == user.id or has_access(user.id, "read", t.access_control):
+                combined_tools_for_user.append(t)
+        
+        for server_idx, server_config_conn in enumerate(request.app.state.config.TOOL_SERVER_CONNECTIONS):
+            server_openapi = request.app.state.TOOL_SERVERS[server_idx]["openapi"]
+            server_tool_ac = server_config_conn.get("config", {}).get("access_control", None)
+            if server_tool_ac is None or has_access(user.id, "read", server_tool_ac):
+                 combined_tools_for_user.append(ToolUserResponse(
+                    id=f"server:{server_idx}", user_id=f"server:{server_idx}",
+                    name=server_openapi.get("info", {}).get("title", "Tool Server"),
+                    meta={"description": server_openapi.get("info", {}).get("description", "")},
+                    access_control=server_tool_ac,
+                    updated_at=int(time.time()), created_at=int(time.time())
+                ))
+        return combined_tools_for_user
 
 
 ############################
@@ -166,13 +160,21 @@ async def get_tool_list(user=Depends(get_verified_user)):
     if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS:
         all_tools = Tools.get_tools()
         filtered_tools = []
-        for tool in all_tools:
-            if (
-                tool.user_id == user.id
-                or tool.access_control is None
-                or has_access(user.id, "write", tool.access_control) # "write"
-            ):
-                filtered_tools.append(tool)
+        for t in all_tools:
+            is_private_other_user = (t.access_control == {} and t.user_id != user.id)
+            if not is_private_other_user:
+                is_owned_by_admin = t.user_id == user.id
+                is_public = t.access_control is None
+                shared_directly = False
+                shared_with_any_group = False
+                if t.access_control is not None:
+                    write_permissions = t.access_control.get('write', {})
+                    if user.id in write_permissions.get('user_ids', []):
+                        shared_directly = True
+                    if write_permissions.get('group_ids'):
+                        shared_with_any_group = True
+                if is_owned_by_admin or is_public or shared_directly or shared_with_any_group:
+                    filtered_tools.append(t)
         return filtered_tools
     elif user.role == "admin":
         tools = Tools.get_tools()
