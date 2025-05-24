@@ -42,16 +42,31 @@ router = APIRouter()
 @router.get("/", response_model=list[KnowledgeUserResponse])
 async def get_knowledge(user=Depends(get_verified_user)):
     knowledge_bases = []
-    if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS:
-        kbs_read = Knowledges.get_knowledge_bases_by_user_id(user.id, "read")
-        kbs_write = Knowledges.get_knowledge_bases_by_user_id(user.id, "write")
-        
-        combined_map = {kb.id: kb for kb in kbs_read}
-        for kb in kbs_write:
-            if kb.id not in combined_map:
-                combined_map[kb.id] = kb
-        knowledge_bases = list(combined_map.values())
-    elif user.role == "admin": # implies ENABLE_ADMIN_WORKSPACE_ACCESS is True
+
+    if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS: # Use direct boolean value
+        all_knowledge_bases = Knowledges.get_knowledge_bases()
+        filtered_knowledge_bases = []
+        for kb in all_knowledge_bases:
+            is_private_other_user = (
+                kb.access_control == {} and kb.user_id != user.id
+            )
+            if not is_private_other_user:
+                is_owned_by_admin = kb.user_id == user.id
+                is_public = kb.access_control is None
+                
+                shared_directly_for_read = False
+                shared_with_any_group_for_read = False
+                if kb.access_control is not None:
+                    read_permissions = kb.access_control.get('read', {})
+                    if user.id in read_permissions.get('user_ids', []):
+                        shared_directly_for_read = True
+                    if read_permissions.get('group_ids'):
+                        shared_with_any_group_for_read = True
+                
+                if is_owned_by_admin or is_public or shared_directly_for_read or shared_with_any_group_for_read:
+                    filtered_knowledge_bases.append(kb)
+        knowledge_bases = filtered_knowledge_bases
+    elif user.role == "admin":
         knowledge_bases = Knowledges.get_knowledge_bases()
     else:
         knowledge_bases = Knowledges.get_knowledge_bases_by_user_id(user.id, "read")
@@ -99,8 +114,29 @@ async def get_knowledge(user=Depends(get_verified_user)):
 async def get_knowledge_list(user=Depends(get_verified_user)):
     knowledge_bases = []
 
-    if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS:
-        knowledge_bases = Knowledges.get_knowledge_bases_by_user_id(user.id, "write")
+    if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS: # Use direct boolean value
+        all_knowledge_bases = Knowledges.get_knowledge_bases()
+        filtered_knowledge_bases = []
+        for kb in all_knowledge_bases:
+            is_private_other_user = (
+                kb.access_control == {} and kb.user_id != user.id
+            )
+            if not is_private_other_user:
+                is_owned_by_admin = kb.user_id == user.id
+                is_public = kb.access_control is None
+
+                shared_directly_for_write = False
+                shared_with_any_group_for_write = False
+                if kb.access_control is not None:
+                    write_permissions = kb.access_control.get('write', {})
+                    if user.id in write_permissions.get('user_ids', []):
+                        shared_directly_for_write = True
+                    if write_permissions.get('group_ids'):
+                        shared_with_any_group_for_write = True
+                
+                if is_owned_by_admin or is_public or shared_directly_for_write or shared_with_any_group_for_write:
+                    filtered_knowledge_bases.append(kb)
+        knowledge_bases = filtered_knowledge_bases
     elif user.role == "admin":
         knowledge_bases = Knowledges.get_knowledge_bases()
     else:
