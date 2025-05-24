@@ -43,17 +43,14 @@ router = APIRouter()
 async def get_knowledge(user=Depends(get_verified_user)):
     knowledge_bases = []
     if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS:
-        all_knowledge_bases = Knowledges.get_knowledge_bases()
-        filtered_knowledge_bases = []
-        for kb in all_knowledge_bases:
-            # If admin owns it, it's public, or admin has specific read access (group/direct)
-            if (
-                kb.user_id == user.id
-                or kb.access_control is None
-                or has_access(user.id, "read", kb.access_control)
-            ):
-                filtered_knowledge_bases.append(kb)
-        knowledge_bases = filtered_knowledge_bases
+        kbs_read = Knowledges.get_knowledge_bases_by_user_id(user.id, "read")
+        kbs_write = Knowledges.get_knowledge_bases_by_user_id(user.id, "write")
+        
+        combined_map = {kb.id: kb for kb in kbs_read}
+        for kb in kbs_write:
+            if kb.id not in combined_map:
+                combined_map[kb.id] = kb
+        knowledge_bases = list(combined_map.values())
     elif user.role == "admin": # implies ENABLE_ADMIN_WORKSPACE_ACCESS is True
         knowledge_bases = Knowledges.get_knowledge_bases()
     else:
@@ -103,17 +100,7 @@ async def get_knowledge_list(user=Depends(get_verified_user)):
     knowledge_bases = []
 
     if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS:
-        all_knowledge_bases = Knowledges.get_knowledge_bases()
-        filtered_knowledge_bases = []
-        for kb in all_knowledge_bases:
-            # If admin owns it, it's public, or admin has specific write access (group/direct)
-            if (
-                kb.user_id == user.id
-                or kb.access_control is None
-                or has_access(user.id, "write", kb.access_control)
-            ):
-                filtered_knowledge_bases.append(kb)
-        knowledge_bases = filtered_knowledge_bases
+        knowledge_bases = Knowledges.get_knowledge_bases_by_user_id(user.id, "write")
     elif user.role == "admin":
         knowledge_bases = Knowledges.get_knowledge_bases()
     else:
