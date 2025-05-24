@@ -22,16 +22,15 @@ router = APIRouter()
 @router.get("/", response_model=list[PromptModel])
 async def get_prompts(user=Depends(get_verified_user)):
     if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS:
-        all_prompts = Prompts.get_prompts()
-        filtered_prompts = []
-        for prompt in all_prompts:
-            if (
-                prompt.user_id == user.id
-                or prompt.access_control is None
-                or has_access(user.id, "read", prompt.access_control)
-            ):
-                filtered_prompts.append(prompt)
-        return filtered_prompts
+        items_read = Prompts.get_prompts_by_user_id(user.id, "read")
+        items_write = Prompts.get_prompts_by_user_id(user.id, "write")
+        
+        combined_map = {item.id: item for item in items_read}
+        for item in items_write:
+            if item.id not in combined_map:
+                combined_map[item.id] = item
+        prompts = list(combined_map.values())
+        return prompts
     elif user.role == "admin":
         prompts = Prompts.get_prompts()
     else:
@@ -43,16 +42,15 @@ async def get_prompts(user=Depends(get_verified_user)):
 @router.get("/list", response_model=list[PromptUserResponse])
 async def get_prompt_list(user=Depends(get_verified_user)):
     if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS:
-        all_prompts = Prompts.get_prompts()
-        filtered_prompts = []
-        for prompt in all_prompts:
-            if (
-                prompt.user_id == user.id
-                or prompt.access_control is None
-                or has_access(user.id, "write", prompt.access_control)
-            ):
-                filtered_prompts.append(prompt)
-        return filtered_prompts
+        items_read = Prompts.get_prompts_by_user_id(user.id, "read")
+        items_write = Prompts.get_prompts_by_user_id(user.id, "write")
+        
+        combined_map = {item.id: item for item in items_read}
+        for item in items_write:
+            if item.id not in combined_map:
+                combined_map[item.id] = item
+        prompts = list(combined_map.values())
+        return prompts
     elif user.role == "admin":
         prompts = Prompts.get_prompts()
     else:
