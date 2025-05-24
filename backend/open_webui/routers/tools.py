@@ -72,20 +72,19 @@ async def get_tools(request: Request, user=Depends(get_verified_user)):
 
     # Apply admin workspace access control first to DB tools
     if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS:
-    db_tools_from_db = Tools.get_tools() # Renamed to avoid confusion
-    filtered_db_tools = []
-    for tool in db_tools_from_db: # Iterate over DB tools
-        if (
-            tool.user_id == user.id
-            or tool.access_control is None
-            or has_access(user.id, "read", tool.access_control)
-        ):
-            filtered_db_tools.append(tool)
-        tools = filtered_db_tools
-    else:
-        # Original logic for fetching DB tools if not admin or flag is true
-        tools = Tools.get_tools()
-
+        db_tools_from_db = Tools.get_tools() # Renamed to avoid confusion
+        filtered_db_tools = []
+        for tool in db_tools_from_db: # Iterate over DB tools
+            if (
+                tool.user_id == user.id
+                or tool.access_control is None
+                or has_access(user.id, "read", tool.access_control)
+            ):
+                filtered_db_tools.append(tool)
+            tools = filtered_db_tools
+        else:
+            # Original logic for fetching DB tools if not admin or flag is true
+            tools = Tools.get_tools()
 
     # Combine with server tools
     combined_tools = list(tools) # Start with potentially filtered DB tools or all DB tools
