@@ -21,16 +21,33 @@ router = APIRouter()
 
 @router.get("/", response_model=list[PromptModel])
 async def get_prompts(user=Depends(get_verified_user)):
-    if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS:
-        items_read = Prompts.get_prompts_by_user_id(user.id, "read")
-        items_write = Prompts.get_prompts_by_user_id(user.id, "write")
-        
-        combined_map = {item.id: item for item in items_read}
-        for item in items_write:
-            if item.id not in combined_map:
-                combined_map[item.id] = item
-        prompts = list(combined_map.values())
-        return prompts
+    if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS.value:
+        all_prompts = Prompts.get_prompts()
+        filtered_prompts = []
+        for prompt in all_prompts:
+            # Check if the prompt is private and belongs to another user
+            is_private_other_user = (
+                prompt.access_control == {} and prompt.user_id != user.id
+            )
+
+            if not is_private_other_user:
+                # Apply new filtering logic
+                is_owned_by_admin = prompt.user_id == user.id
+                is_public = prompt.access_control is None
+                
+                shared_directly_for_read = False
+                shared_with_any_group_for_read = False
+
+                if prompt.access_control is not None:
+                    read_permissions = prompt.access_control.get('read', {})
+                    if user.id in read_permissions.get('user_ids', []):
+                        shared_directly_for_read = True
+                    if read_permissions.get('group_ids'): # Check if list exists and is not empty
+                        shared_with_any_group_for_read = True
+                
+                if is_owned_by_admin or is_public or shared_directly_for_read or shared_with_any_group_for_read:
+                    filtered_prompts.append(prompt)
+        return filtered_prompts
     elif user.role == "admin":
         prompts = Prompts.get_prompts()
     else:
@@ -41,8 +58,33 @@ async def get_prompts(user=Depends(get_verified_user)):
 
 @router.get("/list", response_model=list[PromptUserResponse])
 async def get_prompt_list(user=Depends(get_verified_user)):
-    if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS:
-        prompts = Prompts.get_prompts_by_user_id(user.id, "write")
+    if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS.value:
+        all_prompts = Prompts.get_prompts()
+        filtered_prompts = []
+        for prompt in all_prompts:
+            # Check if the prompt is private and belongs to another user
+            is_private_other_user = (
+                prompt.access_control == {} and prompt.user_id != user.id
+            )
+
+            if not is_private_other_user:
+                # Apply new filtering logic
+                is_owned_by_admin = prompt.user_id == user.id
+                is_public = prompt.access_control is None
+
+                shared_directly_for_write = False
+                shared_with_any_group_for_write = False
+
+                if prompt.access_control is not None:
+                    write_permissions = prompt.access_control.get('write', {})
+                    if user.id in write_permissions.get('user_ids', []):
+                        shared_directly_for_write = True
+                    if write_permissions.get('group_ids'): # Check if list exists and is not empty
+                        shared_with_any_group_for_write = True
+                
+                if is_owned_by_admin or is_public or shared_directly_for_write or shared_with_any_group_for_write:
+                    filtered_prompts.append(prompt)
+        return filtered_prompts
     elif user.role == "admin":
         prompts = Prompts.get_prompts()
     else:
