@@ -66,10 +66,13 @@ except Exception:
 ####################################
 
 GLOBAL_LOG_LEVEL = os.environ.get("GLOBAL_LOG_LEVEL", "").upper()
-if GLOBAL_LOG_LEVEL in logging.getLevelNamesMapping():
+# Compatibility for Python < 3.11
+if hasattr(logging, '_nameToLevel') and GLOBAL_LOG_LEVEL in logging._nameToLevel:
     logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL, force=True)
 else:
+    # If level is invalid or not found, default to INFO and configure logging
     GLOBAL_LOG_LEVEL = "INFO"
+    logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL, force=True)
 
 log = logging.getLogger(__name__)
 log.info(f"GLOBAL_LOG_LEVEL: {GLOBAL_LOG_LEVEL}")
@@ -99,7 +102,11 @@ SRC_LOG_LEVELS = {}
 for source in log_sources:
     log_env_var = source + "_LOG_LEVEL"
     SRC_LOG_LEVELS[source] = os.environ.get(log_env_var, "").upper()
-    if SRC_LOG_LEVELS[source] not in logging.getLevelNamesMapping():
+    # Compatibility for Python < 3.11
+    if hasattr(logging, '_nameToLevel') and SRC_LOG_LEVELS[source] in logging._nameToLevel:
+        # It's a valid level, do nothing to change it from what was set via env var
+        pass
+    else:
         SRC_LOG_LEVELS[source] = GLOBAL_LOG_LEVEL
     log.info(f"{log_env_var}: {SRC_LOG_LEVELS[source]}")
 

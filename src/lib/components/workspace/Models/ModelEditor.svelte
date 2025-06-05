@@ -265,6 +265,9 @@
 			};
 
 			console.log(model);
+
+			// Initialize pinned_to_sidebar
+			info.meta.pinned_to_sidebar = model?.meta?.pinned_to_sidebar ?? false;
 		}
 
 		loaded = true;
@@ -545,6 +548,20 @@
 								accessRoles={['read', 'write']}
 								allowPublic={$user?.permissions?.sharing?.public_models || $user?.role === 'admin'}
 							/>
+						</div>
+					</div>
+
+					<div class="my-2">
+						<div class="flex items-center">
+							<input
+								type="checkbox"
+								id="pinned_to_sidebar_checkbox"
+								bind:checked={info.meta.pinned_to_sidebar}
+								class="mr-2 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+							/>
+							<label for="pinned_to_sidebar_checkbox" class="text-sm text-gray-700 dark:text-gray-300"
+								>{$i18n.t('Pin model to sidebar')}</label
+							>
 						</div>
 					</div>
 

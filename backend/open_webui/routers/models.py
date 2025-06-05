@@ -41,6 +41,34 @@ async def get_base_models(user=Depends(get_admin_user)):
     return Models.get_base_models()
 
 
+###########################
+# GetPinnedModels
+###########################
+
+
+@router.get("/pinned", response_model=list[ModelResponse])
+async def get_pinned_models(user=Depends(get_verified_user)):
+    all_models = Models.get_all_models()
+    pinned_models = []
+
+    for model in all_models:
+        # Check pinned_to_sidebar, is_active
+        if not model.pinned_to_sidebar or not model.is_active:
+            continue
+
+        # Check meta.hidden (safely)
+        if model.meta and model.meta.model_dump().get("hidden", False):
+            continue
+
+        # Check user access
+        if not has_access(user.id, "read", model.access_control):
+            continue
+
+        pinned_models.append(model)
+
+    return pinned_models
+
+
 ############################
 # CreateNewModel
 ############################
