@@ -115,14 +115,13 @@
 
 	let chatIdUnsubscriber: Unsubscriber | undefined;
 
-	let selectedModels = ['']; // This is used by Navbar and other parts
+	let selectedModels = [''];
 	let atSelectedModel: Model | undefined;
 	let selectedModelIds = [];
 	$: selectedModelIds = atSelectedModel !== undefined ? [atSelectedModel.id] : selectedModels;
 
-	let currentModelIdFromUrl = ''; // Used to track model from URL query
+	let currentModelIdFromUrl = '';
 
-	// Reactive block to handle model changes from URL
 	$: {
 		if ($page.url.searchParams) {
 			const modelIdFromQuery = $page.url.searchParams.get('model');
@@ -142,8 +141,7 @@
 						resetInput();
 					}
 				} else {
-					// Optional: Keep a warning if a model ID from URL is invalid, or handle silently
-					// console.warn(`[Chat.svelte] Model ID ${modelIdFromQuery} from URL not found in available models.`);
+					console.warn(`[Chat.svelte] Model ID ${modelIdFromQuery} from URL not found in available models.`);
 				}
 			} else if (!modelIdFromQuery && currentModelIdFromUrl !== '') {
 				currentModelIdFromUrl = '';
@@ -223,6 +221,7 @@
 			return;
 		}
 		sessionStorage.selectedModels = JSON.stringify(selectedModels);
+		console.log('saveSessionSelectedModels', selectedModels, sessionStorage.selectedModels);
 	};
 
 	let oldSelectedModelIds = [''];
@@ -238,6 +237,7 @@
 	};
 
 	const resetInput = () => {
+		console.debug('resetInput');
 		setToolIds();
 
 		selectedFilterIds = [];
@@ -303,6 +303,8 @@
 	};
 
 	const chatEventHandler = async (event, cb) => {
+		console.log(event);
+
 		if (event.chat_id === $chatId) {
 			await tick();
 			let message = history.messages[event.message_id];
@@ -403,6 +405,8 @@
 					eventConfirmationMessage = data.message;
 					eventConfirmationInputPlaceholder = data.placeholder;
 					eventConfirmationInputValue = data?.value ?? '';
+				} else {
+					console.log('Unknown message type', data);
 				}
 
 				history.messages[event.message_id] = message;
@@ -451,6 +455,7 @@
 
 	onMount(async () => {
 		loading = true;
+		console.log('mounted');
 		window.addEventListener('message', onMessageHandler);
 		$socket?.on('chat-events', chatEventHandler);
 
@@ -533,14 +538,14 @@
 	// File upload functions
 
 	const uploadGoogleDriveFile = async (fileData) => {
-			// console.log('Starting uploadGoogleDriveFile with:', {
-			// 	id: fileData.id,
-			// 	name: fileData.name,
-			// 	url: fileData.url,
-			// 	headers: {
-			// 		Authorization: `Bearer ${token}`
-			// 	}
-			// });
+		console.log('Starting uploadGoogleDriveFile with:', {
+			id: fileData.id,
+			name: fileData.name,
+			url: fileData.url,
+			headers: {
+				Authorization: `Bearer ${token}`
+			}
+		});
 
 		// Validate input
 		if (!fileData?.id || !fileData?.name || !fileData?.url || !fileData?.headers?.Authorization) {
@@ -563,9 +568,9 @@
 
 		try {
 			files = [...files, fileItem];
-			// console.log('Processing web file with URL:', fileData.url);
+			console.log('Processing web file with URL:', fileData.url);
 
-			// Configure fetch options with proper headers
+			Configure fetch options with proper headers
 			const fetchOptions = {
 				headers: {
 					Authorization: fileData.headers.Authorization,
@@ -575,7 +580,7 @@
 			};
 
 			// Attempt to fetch the file
-			// console.log('Fetching file content from Google Drive...');
+			console.log('Fetching file content from Google Drive...');
 			const fileResponse = await fetch(fileData.url, fetchOptions);
 
 			if (!fileResponse.ok) {
@@ -585,31 +590,31 @@
 
 			// Get content type from response
 			const contentType = fileResponse.headers.get('content-type') || 'application/octet-stream';
-			// console.log('Response received with content-type:', contentType);
+			console.log('Response received with content-type:', contentType);
 
 			// Convert response to blob
-			// console.log('Converting response to blob...');
+			console.log('Converting response to blob...');
 			const fileBlob = await fileResponse.blob();
 
 			if (fileBlob.size === 0) {
 				throw new Error('Retrieved file is empty');
 			}
 
-			// console.log('Blob created:', {
-			// 	size: fileBlob.size,
-			// 	type: fileBlob.type || contentType
-			// });
+			console.log('Blob created:', {
+				size: fileBlob.size,
+				type: fileBlob.type || contentType
+			});
 
 			// Create File object with proper MIME type
 			const file = new File([fileBlob], fileData.name, {
 				type: fileBlob.type || contentType
 			});
 
-			// console.log('File object created:', {
-			// 	name: file.name,
-			// 	size: file.size,
-			// 	type: file.type
-			// });
+			console.log('File object created:', {
+				name: file.name,
+				size: file.size,
+				type: file.type
+			});
 
 			if (file.size === 0) {
 				throw new Error('Created file is empty');
@@ -627,14 +632,14 @@
 			}
 
 			// Upload file to server
-			// console.log('Uploading file to server...');
+			console.log('Uploading file to server...');
 			const uploadedFile = await uploadFile(localStorage.token, file, metadata);
 
 			if (!uploadedFile) {
 				throw new Error('Server returned null response for file upload');
 			}
 
-			// console.log('File uploaded successfully:', uploadedFile);
+			console.log('File uploaded successfully:', uploadedFile);
 
 			// Update file item with upload results
 			fileItem.status = 'uploaded';
@@ -647,7 +652,7 @@
 			files = files;
 			toast.success($i18n.t('File uploaded successfully'));
 		} catch (e) {
-			// console.error('Error uploading file:', e); // Kept console.error for actual errors
+			console.error('Error uploading file:', e); // Kept console.error for actual errors
 			files = files.filter((f) => f.itemId !== tempItemId);
 			toast.error(
 				$i18n.t('Error uploading file: {{error}}', {
@@ -658,6 +663,8 @@
 	};
 
 	const uploadWeb = async (url) => {
+		console.log(url);
+
 		const fileItem = {
 			type: 'doc',
 			name: url,
@@ -689,6 +696,8 @@
 	};
 
 	const uploadYoutubeTranscription = async (url) => {
+		console.log(url);
+
 		const fileItem = {
 			type: 'doc',
 			name: url,
@@ -768,6 +777,7 @@
 				if ($settings?.models) {
 					selectedModels = $settings?.models;
 				} else if ($config?.default_models) {
+					console.log($config?.default_models.split(',') ?? '');
 					selectedModels = $config?.default_models.split(',');
 				}
 			}
