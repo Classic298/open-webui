@@ -86,9 +86,9 @@
 		if ($user?.token) {
 			try {
 				const models = await getPinnedModels(localStorage.token);
-				pinnedSystemModels = models; // Backend already filters, so just assign
+				pinnedSystemModels = models;
 			} catch (error) {
-				console.error('Failed to fetch pinned models:', error); // Keep generic error log
+				console.error('Failed to fetch pinned models:', error);
 				toast.error($i18n.t('Failed to load pinned models.'));
 				pinnedSystemModels = [];
 			}
