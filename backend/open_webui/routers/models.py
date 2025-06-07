@@ -7,10 +7,10 @@ from open_webui.models.models import (
     ModelUserResponse,
     Models,
     Model,
-    ModelModel, # Ensure ModelModel is imported for conversion
+    ModelModel,
 )
 from open_webui.constants import ERROR_MESSAGES
-from open_webui.internal.db import get_db # Import get_db for direct session
+from open_webui.internal.db import get_db
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 import logging
 
@@ -53,7 +53,7 @@ async def get_base_models(user=Depends(get_admin_user)):
 
 @router.get("/pinned", response_model=list[ModelResponse])
 async def get_pinned_models(user=Depends(get_verified_user)):
-    log.info(f"Request for pinned models from user ID: {user.id}, Role: {user.role}")
+    log.debug(f"Request for pinned models from user ID: {user.id}, Role: {user.role}")
 
     db_pinned_models_sqla = []
     try:
@@ -61,9 +61,7 @@ async def get_pinned_models(user=Depends(get_verified_user)):
             db_pinned_models_sqla = db.query(Model).filter(Model.pinned_to_sidebar == True).all()
     except Exception as e:
         log.error(f"Error during DB query for pinned models: {e}", exc_info=True)
-        # db_pinned_models_sqla remains empty list, initialized above
 
-    # Convert SQLAlchemy models to Pydantic ModelModel for consistent processing
     models_to_filter = [ModelModel.model_validate(m) for m in db_pinned_models_sqla]
 
     # Filter for active status
@@ -71,9 +69,9 @@ async def get_pinned_models(user=Depends(get_verified_user)):
 
     # Filter for hidden status
     visible_models = []
-    for m_model in active_models: # m_model is ModelModel instance
+    for m_model in active_models:
         hidden = False
-        if m_model.meta: # m_model.meta is ModelMeta Pydantic model
+        if m_model.meta:
             hidden = m_model.meta.model_dump().get("hidden", False)
 
         if not hidden:
@@ -81,7 +79,7 @@ async def get_pinned_models(user=Depends(get_verified_user)):
 
     # Filter for permission
     final_permitted_models = []
-    for model_obj in visible_models: # model_obj is ModelModel instance
+    for model_obj in visible_models:
         if user.role == "admin":
             final_permitted_models.append(model_obj)
         elif has_access(user.id, "read", model_obj.access_control):
