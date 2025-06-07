@@ -16,7 +16,7 @@
 	import Bookmark from '$lib/components/icons/Bookmark.svelte';
 	import BookmarkSlash from '$lib/components/icons/BookmarkSlash.svelte';
 	import { toast } from 'svelte-sonner';
-	import { updateModel } from '$lib/apis/models';
+	import { updateModelById } from '$lib/apis/models';
 
 	import { config } from '$lib/stores';
 	import Link from '$lib/components/icons/Link.svelte';
@@ -47,7 +47,7 @@
 		try {
 			// Use ?? false to ensure newPinnedStatus is boolean even if pinned_to_sidebar is undefined
 			const newPinnedStatus = !(model.pinned_to_sidebar ?? false);
-			await updateModel(localStorage.token, model.id, {
+			await updateModelById(localStorage.token, model.id, {
 				pinned_to_sidebar: newPinnedStatus
 			});
 			model.pinned_to_sidebar = newPinnedStatus; // Update the model object for reactivity
