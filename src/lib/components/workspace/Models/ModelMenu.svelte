@@ -38,8 +38,15 @@
 	let show = false;
 
 	const togglePinStatus = async () => {
+		if (!model) {
+			console.error('Model is undefined in togglePinStatus');
+			toast.error($i18n.t('An unexpected error occurred. Model data is missing.'));
+			onClose();
+			return;
+		}
 		try {
-			const newPinnedStatus = !model.pinned_to_sidebar;
+			// Use ?? false to ensure newPinnedStatus is boolean even if pinned_to_sidebar is undefined
+			const newPinnedStatus = !(model.pinned_to_sidebar ?? false);
 			await updateModel(localStorage.token, model.id, {
 				pinned_to_sidebar: newPinnedStatus
 			});
@@ -174,6 +181,7 @@
 				<div class="flex items-center">{$i18n.t('Export')}</div>
 			</DropdownMenu.Item>
 
+			{#if model}
 			<DropdownMenu.Item
 				class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
 				on:click={togglePinStatus}
@@ -186,6 +194,7 @@
 					<div class="flex items-center">{$i18n.t('Pin to sidebar')}</div>
 				{/if}
 			</DropdownMenu.Item>
+			{/if}
 
 			<hr class="border-gray-100 dark:border-gray-850 my-1" />
 

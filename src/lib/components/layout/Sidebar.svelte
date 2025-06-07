@@ -679,15 +679,17 @@
 	{#if pinnedSystemModels.length > 0}
 		<div class="px-1.5 mt-2">
 			<button
-				class="flex items-center justify-between w-full text-xs font-semibold text-gray-500 dark:text-gray-400 px-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-900 rounded-md transition"
+				class="w-full flex items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-500 py-1.5 px-2 hover:bg-gray-100 dark:hover:bg-gray-900 rounded-md transition"
 				on:click={() => (pinnedModelsCollapsed = !pinnedModelsCollapsed)}
 			>
-				<span>{$i18n.t('Pinned Models')}</span>
-				{#if pinnedModelsCollapsed}
-					<ChevronRight className="size-4" />
-				{:else}
-					<ChevronDown className="size-4" />
-				{/if}
+				<div class="text-gray-300 dark:text-gray-600">
+					{#if pinnedModelsCollapsed}
+						<ChevronRight className="size-3" strokeWidth="2.5" />
+					{:else}
+						<ChevronDown className="size-3" strokeWidth="2.5" />
+					{/if}
+				</div>
+				<span class="translate-y-[0.5px]">{$i18n.t('Pinned Models')}</span>
 			</button>
 
 			{#if !pinnedModelsCollapsed}
