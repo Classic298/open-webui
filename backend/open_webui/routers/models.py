@@ -53,26 +53,21 @@ async def get_base_models(user=Depends(get_admin_user)):
 
 @router.get("/pinned", response_model=list[ModelResponse])
 async def get_pinned_models(user=Depends(get_verified_user)):
-    log.info(f"[PinnedModels] Request from user ID: {user.id}, Role: {user.role}")
+    log.info(f"Request for pinned models from user ID: {user.id}, Role: {user.role}")
 
     db_pinned_models_sqla = []
     try:
         with get_db() as db:
             db_pinned_models_sqla = db.query(Model).filter(Model.pinned_to_sidebar == True).all()
-            log.info(f"[PinnedModels] Raw DB query for 'Model.pinned_to_sidebar == True' found {len(db_pinned_models_sqla)} models.")
-            if db_pinned_models_sqla:
-                log.info(f"[PinnedModels] IDs from raw DB query: {[m.id for m in db_pinned_models_sqla]}")
     except Exception as e:
-        log.error(f"[PinnedModels] Error during raw DB query for pinned models: {e}", exc_info=True)
+        log.error(f"Error during DB query for pinned models: {e}", exc_info=True)
         # db_pinned_models_sqla remains empty list, initialized above
 
     # Convert SQLAlchemy models to Pydantic ModelModel for consistent processing
     models_to_filter = [ModelModel.model_validate(m) for m in db_pinned_models_sqla]
-    log.info(f"[PinnedModels] Found {len(models_to_filter)} models from direct DB query after Pydantic validation.")
 
     # Filter for active status
     active_models = [m for m in models_to_filter if m.is_active]
-    log.info(f"[PinnedModels] Found {len(active_models)} active pinned models for user {user.id}.")
 
     # Filter for hidden status
     visible_models = []
@@ -83,25 +78,14 @@ async def get_pinned_models(user=Depends(get_verified_user)):
 
         if not hidden:
             visible_models.append(m_model)
-    log.info(f"[PinnedModels] Found {len(visible_models)} non-hidden, active, pinned models for user {user.id}.")
 
     # Filter for permission
     final_permitted_models = []
     for model_obj in visible_models: # model_obj is ModelModel instance
         if user.role == "admin":
             final_permitted_models.append(model_obj)
-            log.info(f"[PinnedModels] Admin user {user.id} automatically granted access to model: {model_obj.id}")
         elif has_access(user.id, "read", model_obj.access_control):
             final_permitted_models.append(model_obj)
-            log.info(f"[PinnedModels] User {user.id} granted access to model by has_access: {model_obj.id}")
-        else:
-            log.info(f"[PinnedModels] User {user.id} denied access to model by has_access: {model_obj.id}. Access control: {model_obj.access_control}")
-
-    log.info(f"[PinnedModels] Found {len(final_permitted_models)} permitted, non-hidden, active, pinned models for user {user.id} (Role: {user.role}).")
-
-    # Log the final list of models being returned
-    returned_model_ids = [m.id for m in final_permitted_models]
-    log.info(f"[PinnedModels] Returning {len(final_permitted_models)} models to user {user.id}: {returned_model_ids}")
 
     return final_permitted_models
 

@@ -241,7 +241,6 @@ class ModelsTable:
         try:
             with get_db() as db:
                 # update only the fields that are present in the model
-                # update only the fields that are present in the model
                 update_data = model.model_dump(exclude_unset=True, exclude={"id"})
                 update_data["updated_at"] = int(time.time())
 

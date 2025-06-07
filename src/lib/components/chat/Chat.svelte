@@ -128,42 +128,25 @@
 			const modelIdFromQuery = $page.url.searchParams.get('model');
 
 			if (modelIdFromQuery && modelIdFromQuery !== currentModelIdFromUrl) {
-				console.log(`[Chat.svelte] URL model query changed to: ${modelIdFromQuery}`);
 				currentModelIdFromUrl = modelIdFromQuery;
 
 				const modelExists = $models.find((m) => m.id === modelIdFromQuery);
 				if (modelExists) {
-					selectedModels = [modelIdFromQuery]; // Update the selectedModels array
-					atSelectedModel = undefined; // Clear @selected model if any
-
-					// Persist this choice like ModelSelector might do (check ModelSelector for exact mechanism if different)
-					// localStorage.setItem('selectedLLMId', modelIdFromQuery); // This key is seen in stores/configs.ts
-					// initNewChat also uses sessionStorage.selectedModels, so let's update that too for consistency on reload.
+					selectedModels = [modelIdFromQuery];
+					atSelectedModel = undefined;
 					sessionStorage.selectedModels = JSON.stringify(selectedModels);
 
-
-					// If on the base chat page (no specific chat ID in URL) and not a temporary chat,
-					// re-initialize for the new model. This might clear existing unsaved chat.
 					if (!$chatId && !$temporaryChatEnabled) {
-						console.log('[Chat.svelte] Applying model from URL to new chat interface.');
-						// Consider if a full initNewChat() is needed or just parts of it.
-						// For now, setting selectedModels and persisting should be enough for Navbar to update.
-						// If chat content needs reset, that would be an additional step.
-						// Resetting prompt and files for the new model selection
 						prompt = '';
 						files = [];
-						// Clearing other model-specific settings
 						resetInput();
 					}
-
-					console.log(`[Chat.svelte] Set selectedModels to: [${modelIdFromQuery}]`);
 				} else {
-					console.warn(`[Chat.svelte] Model ID ${modelIdFromQuery} from URL not found in available models.`);
+					// Optional: Keep a warning if a model ID from URL is invalid, or handle silently
+					// console.warn(`[Chat.svelte] Model ID ${modelIdFromQuery} from URL not found in available models.`);
 				}
 			} else if (!modelIdFromQuery && currentModelIdFromUrl !== '') {
-				// Model parameter removed from URL
 				currentModelIdFromUrl = '';
-				console.log('[Chat.svelte] Model parameter removed from URL.');
 			}
 		}
 	}
@@ -240,7 +223,6 @@
 			return;
 		}
 		sessionStorage.selectedModels = JSON.stringify(selectedModels);
-		console.log('saveSessionSelectedModels', selectedModels, sessionStorage.selectedModels);
 	};
 
 	let oldSelectedModelIds = [''];
@@ -256,7 +238,6 @@
 	};
 
 	const resetInput = () => {
-		console.debug('resetInput');
 		setToolIds();
 
 		selectedFilterIds = [];
@@ -322,8 +303,6 @@
 	};
 
 	const chatEventHandler = async (event, cb) => {
-		console.log(event);
-
 		if (event.chat_id === $chatId) {
 			await tick();
 			let message = history.messages[event.message_id];
@@ -424,8 +403,6 @@
 					eventConfirmationMessage = data.message;
 					eventConfirmationInputPlaceholder = data.placeholder;
 					eventConfirmationInputValue = data?.value ?? '';
-				} else {
-					console.log('Unknown message type', data);
 				}
 
 				history.messages[event.message_id] = message;
@@ -474,7 +451,6 @@
 
 	onMount(async () => {
 		loading = true;
-		console.log('mounted');
 		window.addEventListener('message', onMessageHandler);
 		$socket?.on('chat-events', chatEventHandler);
 
@@ -557,14 +533,14 @@
 	// File upload functions
 
 	const uploadGoogleDriveFile = async (fileData) => {
-		console.log('Starting uploadGoogleDriveFile with:', {
-			id: fileData.id,
-			name: fileData.name,
-			url: fileData.url,
-			headers: {
-				Authorization: `Bearer ${token}`
-			}
-		});
+			// console.log('Starting uploadGoogleDriveFile with:', {
+			// 	id: fileData.id,
+			// 	name: fileData.name,
+			// 	url: fileData.url,
+			// 	headers: {
+			// 		Authorization: `Bearer ${token}`
+			// 	}
+			// });
 
 		// Validate input
 		if (!fileData?.id || !fileData?.name || !fileData?.url || !fileData?.headers?.Authorization) {
@@ -587,7 +563,7 @@
 
 		try {
 			files = [...files, fileItem];
-			console.log('Processing web file with URL:', fileData.url);
+			// console.log('Processing web file with URL:', fileData.url);
 
 			// Configure fetch options with proper headers
 			const fetchOptions = {
@@ -599,7 +575,7 @@
 			};
 
 			// Attempt to fetch the file
-			console.log('Fetching file content from Google Drive...');
+			// console.log('Fetching file content from Google Drive...');
 			const fileResponse = await fetch(fileData.url, fetchOptions);
 
 			if (!fileResponse.ok) {
@@ -609,31 +585,31 @@
 
 			// Get content type from response
 			const contentType = fileResponse.headers.get('content-type') || 'application/octet-stream';
-			console.log('Response received with content-type:', contentType);
+			// console.log('Response received with content-type:', contentType);
 
 			// Convert response to blob
-			console.log('Converting response to blob...');
+			// console.log('Converting response to blob...');
 			const fileBlob = await fileResponse.blob();
 
 			if (fileBlob.size === 0) {
 				throw new Error('Retrieved file is empty');
 			}
 
-			console.log('Blob created:', {
-				size: fileBlob.size,
-				type: fileBlob.type || contentType
-			});
+			// console.log('Blob created:', {
+			// 	size: fileBlob.size,
+			// 	type: fileBlob.type || contentType
+			// });
 
 			// Create File object with proper MIME type
 			const file = new File([fileBlob], fileData.name, {
 				type: fileBlob.type || contentType
 			});
 
-			console.log('File object created:', {
-				name: file.name,
-				size: file.size,
-				type: file.type
-			});
+			// console.log('File object created:', {
+			// 	name: file.name,
+			// 	size: file.size,
+			// 	type: file.type
+			// });
 
 			if (file.size === 0) {
 				throw new Error('Created file is empty');
@@ -651,14 +627,14 @@
 			}
 
 			// Upload file to server
-			console.log('Uploading file to server...');
+			// console.log('Uploading file to server...');
 			const uploadedFile = await uploadFile(localStorage.token, file, metadata);
 
 			if (!uploadedFile) {
 				throw new Error('Server returned null response for file upload');
 			}
 
-			console.log('File uploaded successfully:', uploadedFile);
+			// console.log('File uploaded successfully:', uploadedFile);
 
 			// Update file item with upload results
 			fileItem.status = 'uploaded';
@@ -671,7 +647,7 @@
 			files = files;
 			toast.success($i18n.t('File uploaded successfully'));
 		} catch (e) {
-			console.error('Error uploading file:', e);
+			// console.error('Error uploading file:', e); // Kept console.error for actual errors
 			files = files.filter((f) => f.itemId !== tempItemId);
 			toast.error(
 				$i18n.t('Error uploading file: {{error}}', {
@@ -682,8 +658,6 @@
 	};
 
 	const uploadWeb = async (url) => {
-		console.log(url);
-
 		const fileItem = {
 			type: 'doc',
 			name: url,
@@ -715,8 +689,6 @@
 	};
 
 	const uploadYoutubeTranscription = async (url) => {
-		console.log(url);
-
 		const fileItem = {
 			type: 'doc',
 			name: url,
@@ -796,7 +768,6 @@
 				if ($settings?.models) {
 					selectedModels = $settings?.models;
 				} else if ($config?.default_models) {
-					console.log($config?.default_models.split(',') ?? '');
 					selectedModels = $config?.default_models.split(',');
 				}
 			}
@@ -905,8 +876,6 @@
 			const chatContent = chat.chat;
 
 			if (chatContent) {
-				console.log(chatContent);
-
 				selectedModels =
 					(chatContent?.models ?? undefined) !== undefined
 						? chatContent.models
@@ -1230,7 +1199,7 @@
 				// Stream response
 				let value = choices[0]?.delta?.content ?? '';
 				if (message.content == '' && value == '\n') {
-					console.log('Empty response');
+						// console.log('Empty response'); // Removed less critical log
 				} else {
 					message.content += value;
 
@@ -1350,7 +1319,7 @@
 			);
 		}
 
-		console.log(data);
+		// console.log(data); // Removed verbose stream data log
 		if (autoScroll) {
 			scrollToBottom();
 		}
@@ -1361,8 +1330,6 @@
 	//////////////////////////
 
 	const submitPrompt = async (userPrompt, { _raw = false } = {}) => {
-		console.log('submitPrompt', userPrompt, $chatId);
-
 		const messages = createMessagesList(history, history.currentId);
 		const _selectedModels = selectedModels.map((modelId) =>
 			$models.map((m) => m.id).includes(modelId) ? modelId : ''
@@ -1534,7 +1501,6 @@
 
 		await Promise.all(
 			selectedModelIds.map(async (modelId, _modelIdx) => {
-				console.log('modelId', modelId);
 				const model = $models.filter((m) => m.id === modelId).at(0);
 
 				if (model) {
@@ -1876,8 +1842,6 @@
 	};
 
 	const regenerateResponse = async (message) => {
-		console.log('regenerateResponse');
-
 		if (history.currentId) {
 			let userMessage = history.messages[message.parentId];
 			let userPrompt = userMessage.content;
@@ -1901,7 +1865,6 @@
 	};
 
 	const continueResponse = async () => {
-		console.log('continueResponse');
 		const _chatId = JSON.parse(JSON.stringify($chatId));
 
 		if (history.currentId && history.messages[history.currentId].done == true) {
@@ -1920,7 +1883,6 @@
 	};
 
 	const mergeResponses = async (messageId, responses, _chatId) => {
-		console.log('mergeResponses', messageId, responses);
 		const message = history.messages[messageId];
 		const mergedResponse = {
 			status: true,
