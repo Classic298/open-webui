@@ -181,18 +181,17 @@
 				<div class="flex items-center">{$i18n.t('Export')}</div>
 			</DropdownMenu.Item>
 
-			{#if model}
+			{#if model && model.id}
 			<DropdownMenu.Item
 				class="flex gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
 				on:click={togglePinStatus}
 			>
 				{#if model.pinned_to_sidebar}
 					<BookmarkSlash class="size-4" />
-					<div class="flex items-center">{$i18n.t('Unpin from sidebar')}</div>
 				{:else}
 					<Bookmark class="size-4" />
-					<div class="flex items-center">{$i18n.t('Pin to sidebar')}</div>
 				{/if}
+				<div class="flex items-center">{$i18n.t(model.pinned_to_sidebar ? 'Unpin from sidebar' : 'Pin to sidebar')}</div>
 			</DropdownMenu.Item>
 			{/if}
 
