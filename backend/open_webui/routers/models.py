@@ -6,9 +6,11 @@ from open_webui.models.models import (
     ModelResponse,
     ModelUserResponse,
     Models,
-    Model, # Added for direct DB query if needed, though Models.get_all_models() is used
+    Model,
+    ModelModel, # Ensure ModelModel is imported for conversion
 )
 from open_webui.constants import ERROR_MESSAGES
+from open_webui.internal.db import get_db # Import get_db for direct session
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 import logging
 
@@ -51,52 +53,51 @@ async def get_base_models(user=Depends(get_admin_user)):
 
 @router.get("/pinned", response_model=list[ModelResponse])
 async def get_pinned_models(user=Depends(get_verified_user)):
-    log.info(f"User {user.id} attempting to fetch pinned models.")
+    log.info(f"[PinnedModels] Request from user ID: {user.id}, Role: {user.role}")
 
-    # Fetch all models from the database (as per existing logic)
-    all_db_models = Models.get_all_models()
-    log.info(f"Total models fetched from DB: {len(all_db_models)}")
+    db_pinned_models_sqla = []
+    try:
+        with get_db() as db:
+            db_pinned_models_sqla = db.query(Model).filter(Model.pinned_to_sidebar == True).all()
+            log.info(f"[PinnedModels] Raw DB query for 'Model.pinned_to_sidebar == True' found {len(db_pinned_models_sqla)} models.")
+            if db_pinned_models_sqla:
+                log.info(f"[PinnedModels] IDs from raw DB query: {[m.id for m in db_pinned_models_sqla]}")
+    except Exception as e:
+        log.error(f"[PinnedModels] Error during raw DB query for pinned models: {e}", exc_info=True)
+        # db_pinned_models_sqla remains empty list, initialized above
 
-    # Initial filter for models marked as pinned in DB
-    # This is slightly different from direct DB query but achieves similar logging start point
-    initially_pinned_models = [m for m in all_db_models if m.pinned_to_sidebar]
-    log.info(f"Found {len(initially_pinned_models)} models initially marked as pinned in DB for user {user.id}.")
-    # Detailed log for initial pinned models (optional, can be verbose)
-    # for m in initially_pinned_models:
-    #     log.info(f"Initial Pinned - ID: {m.id}, Pinned: {m.pinned_to_sidebar}, Active: {m.is_active}, Meta: {m.meta.model_dump()}, Access: {m.access_control}")
+    # Convert SQLAlchemy models to Pydantic ModelModel for consistent processing
+    models_to_filter = [ModelModel.model_validate(m) for m in db_pinned_models_sqla]
+    log.info(f"[PinnedModels] Found {len(models_to_filter)} models from direct DB query after Pydantic validation.")
 
     # Filter for active status
-    active_models = [m for m in initially_pinned_models if m.is_active]
-    log.info(f"Found {len(active_models)} active pinned models for user {user.id}.")
+    active_models = [m for m in models_to_filter if m.is_active]
+    log.info(f"[PinnedModels] Found {len(active_models)} active pinned models for user {user.id}.")
 
     # Filter for hidden status
     visible_models = []
-    for m in active_models:
-        # Safely access model.meta which is a Pydantic model ModelMeta
+    for m_model in active_models: # m_model is ModelModel instance
         hidden = False
-        if m.meta:
-            # model_dump() converts Pydantic model to dict for .get()
-            hidden = m.meta.model_dump().get("hidden", False)
+        if m_model.meta: # m_model.meta is ModelMeta Pydantic model
+            hidden = m_model.meta.model_dump().get("hidden", False)
 
         if not hidden:
-            visible_models.append(m)
-    log.info(f"Found {len(visible_models)} non-hidden, active, pinned models for user {user.id}.")
+            visible_models.append(m_model)
+    log.info(f"[PinnedModels] Found {len(visible_models)} non-hidden, active, pinned models for user {user.id}.")
 
     # Filter for permission
-    permitted_models_responses = []
+    final_permitted_models = []
     for model_obj in visible_models: # model_obj is ModelModel instance
         if has_access(user.id, "read", model_obj.access_control):
-            # Convert ModelModel to ModelResponse if necessary, though ModelResponse inherits from ModelModel
-            # Assuming ModelModel can be directly appended if it matches ModelResponse structure
-            permitted_models_responses.append(model_obj)
+            final_permitted_models.append(model_obj)
 
-    log.info(f"Found {len(permitted_models_responses)} permitted, non-hidden, active, pinned models for user {user.id}.")
+    log.info(f"[PinnedModels] Found {len(final_permitted_models)} permitted, non-hidden, active, pinned models for user {user.id}.")
 
     # Log the final list of models being returned
-    returned_model_ids = [m.id for m in permitted_models_responses]
-    log.info(f"Returning {len(permitted_models_responses)} models to user {user.id}: {returned_model_ids}")
+    returned_model_ids = [m.id for m in final_permitted_models]
+    log.info(f"[PinnedModels] Returning {len(final_permitted_models)} models to user {user.id}: {returned_model_ids}")
 
-    return permitted_models_responses
+    return final_permitted_models
 
 
 ############################

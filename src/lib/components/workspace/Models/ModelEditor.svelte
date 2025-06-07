@@ -267,8 +267,13 @@
 
 			console.log(model);
 
-			// Initialize pinned_to_sidebar
-			info.meta.pinned_to_sidebar = model?.meta?.pinned_to_sidebar ?? false;
+			// Initialize pinned_to_sidebar as a top-level property
+			info.pinned_to_sidebar = model?.pinned_to_sidebar ?? model?.meta?.pinned_to_sidebar ?? false;
+
+			// Clean up old location in meta if it exists from a previous incorrect save
+			if (info.meta && typeof info.meta.pinned_to_sidebar !== 'undefined') {
+				delete info.meta.pinned_to_sidebar;
+			}
 		}
 
 		loaded = true;
@@ -554,15 +559,15 @@
 
 					<div class="my-2 flex items-center gap-2">
 						<Checkbox
-							state={info.meta.pinned_to_sidebar ? 'checked' : 'unchecked'}
+							state={info.pinned_to_sidebar ? 'checked' : 'unchecked'}
 							on:change={(e) => {
-								info.meta.pinned_to_sidebar = e.detail === 'checked';
+								info.pinned_to_sidebar = e.detail === 'checked';
 							}}
 						/>
 						<label
 							class="text-sm text-gray-700 dark:text-gray-300 cursor-pointer"
 							on:click={() => {
-								info.meta.pinned_to_sidebar = !info.meta.pinned_to_sidebar;
+								info.pinned_to_sidebar = !info.pinned_to_sidebar;
 							}}
 							on:keypress
 						>
