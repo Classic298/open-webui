@@ -35,8 +35,8 @@
 	let show = false;
 
 	const togglePinStatus = async () => {
-		if (!model || !model.id) {
-			console.error('Model or model.id is undefined in togglePinStatus (Admin)');
+		if (!model || !model.id || !model.name) {
+			console.error('Model data is incomplete in togglePinStatus (Admin)');
 			toast.error($i18n.t('An unexpected error occurred. Model data is incomplete.'));
 			onClose();
 			return;
@@ -45,6 +45,10 @@
 		try {
 			const newPinnedStatus = !(model.pinned_to_sidebar ?? false);
 			await updateModelById(localStorage.token, model.id, {
+				id: model.id,
+				name: model.name,
+				meta: model.meta ?? {}, // Default to empty object if undefined
+				params: model.params ?? {}, // Default to empty object if undefined
 				pinned_to_sidebar: newPinnedStatus
 			});
 
