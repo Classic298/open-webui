@@ -45,16 +45,15 @@
 			return;
 		}
 		try {
-			// Use ?? false to ensure newPinnedStatus is boolean even if pinned_to_sidebar is undefined
 			const newPinnedStatus = !(model.pinned_to_sidebar ?? false);
 			await updateModelById(localStorage.token, model.id, {
 				id: model.id,
 				name: model.name,
-				meta: model.meta ?? {}, // Default to empty object if undefined
-				params: model.params ?? {}, // Default to empty object if undefined
+				meta: model.meta ?? {},
+				params: model.params ?? {},
 				pinned_to_sidebar: newPinnedStatus
 			});
-			model.pinned_to_sidebar = newPinnedStatus; // Update the model object for reactivity
+			model.pinned_to_sidebar = newPinnedStatus;
 			toast.success(
 				newPinnedStatus
 					? $i18n.t('Model pinned to sidebar.')
