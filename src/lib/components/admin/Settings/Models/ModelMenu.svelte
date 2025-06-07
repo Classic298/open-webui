@@ -47,13 +47,11 @@
 			await updateModelById(localStorage.token, model.id, {
 				id: model.id,
 				name: model.name,
-				meta: model.meta ?? {}, // Default to empty object if undefined
-				params: model.params ?? {}, // Default to empty object if undefined
+				meta: model.meta ?? {},
+				params: model.params ?? {},
 				pinned_to_sidebar: newPinnedStatus
 			});
 
-			// Update the model object for local reactivity within the menu
-			// Parent component will need to handle broader UI updates if necessary
 			model.pinned_to_sidebar = newPinnedStatus;
 
 			toast.success(
