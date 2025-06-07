@@ -265,10 +265,9 @@
 				)
 			};
 
-			// Initialize pinned_to_sidebar as a top-level property
+			console.log(model);
 			info.pinned_to_sidebar = model?.pinned_to_sidebar ?? model?.meta?.pinned_to_sidebar ?? false;
 
-			// Clean up old location in meta if it exists from a previous incorrect save
 			if (info.meta && typeof info.meta.pinned_to_sidebar !== 'undefined') {
 				delete info.meta.pinned_to_sidebar;
 			}
