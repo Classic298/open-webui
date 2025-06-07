@@ -115,10 +115,58 @@
 
 	let chatIdUnsubscriber: Unsubscriber | undefined;
 
-	let selectedModels = [''];
+	let selectedModels = ['']; // This is used by Navbar and other parts
 	let atSelectedModel: Model | undefined;
 	let selectedModelIds = [];
 	$: selectedModelIds = atSelectedModel !== undefined ? [atSelectedModel.id] : selectedModels;
+
+	let currentModelIdFromUrl = ''; // Used to track model from URL query
+
+	// Reactive block to handle model changes from URL
+	$: {
+		if ($page.url.searchParams) {
+			const modelIdFromQuery = $page.url.searchParams.get('model');
+
+			if (modelIdFromQuery && modelIdFromQuery !== currentModelIdFromUrl) {
+				console.log(`[Chat.svelte] URL model query changed to: ${modelIdFromQuery}`);
+				currentModelIdFromUrl = modelIdFromQuery;
+
+				const modelExists = $models.find((m) => m.id === modelIdFromQuery);
+				if (modelExists) {
+					selectedModels = [modelIdFromQuery]; // Update the selectedModels array
+					atSelectedModel = undefined; // Clear @selected model if any
+
+					// Persist this choice like ModelSelector might do (check ModelSelector for exact mechanism if different)
+					// localStorage.setItem('selectedLLMId', modelIdFromQuery); // This key is seen in stores/configs.ts
+					// initNewChat also uses sessionStorage.selectedModels, so let's update that too for consistency on reload.
+					sessionStorage.selectedModels = JSON.stringify(selectedModels);
+
+
+					// If on the base chat page (no specific chat ID in URL) and not a temporary chat,
+					// re-initialize for the new model. This might clear existing unsaved chat.
+					if (!$chatId && !$temporaryChatEnabled) {
+						console.log('[Chat.svelte] Applying model from URL to new chat interface.');
+						// Consider if a full initNewChat() is needed or just parts of it.
+						// For now, setting selectedModels and persisting should be enough for Navbar to update.
+						// If chat content needs reset, that would be an additional step.
+						// Resetting prompt and files for the new model selection
+						prompt = '';
+						files = [];
+						// Clearing other model-specific settings
+						resetInput();
+					}
+
+					console.log(`[Chat.svelte] Set selectedModels to: [${modelIdFromQuery}]`);
+				} else {
+					console.warn(`[Chat.svelte] Model ID ${modelIdFromQuery} from URL not found in available models.`);
+				}
+			} else if (!modelIdFromQuery && currentModelIdFromUrl !== '') {
+				// Model parameter removed from URL
+				currentModelIdFromUrl = '';
+				console.log('[Chat.svelte] Model parameter removed from URL.');
+			}
+		}
+	}
 
 	let selectedToolIds = [];
 	let selectedFilterIds = [];
