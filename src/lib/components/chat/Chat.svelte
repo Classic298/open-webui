@@ -1211,7 +1211,7 @@
 				// Stream response
 				let value = choices[0]?.delta?.content ?? '';
 				if (message.content == '' && value == '\n') {
-						console.log('Empty response');
+					console.log('Empty response');
 				} else {
 					message.content += value;
 
