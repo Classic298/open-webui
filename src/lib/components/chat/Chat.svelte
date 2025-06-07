@@ -570,7 +570,7 @@
 			files = [...files, fileItem];
 			console.log('Processing web file with URL:', fileData.url);
 
-			Configure fetch options with proper headers
+			// Configure fetch options with proper headers
 			const fetchOptions = {
 				headers: {
 					Authorization: fileData.headers.Authorization,
@@ -652,7 +652,7 @@
 			files = files;
 			toast.success($i18n.t('File uploaded successfully'));
 		} catch (e) {
-			console.error('Error uploading file:', e); // Kept console.error for actual errors
+			console.error('Error uploading file:', e);
 			files = files.filter((f) => f.itemId !== tempItemId);
 			toast.error(
 				$i18n.t('Error uploading file: {{error}}', {
@@ -886,6 +886,8 @@
 			const chatContent = chat.chat;
 
 			if (chatContent) {
+				console.log(chatContent);
+
 				selectedModels =
 					(chatContent?.models ?? undefined) !== undefined
 						? chatContent.models
@@ -1209,7 +1211,7 @@
 				// Stream response
 				let value = choices[0]?.delta?.content ?? '';
 				if (message.content == '' && value == '\n') {
-						// console.log('Empty response'); // Removed less critical log
+						console.log('Empty response');
 				} else {
 					message.content += value;
 
@@ -1329,7 +1331,7 @@
 			);
 		}
 
-		// console.log(data); // Removed verbose stream data log
+		console.log(data);
 		if (autoScroll) {
 			scrollToBottom();
 		}
@@ -1340,6 +1342,8 @@
 	//////////////////////////
 
 	const submitPrompt = async (userPrompt, { _raw = false } = {}) => {
+		console.log('submitPrompt', userPrompt, $chatId);
+
 		const messages = createMessagesList(history, history.currentId);
 		const _selectedModels = selectedModels.map((modelId) =>
 			$models.map((m) => m.id).includes(modelId) ? modelId : ''
@@ -1511,6 +1515,7 @@
 
 		await Promise.all(
 			selectedModelIds.map(async (modelId, _modelIdx) => {
+				console.log('modelId', modelId);
 				const model = $models.filter((m) => m.id === modelId).at(0);
 
 				if (model) {
@@ -1852,6 +1857,8 @@
 	};
 
 	const regenerateResponse = async (message) => {
+		console.log('regenerateResponse');
+
 		if (history.currentId) {
 			let userMessage = history.messages[message.parentId];
 			let userPrompt = userMessage.content;
@@ -1875,6 +1882,7 @@
 	};
 
 	const continueResponse = async () => {
+		console.log('continueResponse');
 		const _chatId = JSON.parse(JSON.stringify($chatId));
 
 		if (history.currentId && history.messages[history.currentId].done == true) {
@@ -1893,6 +1901,7 @@
 	};
 
 	const mergeResponses = async (messageId, responses, _chatId) => {
+		console.log('mergeResponses', messageId, responses);
 		const message = history.messages[messageId];
 		const mergedResponse = {
 			status: true,
