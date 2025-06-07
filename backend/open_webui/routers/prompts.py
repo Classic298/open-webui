@@ -1,5 +1,6 @@
 from typing import Optional
 
+from open_webui.config import ENABLE_ADMIN_WORKSPACE_ACCESS
 from open_webui.models.prompts import (
     PromptForm,
     PromptUserResponse,
@@ -20,7 +21,33 @@ router = APIRouter()
 
 @router.get("/", response_model=list[PromptModel])
 async def get_prompts(user=Depends(get_verified_user)):
-    if user.role == "admin":
+    if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS: # Direct boolean usage
+        all_prompts = Prompts.get_prompts()
+        filtered_prompts = []
+        for prompt in all_prompts:
+            is_private_other_user = (
+                prompt.access_control == {} and prompt.user_id != user.id
+            )
+
+            if not is_private_other_user:
+                is_owned_by_admin = prompt.user_id == user.id
+                is_public = prompt.access_control is None
+
+                shared_directly_for_read = False
+                shared_with_any_group_at_any_level = False
+
+                if prompt.access_control is not None:
+                    read_permissions = prompt.access_control.get('read', {})
+                    write_permissions = prompt.access_control.get('write', {})
+                    if user.id in read_permissions.get('user_ids', []):
+                        shared_directly_for_read = True
+                    if read_permissions.get('group_ids') or write_permissions.get('group_ids'):
+                        shared_with_any_group_at_any_level = True
+
+                if is_owned_by_admin or is_public or shared_directly_for_read or shared_with_any_group_at_any_level:
+                    filtered_prompts.append(prompt)
+        return filtered_prompts
+    elif user.role == "admin":
         prompts = Prompts.get_prompts()
     else:
         prompts = Prompts.get_prompts_by_user_id(user.id, "read")
@@ -30,7 +57,33 @@ async def get_prompts(user=Depends(get_verified_user)):
 
 @router.get("/list", response_model=list[PromptUserResponse])
 async def get_prompt_list(user=Depends(get_verified_user)):
-    if user.role == "admin":
+    if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS: # Direct boolean usage
+        all_prompts = Prompts.get_prompts()
+        filtered_prompts = []
+        for prompt in all_prompts:
+            is_private_other_user = (
+                prompt.access_control == {} and prompt.user_id != user.id
+            )
+
+            if not is_private_other_user:
+                is_owned_by_admin = prompt.user_id == user.id
+                is_public = prompt.access_control is None
+
+                shared_directly_for_write = False
+                shared_with_any_group_at_any_level = False
+
+                if prompt.access_control is not None:
+                    read_permissions = prompt.access_control.get('read', {}) # Check read groups
+                    write_permissions = prompt.access_control.get('write', {}) # Check write groups
+                    if user.id in write_permissions.get('user_ids', []): # Direct share for write
+                        shared_directly_for_write = True
+                    if read_permissions.get('group_ids') or write_permissions.get('group_ids'):
+                        shared_with_any_group_at_any_level = True
+
+                if is_owned_by_admin or is_public or shared_directly_for_write or shared_with_any_group_at_any_level:
+                    filtered_prompts.append(prompt)
+        return filtered_prompts
+    elif user.role == "admin":
         prompts = Prompts.get_prompts()
     else:
         prompts = Prompts.get_prompts_by_user_id(user.id, "write")

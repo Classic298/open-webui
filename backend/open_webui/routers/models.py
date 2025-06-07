@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_access, has_permission
+from open_webui.config import ENABLE_ADMIN_WORKSPACE_ACCESS
 
 
 router = APIRouter()
@@ -25,7 +26,31 @@ router = APIRouter()
 
 @router.get("/", response_model=list[ModelUserResponse])
 async def get_models(id: Optional[str] = None, user=Depends(get_verified_user)):
-    if user.role == "admin":
+    if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS: # Use direct boolean value
+        all_models = Models.get_models()
+        filtered_models = []
+        for model in all_models:
+            is_private_other_user = (
+                model.access_control == {} and model.user_id != user.id
+            )
+            if not is_private_other_user:
+                is_owned_by_admin = model.user_id == user.id
+                is_public = model.access_control is None
+
+                shared_directly_for_read = False
+                shared_with_any_group_at_any_level = False # Updated variable name and logic
+                if model.access_control is not None:
+                    read_permissions = model.access_control.get('read', {})
+                    write_permissions = model.access_control.get('write', {}) # Check write groups too
+                    if user.id in read_permissions.get('user_ids', []):
+                        shared_directly_for_read = True
+                    if read_permissions.get('group_ids') or write_permissions.get('group_ids'): # Updated logic
+                        shared_with_any_group_at_any_level = True
+
+                if is_owned_by_admin or is_public or shared_directly_for_read or shared_with_any_group_at_any_level:
+                    filtered_models.append(model)
+        return filtered_models
+    elif user.role == "admin":
         return Models.get_models()
     else:
         return Models.get_models_by_user_id(user.id)

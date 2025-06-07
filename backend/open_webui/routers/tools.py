@@ -11,7 +11,7 @@ from open_webui.models.tools import (
     Tools,
 )
 from open_webui.utils.plugin import load_tool_module_by_id, replace_imports
-from open_webui.config import CACHE_DIR
+from open_webui.config import CACHE_DIR, ENABLE_ADMIN_WORKSPACE_ACCESS
 from open_webui.constants import ERROR_MESSAGES
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from open_webui.utils.tools import get_tool_specs
@@ -70,15 +70,86 @@ async def get_tools(request: Request, user=Depends(get_verified_user)):
             )
         )
 
-    if user.role != "admin":
-        tools = [
-            tool
-            for tool in tools
-            if tool.user_id == user.id
-            or has_access(user.id, "read", tool.access_control)
-        ]
+    final_tools = []
 
-    return tools
+    if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS:
+        # Admin with workspace restrictions
+        db_tools = Tools.get_tools()
+        for t in db_tools:
+            is_private_other_user = (t.access_control == {} and t.user_id != user.id)
+            if not is_private_other_user:
+                is_owned_by_admin = t.user_id == user.id
+                is_public = t.access_control is None
+                shared_directly_for_read = False
+                shared_with_any_group_at_any_level = False
+                if t.access_control is not None:
+                    read_permissions = t.access_control.get('read', {})
+                    write_permissions = t.access_control.get('write', {})
+                    if user.id in read_permissions.get('user_ids', []):
+                        shared_directly_for_read = True
+                    if read_permissions.get('group_ids') or write_permissions.get('group_ids'):
+                        shared_with_any_group_at_any_level = True
+                if is_owned_by_admin or is_public or shared_directly_for_read or shared_with_any_group_at_any_level:
+                    final_tools.append(t)
+
+        for server_idx, server_config_conn in enumerate(request.app.state.config.TOOL_SERVER_CONNECTIONS):
+            server_openapi = request.app.state.TOOL_SERVERS[server_idx]["openapi"]
+            server_tool_ac = server_config_conn.get("config", {}).get("access_control", None)
+
+            is_public_server_tool = server_tool_ac is None
+            shared_directly_server_tool_for_read = False
+            shared_with_any_group_at_any_level_server_tool = False
+            if server_tool_ac is not None:
+                read_permissions = server_tool_ac.get('read', {})
+                write_permissions = server_tool_ac.get('write', {})
+                if user.id in read_permissions.get('user_ids', []):
+                    shared_directly_server_tool_for_read = True
+                if read_permissions.get('group_ids') or write_permissions.get('group_ids'):
+                    shared_with_any_group_at_any_level_server_tool = True
+
+            if is_public_server_tool or shared_directly_server_tool_for_read or shared_with_any_group_at_any_level_server_tool:
+                final_tools.append(ToolUserResponse(
+                    id=f"server:{server_idx}", user_id=f"server:{server_idx}",
+                    name=server_openapi.get("info", {}).get("title", "Tool Server"),
+                    meta={"description": server_openapi.get("info", {}).get("description", "")},
+                    access_control=server_tool_ac,
+                    updated_at=int(time.time()), created_at=int(time.time())
+                ))
+        return final_tools
+
+    elif user.role == "admin" and ENABLE_ADMIN_WORKSPACE_ACCESS:
+        # Admin without restrictions
+        final_tools.extend(Tools.get_tools())
+        for server_idx, server_config_conn in enumerate(request.app.state.config.TOOL_SERVER_CONNECTIONS):
+            server_openapi = request.app.state.TOOL_SERVERS[server_idx]["openapi"]
+            final_tools.append(ToolUserResponse(
+                id=f"server:{server_idx}", user_id=f"server:{server_idx}",
+                name=server_openapi.get("info", {}).get("title", "Tool Server"),
+                meta={"description": server_openapi.get("info", {}).get("description", "")},
+                access_control=server_config_conn.get("config", {}).get("access_control", None),
+                updated_at=int(time.time()), created_at=int(time.time())
+            ))
+        return final_tools
+    else:
+        # Non-admin user
+        db_tools = Tools.get_tools() # Get all to filter using has_access
+        combined_tools_for_user = []
+        for t in db_tools:
+            if t.user_id == user.id or has_access(user.id, "read", t.access_control):
+                combined_tools_for_user.append(t)
+
+        for server_idx, server_config_conn in enumerate(request.app.state.config.TOOL_SERVER_CONNECTIONS):
+            server_openapi = request.app.state.TOOL_SERVERS[server_idx]["openapi"]
+            server_tool_ac = server_config_conn.get("config", {}).get("access_control", None)
+            if server_tool_ac is None or has_access(user.id, "read", server_tool_ac):
+                 combined_tools_for_user.append(ToolUserResponse(
+                    id=f"server:{server_idx}", user_id=f"server:{server_idx}",
+                    name=server_openapi.get("info", {}).get("title", "Tool Server"),
+                    meta={"description": server_openapi.get("info", {}).get("description", "")},
+                    access_control=server_tool_ac,
+                    updated_at=int(time.time()), created_at=int(time.time())
+                ))
+        return combined_tools_for_user
 
 
 ############################
@@ -88,7 +159,27 @@ async def get_tools(request: Request, user=Depends(get_verified_user)):
 
 @router.get("/list", response_model=list[ToolUserResponse])
 async def get_tool_list(user=Depends(get_verified_user)):
-    if user.role == "admin":
+    if user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_ACCESS:
+        all_tools = Tools.get_tools()
+        filtered_tools = []
+        for t in all_tools:
+            is_private_other_user = (t.access_control == {} and t.user_id != user.id)
+            if not is_private_other_user:
+                is_owned_by_admin = t.user_id == user.id
+                is_public = t.access_control is None
+                shared_directly_for_write = False
+                shared_with_any_group_at_any_level = False
+                if t.access_control is not None:
+                    read_permissions = t.access_control.get('read', {})
+                    write_permissions = t.access_control.get('write', {})
+                    if user.id in write_permissions.get('user_ids', []): # Direct share for 'write'
+                        shared_directly_for_write = True
+                    if read_permissions.get('group_ids') or write_permissions.get('group_ids'):
+                        shared_with_any_group_at_any_level = True
+                if is_owned_by_admin or is_public or shared_directly_for_write or shared_with_any_group_at_any_level:
+                    filtered_tools.append(t)
+        return filtered_tools
+    elif user.role == "admin":
         tools = Tools.get_tools()
     else:
         tools = Tools.get_tools_by_user_id(user.id, "write")
