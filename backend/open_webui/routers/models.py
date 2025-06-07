@@ -88,10 +88,16 @@ async def get_pinned_models(user=Depends(get_verified_user)):
     # Filter for permission
     final_permitted_models = []
     for model_obj in visible_models: # model_obj is ModelModel instance
-        if has_access(user.id, "read", model_obj.access_control):
+        if user.role == "admin":
             final_permitted_models.append(model_obj)
+            log.info(f"[PinnedModels] Admin user {user.id} automatically granted access to model: {model_obj.id}")
+        elif has_access(user.id, "read", model_obj.access_control):
+            final_permitted_models.append(model_obj)
+            log.info(f"[PinnedModels] User {user.id} granted access to model by has_access: {model_obj.id}")
+        else:
+            log.info(f"[PinnedModels] User {user.id} denied access to model by has_access: {model_obj.id}. Access control: {model_obj.access_control}")
 
-    log.info(f"[PinnedModels] Found {len(final_permitted_models)} permitted, non-hidden, active, pinned models for user {user.id}.")
+    log.info(f"[PinnedModels] Found {len(final_permitted_models)} permitted, non-hidden, active, pinned models for user {user.id} (Role: {user.role}).")
 
     # Log the final list of models being returned
     returned_model_ids = [m.id for m in final_permitted_models]
