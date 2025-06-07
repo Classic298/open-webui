@@ -86,9 +86,11 @@
 		if ($user?.token) {
 			try {
 				const models = await getPinnedModels(localStorage.token);
+				console.log('[Sidebar] Raw response from getPinnedModels:', models);
 				pinnedSystemModels = models; // Backend already filters, so just assign
+				console.log('[Sidebar] Processed pinnedSystemModels:', pinnedSystemModels);
 			} catch (error) {
-				console.error('Failed to fetch pinned models:', error);
+				console.error('[Sidebar] Failed to fetch pinned models:', error);
 				toast.error($i18n.t('Failed to load pinned models.'));
 				pinnedSystemModels = [];
 			}
@@ -703,6 +705,10 @@
 			</ul>
 		</div>
 	{/if}
+
+	<!-- Temporary debug output -->
+	<p class="text-xs text-red-500 px-1.5">Debug: Pinned models count: {pinnedSystemModels.length}</p>
+	<!-- <pre class="text-xs text-red-500 px-1.5">{JSON.stringify(pinnedSystemModels, null, 2)}</pre> -->
 
 		<div
 			class="relative flex flex-col flex-1 overflow-y-auto overflow-x-hidden {$temporaryChatEnabled

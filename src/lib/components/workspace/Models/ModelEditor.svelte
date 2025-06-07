@@ -14,6 +14,7 @@
 	import { getFunctions } from '$lib/apis/functions';
 	import { getKnowledgeBases } from '$lib/apis/knowledge';
 	import AccessControl from '../common/AccessControl.svelte';
+	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import { stringify } from 'postcss';
 	import { toast } from 'svelte-sonner';
 
@@ -551,18 +552,22 @@
 						</div>
 					</div>
 
-					<div class="my-2">
-						<div class="flex items-center">
-							<input
-								type="checkbox"
-								id="pinned_to_sidebar_checkbox"
-								bind:checked={info.meta.pinned_to_sidebar}
-								class="mr-2 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-							/>
-							<label for="pinned_to_sidebar_checkbox" class="text-sm text-gray-700 dark:text-gray-300"
-								>{$i18n.t('Pin model to sidebar')}</label
-							>
-						</div>
+					<div class="my-2 flex items-center gap-2">
+						<Checkbox
+							state={info.meta.pinned_to_sidebar ? 'checked' : 'unchecked'}
+							on:change={(e) => {
+								info.meta.pinned_to_sidebar = e.detail === 'checked';
+							}}
+						/>
+						<label
+							class="text-sm text-gray-700 dark:text-gray-300 cursor-pointer"
+							on:click={() => {
+								info.meta.pinned_to_sidebar = !info.meta.pinned_to_sidebar;
+							}}
+							on:keypress
+						>
+							{$i18n.t('Pin model to sidebar')}
+						</label>
 					</div>
 
 					<hr class=" border-gray-100 dark:border-gray-850 my-1.5" />

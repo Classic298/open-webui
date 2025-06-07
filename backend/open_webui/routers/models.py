@@ -6,9 +6,11 @@ from open_webui.models.models import (
     ModelResponse,
     ModelUserResponse,
     Models,
+    Model, # Added for direct DB query if needed, though Models.get_all_models() is used
 )
 from open_webui.constants import ERROR_MESSAGES
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+import logging
 
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
@@ -16,6 +18,7 @@ from open_webui.utils.access_control import has_access, has_permission
 
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 
 ###########################
@@ -48,25 +51,52 @@ async def get_base_models(user=Depends(get_admin_user)):
 
 @router.get("/pinned", response_model=list[ModelResponse])
 async def get_pinned_models(user=Depends(get_verified_user)):
-    all_models = Models.get_all_models()
-    pinned_models = []
+    log.info(f"User {user.id} attempting to fetch pinned models.")
 
-    for model in all_models:
-        # Check pinned_to_sidebar, is_active
-        if not model.pinned_to_sidebar or not model.is_active:
-            continue
+    # Fetch all models from the database (as per existing logic)
+    all_db_models = Models.get_all_models()
+    log.info(f"Total models fetched from DB: {len(all_db_models)}")
 
-        # Check meta.hidden (safely)
-        if model.meta and model.meta.model_dump().get("hidden", False):
-            continue
+    # Initial filter for models marked as pinned in DB
+    # This is slightly different from direct DB query but achieves similar logging start point
+    initially_pinned_models = [m for m in all_db_models if m.pinned_to_sidebar]
+    log.info(f"Found {len(initially_pinned_models)} models initially marked as pinned in DB for user {user.id}.")
+    # Detailed log for initial pinned models (optional, can be verbose)
+    # for m in initially_pinned_models:
+    #     log.info(f"Initial Pinned - ID: {m.id}, Pinned: {m.pinned_to_sidebar}, Active: {m.is_active}, Meta: {m.meta.model_dump()}, Access: {m.access_control}")
 
-        # Check user access
-        if not has_access(user.id, "read", model.access_control):
-            continue
+    # Filter for active status
+    active_models = [m for m in initially_pinned_models if m.is_active]
+    log.info(f"Found {len(active_models)} active pinned models for user {user.id}.")
 
-        pinned_models.append(model)
+    # Filter for hidden status
+    visible_models = []
+    for m in active_models:
+        # Safely access model.meta which is a Pydantic model ModelMeta
+        hidden = False
+        if m.meta:
+            # model_dump() converts Pydantic model to dict for .get()
+            hidden = m.meta.model_dump().get("hidden", False)
 
-    return pinned_models
+        if not hidden:
+            visible_models.append(m)
+    log.info(f"Found {len(visible_models)} non-hidden, active, pinned models for user {user.id}.")
+
+    # Filter for permission
+    permitted_models_responses = []
+    for model_obj in visible_models: # model_obj is ModelModel instance
+        if has_access(user.id, "read", model_obj.access_control):
+            # Convert ModelModel to ModelResponse if necessary, though ModelResponse inherits from ModelModel
+            # Assuming ModelModel can be directly appended if it matches ModelResponse structure
+            permitted_models_responses.append(model_obj)
+
+    log.info(f"Found {len(permitted_models_responses)} permitted, non-hidden, active, pinned models for user {user.id}.")
+
+    # Log the final list of models being returned
+    returned_model_ids = [m.id for m in permitted_models_responses]
+    log.info(f"Returning {len(permitted_models_responses)} models to user {user.id}: {returned_model_ids}")
+
+    return permitted_models_responses
 
 
 ############################
