@@ -315,8 +315,8 @@
 				<div class=" my-2.5 text-sm font-medium">{$i18n.t('System Prompt')}</div>
 				<Textarea
 					bind:value={system}
-					className="w-full text-sm bg-white dark:text-gray-300 dark:bg-gray-900 outline-hidden resize-none"
-					rows="4"
+					className="w-full text-sm bg-white dark:text-gray-300 dark:bg-gray-850 dark:border dark:border-gray-700 outline-hidden"
+					rows="6"
 					placeholder={$i18n.t('Enter system prompt here')}
 				/>
 			</div>
