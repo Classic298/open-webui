@@ -274,6 +274,7 @@
 					enableResize={true}
 					rows="4"
 					placeholder={$i18n.t('Enter system prompt here')}
+					style="min-height: 6rem;"
 				/>
 			</div>
 
