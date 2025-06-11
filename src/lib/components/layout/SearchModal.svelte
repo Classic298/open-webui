@@ -36,45 +36,39 @@
 	let selectedIdx = 0;
 
 	const parseSearchQuery = (queryStr: string) => {
-		const queryParts = queryStr.trim().split(/\s+/);
+		const parts = queryStr.trim().split(' ');
 		const tags: string[] = [];
 		let before: string | null = null;
 		let after: string | null = null;
 		const textParts: string[] = [];
 
-		for (const part of queryParts) {
-			const firstColonIndex = part.indexOf(':');
-
-			if (firstColonIndex > 0) { // Key must exist before colon
-				const key = part.substring(0, firstColonIndex).toLowerCase();
-				const value = part.substring(firstColonIndex + 1).trim();
-
-				if (value) { // Only process if value is not empty after trim
-					switch (key) {
-						case 'tag':
-							tags.push(value);
-							break;
-						case 'before':
-							before = value;
-							break;
-						case 'after':
-							after = value;
-							break;
-						default:
-							// Not a recognized key, treat as text
-							textParts.push(part);
-							break;
-					}
-				} else {
-					// Key present but no value (e.g., "tag:"), treat as text part
-					textParts.push(part);
+		for (const part of parts) {
+			if (part.startsWith('tag:')) {
+				const tagValue = part.substring(4);
+				if (tagValue) {
+					tags.push(tagValue);
+				}
+			} else if (part.startsWith('before:')) {
+				const dateValue = part.substring(7);
+				if (dateValue) {
+					before = dateValue;
+				}
+			} else if (part.startsWith('after:')) {
+				const dateValue = part.substring(6);
+				if (dateValue) {
+					after = dateValue;
 				}
 			} else {
-				// No colon, or colon is the first character (e.g., ":value" or "text")
 				textParts.push(part);
 			}
 		}
-		return { text: textParts.join(' '), tags, before, after };
+
+		return {
+			text: textParts.join(' '),
+			tags,
+			before,
+			after
+		};
 	};
 
 	const searchHandler = async () => {
