@@ -259,7 +259,7 @@
 									dispatch('input');
 									await tick();
 									// Keep focus to allow user to type the date
-									const inputElement = document.querySelector('#chat-search input') as HTMLInputElement;
+									const inputElement = document.querySelector<HTMLInputElement>('#chat-search input');
 									inputElement?.focus();
 									// focused = true; // Re-ensure focused state if needed
 								}}
@@ -293,7 +293,7 @@
 									dispatch('input');
 									await tick();
 									// Ensure input remains focused to trigger next suggestions if applicable
-									const inputElement = document.querySelector('#chat-search input') as HTMLInputElement;
+									const inputElement = document.querySelector<HTMLInputElement>('#chat-search input');
 									inputElement?.focus();
 									focused = true;
 								}}
