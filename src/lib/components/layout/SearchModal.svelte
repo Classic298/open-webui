@@ -19,6 +19,13 @@
 	let query = '';
 	let page = 1;
 
+	let parsedQuery = {
+		text: '',
+		tags: [],
+		before: null,
+		after: null
+	};
+
 	let chatList = null;
 
 	let chatListLoading = false;
@@ -28,6 +35,27 @@
 
 	let selectedIdx = 0;
 
+	const parseSearchQuery = (queryStr: string) => {
+		const parts = queryStr.trim().split(/\s+/);
+		const tags = [];
+		let before = null;
+		let after = null;
+		const textParts = [];
+
+		for (const part of parts) {
+			if (part.startsWith('tag:')) {
+				tags.push(part.substring(4));
+			} else if (part.startsWith('before:')) {
+				before = part.substring(7);
+			} else if (part.startsWith('after:')) {
+				after = part.substring(6);
+			} else {
+				textParts.push(part);
+			}
+		}
+		return { text: textParts.join(' '), tags, before, after };
+	};
+
 	const searchHandler = async () => {
 		if (searchDebounceTimeout) {
 			clearTimeout(searchDebounceTimeout);
@@ -35,11 +63,13 @@
 
 		page = 1;
 		chatList = null;
-		if (query === '') {
+		parsedQuery = parseSearchQuery(query);
+
+		if (query.trim() === '') {
 			chatList = await getChatList(localStorage.token, page);
 		} else {
 			searchDebounceTimeout = setTimeout(async () => {
-				chatList = await getChatListBySearchText(localStorage.token, query, page);
+				chatList = await getChatListBySearchText(localStorage.token, parsedQuery, page);
 			}, 500);
 		}
 
@@ -55,9 +85,12 @@
 		page += 1;
 
 		let newChatList = [];
+		// parsedQuery should already be set by searchHandler or a previous loadMoreChats
+		// No need to parse again unless query string itself could change independently,
+		// but it's bound to SearchInput, which triggers searchHandler on input.
 
-		if (query) {
-			newChatList = await getChatListBySearchText(localStorage.token, query, page);
+		if (query.trim()) {
+			newChatList = await getChatListBySearchText(localStorage.token, parsedQuery, page);
 		} else {
 			newChatList = await getChatList(localStorage.token, page);
 		}
@@ -72,13 +105,14 @@
 		chatListLoading = false;
 	};
 
-	const init = () => {
-		searchHandler();
-	};
+	// Remove init and onMount, searchHandler is called on input
+	// const init = () => {
+	// 	searchHandler();
+	// };
 
-	onMount(() => {
-		init();
-	});
+	// onMount(() => {
+	// 	init();
+	// });
 </script>
 
 <Modal size="md" bind:show>
