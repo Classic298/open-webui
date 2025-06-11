@@ -36,23 +36,41 @@
 	let selectedIdx = 0;
 
 	const parseSearchQuery = (queryStr: string) => {
-		const parts = queryStr.trim().split(/\s+/);
-		const tags = [];
-		let before = null;
-		let after = null;
-		const textParts = [];
+		const queryParts = queryStr.trim().split(/\s+/);
+		const tags: string[] = [];
+		let before: string | null = null;
+		let after: string | null = null;
+		const textParts: string[] = [];
 
-		for (const part of parts) {
-			if (part.startsWith('tag:')) {
-				const value = part.substring(4).trim();
-				if (value) tags.push(value);
-			} else if (part.startsWith('before:')) {
-				const value = part.substring(7).trim();
-				if (value) before = value;
-			} else if (part.startsWith('after:')) {
-				const value = part.substring(6).trim();
-				if (value) after = value;
+		for (const part of queryParts) {
+			const firstColonIndex = part.indexOf(':');
+
+			if (firstColonIndex > 0) { // Key must exist before colon
+				const key = part.substring(0, firstColonIndex).toLowerCase();
+				const value = part.substring(firstColonIndex + 1).trim();
+
+				if (value) { // Only process if value is not empty after trim
+					switch (key) {
+						case 'tag':
+							tags.push(value);
+							break;
+						case 'before':
+							before = value;
+							break;
+						case 'after':
+							after = value;
+							break;
+						default:
+							// Not a recognized key, treat as text
+							textParts.push(part);
+							break;
+					}
+				} else {
+					// Key present but no value (e.g., "tag:"), treat as text part
+					textParts.push(part);
+				}
 			} else {
+				// No colon, or colon is the first character (e.g., ":value" or "text")
 				textParts.push(part);
 			}
 		}
