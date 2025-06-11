@@ -177,7 +177,7 @@ async def search_user_chats(
         ChatTitleIdResponse(**chat.model_dump())
         for chat in Chats.get_chats_by_user_id_and_search_text(
             user.id,
-            text=text,
+            search_text=text,
             tags=tags,
             before_date_str=before_date,
             after_date_str=after_date,
