@@ -44,11 +44,14 @@
 
 		for (const part of parts) {
 			if (part.startsWith('tag:')) {
-				tags.push(part.substring(4));
+				const value = part.substring(4).trim();
+				if (value) tags.push(value);
 			} else if (part.startsWith('before:')) {
-				before = part.substring(7);
+				const value = part.substring(7).trim();
+				if (value) before = value;
 			} else if (part.startsWith('after:')) {
-				after = part.substring(6);
+				const value = part.substring(6).trim();
+				if (value) after = value;
 			} else {
 				textParts.push(part);
 			}
