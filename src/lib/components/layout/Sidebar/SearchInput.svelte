@@ -260,7 +260,11 @@
 									await tick();
 									// Keep focus to allow user to type the date
 									const inputElement = document.querySelector<HTMLInputElement>('#chat-search input');
-									inputElement?.focus();
+									if (inputElement && inputElement instanceof HTMLInputElement && typeof inputElement.focus === 'function') {
+										inputElement.focus();
+									} else {
+										console.error('Chat search input not found or not focusable for date suggestion', inputElement);
+									}
 									// focused = true; // Re-ensure focused state if needed
 								}}
 							>
@@ -294,7 +298,11 @@
 									await tick();
 									// Ensure input remains focused to trigger next suggestions if applicable
 									const inputElement = document.querySelector<HTMLInputElement>('#chat-search input');
-									inputElement?.focus();
+									if (inputElement && inputElement instanceof HTMLInputElement && typeof inputElement.focus === 'function') {
+										inputElement.focus();
+									} else {
+										console.error('Chat search input not found or not focusable for option suggestion', inputElement);
+									}
 									focused = true;
 								}}
 							>
