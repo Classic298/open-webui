@@ -2,7 +2,6 @@ import json
 import logging
 from typing import Optional
 
-
 from open_webui.socket.main import get_event_emitter
 from open_webui.models.chats import (
     ChatForm,
@@ -18,6 +17,8 @@ from open_webui.config import ENABLE_ADMIN_CHAT_ACCESS, ENABLE_ADMIN_EXPORT
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import SRC_LOG_LEVELS
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+# Query was already removed from the line above by previous step if it was sole user.
+# If Query was shared, this confirms it's not needed for the reverted search_user_chats.
 from pydantic import BaseModel
 
 
@@ -164,7 +165,8 @@ async def search_user_chats(
     if page is None:
         page = 1
 
-    limit = 60
+    CHAT_PAGE_SIZE = 60  # Reinstating explicit constant/value if it was local
+    limit = CHAT_PAGE_SIZE
     skip = (page - 1) * limit
 
     chat_list = [
@@ -174,14 +176,15 @@ async def search_user_chats(
         )
     ]
 
-    # Delete tag if no chat is found
-    words = text.strip().split(" ")
-    if page == 1 and len(words) == 1 and words[0].startswith("tag:"):
-        tag_id = words[0].replace("tag:", "")
-        if len(chat_list) == 0:
-            if Tags.get_tag_by_name_and_user_id(tag_id, user.id):
-                log.debug(f"deleting tag: {tag_id}")
-                Tags.delete_tag_by_name_and_user_id(tag_id, user.id)
+    # Original tag deletion logic
+    if text: # Ensure text is not None before stripping (though type hint implies it won't be)
+        words = text.strip().split(" ")
+        if page == 1 and len(words) == 1 and words[0].startswith("tag:"):
+            tag_id = words[0].replace("tag:", "")
+            if len(chat_list) == 0:
+                if Tags.get_tag_by_name_and_user_id(tag_id, user.id):
+                    log.debug(f"deleting tag: {tag_id}")
+                    Tags.delete_tag_by_name_and_user_id(tag_id, user.id)
 
     return chat_list
 
