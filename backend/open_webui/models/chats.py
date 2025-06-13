@@ -611,6 +611,8 @@ class ChatTable:
 
             query = query.order_by(Chat.updated_at.desc())
 
+            final_query_params = {}
+
             # Check if the database dialect is either 'sqlite' or 'postgresql'
             dialect_name = db.bind.dialect.name
             if dialect_name == "sqlite":
@@ -627,9 +629,9 @@ class ChatTable:
                 """
                 sqlite_combined_clause = text(sqlite_combined_sql)
                 query = query.filter(sqlite_combined_clause)
-                query = query.params(search_key=search_text)
+                final_query_params['search_key'] = search_text
 
-                # Check if there are any tags to filter, it should have all the tags
+                # Tag filtering
                 if "none" in tag_ids:
                     query = query.filter(
                         text(
@@ -642,22 +644,15 @@ class ChatTable:
                         )
                     )
                 elif tag_ids:
-                    query = query.filter(
-                        and_(
-                            *[
-                                text(
-                                    f"""
-                                    EXISTS (
-                                        SELECT 1
-                                        FROM json_each(Chat.meta, '$.tags') AS tag
-                                        WHERE tag.value = :tag_id_{tag_idx}
-                                    )
-                                    """
-                                ).params(**{f"tag_id_{tag_idx}": tag_id})
-                                for tag_idx, tag_id in enumerate(tag_ids)
-                            ]
-                        )
-                    )
+                    tag_text_clauses = []
+                    for tag_idx, tag_id in enumerate(tag_ids):
+                        param_name = f"tag_id_{tag_idx}"
+                        sqlite_tag_sql = f"EXISTS (SELECT 1 FROM json_each(Chat.meta, '$.tags') AS tag WHERE tag.value = :{param_name})"
+                        tag_clause = text(sqlite_tag_sql)
+                        tag_text_clauses.append(tag_clause)
+                        final_query_params[param_name] = tag_id
+                    if tag_text_clauses:
+                        query = query.filter(and_(*tag_text_clauses))
 
             elif dialect_name == "postgresql":
                 # PostgreSQL relies on proper JSON query for search
@@ -673,9 +668,9 @@ class ChatTable:
                 """
                 postgres_combined_clause = text(postgres_combined_sql)
                 query = query.filter(postgres_combined_clause)
-                query = query.params(search_key=search_text)
+                final_query_params['search_key'] = search_text
 
-                # Check if there are any tags to filter, it should have all the tags
+                # Tag filtering
                 if "none" in tag_ids:
                     query = query.filter(
                         text(
@@ -688,26 +683,23 @@ class ChatTable:
                         )
                     )
                 elif tag_ids:
-                    query = query.filter(
-                        and_(
-                            *[
-                                text(
-                                    f"""
-                                    EXISTS (
-                                        SELECT 1
-                                        FROM json_array_elements_text(Chat.meta->'tags') AS tag
-                                        WHERE tag = :tag_id_{tag_idx}
-                                    )
-                                    """
-                                ).params(**{f"tag_id_{tag_idx}": tag_id})
-                                for tag_idx, tag_id in enumerate(tag_ids)
-                            ]
-                        )
-                    )
+                    tag_text_clauses = []
+                    for tag_idx, tag_id in enumerate(tag_ids):
+                        param_name = f"tag_id_{tag_idx}"
+                        pg_tag_sql = f"EXISTS (SELECT 1 FROM json_array_elements_text(Chat.meta->'tags') AS tag WHERE tag = :{param_name})"
+                        tag_clause = text(pg_tag_sql)
+                        tag_text_clauses.append(tag_clause)
+                        final_query_params[param_name] = tag_id
+                    if tag_text_clauses:
+                        query = query.filter(and_(*tag_text_clauses))
             else:
                 raise NotImplementedError(
                     f"Unsupported dialect: {db.bind.dialect.name}"
                 )
+
+            # Apply all collected parameters
+            if final_query_params:
+                query = query.params(**final_query_params)
 
             # Perform pagination at the SQL level
             all_chats = query.offset(skip).limit(limit).all()
