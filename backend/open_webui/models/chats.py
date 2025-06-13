@@ -615,11 +615,9 @@ class ChatTable:
             if dialect_name == "sqlite":
                 # SQLite case: using JSON1 extension for JSON searching
                 query = query.filter(
-                    (
-                        Chat.title.ilike(
-                            f"%{search_text}%"
-                        )  # Case-insensitive search in title
-                        | text(
+                    or_(
+                        Chat.title.ilike('%' || :search_text || '%'),  # Case-insensitive search in title
+                        text(
                             """
                             EXISTS (
                                 SELECT 1 
@@ -664,11 +662,9 @@ class ChatTable:
             elif dialect_name == "postgresql":
                 # PostgreSQL relies on proper JSON query for search
                 query = query.filter(
-                    (
-                        Chat.title.ilike(
-                            f"%{search_text}%"
-                        )  # Case-insensitive search in title
-                        | text(
+                    or_(
+                        Chat.title.ilike('%' || :search_text || '%'),  # Case-insensitive search in title
+                        text(
                             """
                             EXISTS (
                                 SELECT 1
