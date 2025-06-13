@@ -615,20 +615,18 @@ class ChatTable:
             dialect_name = db.bind.dialect.name
             if dialect_name == "sqlite":
                 # SQLite case: using JSON1 extension for JSON searching
-                sqlite_content_search_sql = """
+                sqlite_combined_sql = """
+                (
+                    LOWER(title) LIKE '%' || :search_key || '%' OR
                     EXISTS (
                         SELECT 1
                         FROM json_each(Chat.chat, '$.messages') AS message
-                        WHERE LOWER(REPLACE(message.value->>'content', '\u0000', '')) LIKE '%' || :final_content_param || '%'
+                        WHERE LOWER(REPLACE(message.value->>'content', '\u0000', '')) LIKE '%' || :search_key || '%'
                     )
-                """
-                sqlite_content_search_clause = text(sqlite_content_search_sql)
-                query = query.filter(
-                    or_(
-                        Chat.title.ilike(bindparam('final_title_param')),
-                        sqlite_content_search_clause
-                    ).params(final_title_param=f"%{search_text}%", final_content_param=search_text)
                 )
+                """
+                sqlite_combined_clause = text(sqlite_combined_sql)
+                query = query.filter(sqlite_combined_clause.params(search_key=search_text))
 
                 # Check if there are any tags to filter, it should have all the tags
                 if "none" in tag_ids:
@@ -662,20 +660,18 @@ class ChatTable:
 
             elif dialect_name == "postgresql":
                 # PostgreSQL relies on proper JSON query for search
-                postgres_content_search_sql = """
+                postgres_combined_sql = """
+                (
+                    LOWER(title) LIKE '%' || :search_key || '%' OR
                     EXISTS (
                         SELECT 1
                         FROM json_array_elements(Chat.chat->'messages') AS message
-                        WHERE LOWER(REPLACE(message->>'content', '\u0000', '')) LIKE '%' || :final_content_param || '%'
+                        WHERE LOWER(REPLACE(message->>'content', '\u0000', '')) LIKE '%' || :search_key || '%'
                     )
-                """
-                postgres_content_search_clause = text(postgres_content_search_sql)
-                query = query.filter(
-                    or_(
-                        Chat.title.ilike(bindparam('final_title_param')),
-                        postgres_content_search_clause
-                    ).params(final_title_param=f"%{search_text}%", final_content_param=search_text)
                 )
+                """
+                postgres_combined_clause = text(postgres_combined_sql)
+                query = query.filter(postgres_combined_clause.params(search_key=search_text))
 
                 # Check if there are any tags to filter, it should have all the tags
                 if "none" in tag_ids:
