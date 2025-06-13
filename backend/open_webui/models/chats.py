@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Boolean, Column, String, Text, JSON
 from sqlalchemy import or_, func, select, and_, text
 from sqlalchemy.sql import exists
+from sqlalchemy.sql.expression import bindparam
 
 ####################
 # Chat DB Schema
@@ -616,7 +617,7 @@ class ChatTable:
                 # SQLite case: using JSON1 extension for JSON searching
                 query = query.filter(
                     or_(
-                        Chat.title.ilike(:title_search_pattern),  # Case-insensitive search in title
+                        Chat.title.ilike(bindparam('title_search_pattern')),  # Case-insensitive search in title
                         text(
                             """
                             EXISTS (
@@ -663,7 +664,7 @@ class ChatTable:
                 # PostgreSQL relies on proper JSON query for search
                 query = query.filter(
                     or_(
-                        Chat.title.ilike(:title_search_pattern),  # Case-insensitive search in title
+                        Chat.title.ilike(bindparam('title_search_pattern')),  # Case-insensitive search in title
                         text(
                             """
                             EXISTS (
