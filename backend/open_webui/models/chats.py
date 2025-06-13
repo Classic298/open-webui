@@ -233,6 +233,10 @@ class ChatTable:
         if chat is None:
             return None
 
+        # Sanitize message content for null characters before upserting
+        if isinstance(message.get("content"), str):
+            message["content"] = message["content"].replace("\x00", "")
+
         chat = chat.chat
         history = chat.get("history", {})
 
@@ -615,7 +619,7 @@ class ChatTable:
             dialect_name = db.bind.dialect.name
             if dialect_name == "sqlite":
                 # SQLite case: using JSON1 extension for JSON searching
-                sqlite_content_sql = "EXISTS (SELECT 1 FROM json_each(Chat.chat, '$.messages') AS message WHERE LOWER(REPLACE(message.value->>'content', '\u0000', '')) LIKE '%' || :content_key || '%')"
+                sqlite_content_sql = "EXISTS (SELECT 1 FROM json_each(Chat.chat, '$.messages') AS message WHERE LOWER(message.value->>'content') LIKE '%' || :content_key || '%')"
                 sqlite_content_clause = text(sqlite_content_sql)
                 query = query.filter(
                     or_(
@@ -652,7 +656,7 @@ class ChatTable:
 
             elif dialect_name == "postgresql":
                 # PostgreSQL relies on proper JSON query for search
-                postgres_content_sql = "EXISTS (SELECT 1 FROM json_array_elements(Chat.chat->'messages') AS message WHERE LOWER(REPLACE(message->>'content', '\u0000', '')) LIKE '%' || :content_key || '%')"
+                postgres_content_sql = "EXISTS (SELECT 1 FROM json_array_elements(Chat.chat->'messages') AS message WHERE LOWER(message->>'content') LIKE '%' || :content_key || '%')"
                 postgres_content_clause = text(postgres_content_sql)
                 query = query.filter(
                     or_(
