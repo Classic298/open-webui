@@ -619,7 +619,13 @@ class ChatTable:
             dialect_name = db.bind.dialect.name
             if dialect_name == "sqlite":
                 # SQLite case: using JSON1 extension for JSON searching
-                sqlite_content_sql = "EXISTS (SELECT 1 FROM json_each(Chat.chat, '$.messages') AS message WHERE LOWER(message.value->>'content') LIKE '%' || :content_key || '%')"
+                sqlite_content_sql = (
+                    "EXISTS ("
+                    "    SELECT 1 "
+                    "    FROM json_each(Chat.chat, '$.messages') AS message "
+                    "    WHERE LOWER(message.value->>'content') LIKE '%' || :content_key || '%'"
+                    ")"
+                )
                 sqlite_content_clause = text(sqlite_content_sql)
                 query = query.filter(
                     or_(
@@ -641,8 +647,6 @@ class ChatTable:
                         )
                     )
                 elif tag_ids:
-                    # Assuming tag filtering parameter names (e.g., tag_id_0) are distinct
-                    # and this part was working with its own .params() or similar.
                     query = query.filter(
                         and_(
                             *[
@@ -656,7 +660,13 @@ class ChatTable:
 
             elif dialect_name == "postgresql":
                 # PostgreSQL relies on proper JSON query for search
-                postgres_content_sql = "EXISTS (SELECT 1 FROM json_array_elements(Chat.chat->'messages') AS message WHERE LOWER(message->>'content') LIKE '%' || :content_key || '%')"
+                postgres_content_sql = (
+                    "EXISTS ("
+                    "    SELECT 1 "
+                    "    FROM json_array_elements(Chat.chat->'messages') AS message "
+                    "    WHERE LOWER(message->>'content') LIKE '%' || :content_key || '%'"
+                    ")"
+                )
                 postgres_content_clause = text(postgres_content_sql)
                 query = query.filter(
                     or_(
@@ -678,8 +688,6 @@ class ChatTable:
                         )
                     )
                 elif tag_ids:
-                    # Assuming tag filtering parameter names (e.g., tag_id_0) are distinct
-                    # and this part was working with its own .params() or similar.
                     query = query.filter(
                         and_(
                             *[
