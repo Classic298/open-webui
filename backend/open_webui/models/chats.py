@@ -616,7 +616,7 @@ class ChatTable:
                 # SQLite case: using JSON1 extension for JSON searching
                 query = query.filter(
                     or_(
-                        Chat.title.ilike('%' || :search_text || '%'),  # Case-insensitive search in title
+                        Chat.title.ilike(:title_search_pattern),  # Case-insensitive search in title
                         text(
                             """
                             EXISTS (
@@ -626,7 +626,7 @@ class ChatTable:
                             )
                             """
                         )
-                    ).params(search_text=search_text)
+                    ).params(search_text=search_text, title_search_pattern=f"%{search_text}%")
                 )
 
                 # Check if there are any tags to filter, it should have all the tags
@@ -663,7 +663,7 @@ class ChatTable:
                 # PostgreSQL relies on proper JSON query for search
                 query = query.filter(
                     or_(
-                        Chat.title.ilike('%' || :search_text || '%'),  # Case-insensitive search in title
+                        Chat.title.ilike(:title_search_pattern),  # Case-insensitive search in title
                         text(
                             """
                             EXISTS (
@@ -673,7 +673,7 @@ class ChatTable:
                             )
                             """
                         )
-                    ).params(search_text=search_text)
+                    ).params(search_text=search_text, title_search_pattern=f"%{search_text}%")
                 )
 
                 # Check if there are any tags to filter, it should have all the tags
