@@ -619,15 +619,15 @@ class ChatTable:
                     EXISTS (
                         SELECT 1
                         FROM json_each(Chat.chat, '$.messages') AS message
-                        WHERE LOWER(REPLACE(message.value->>'content', '\u0000', '')) LIKE '%' || :csp || '%'
+                        WHERE LOWER(REPLACE(message.value->>'content', '\u0000', '')) LIKE '%' || :final_content_param || '%'
                     )
                 """
-                sqlite_content_search_clause = text(sqlite_content_search_sql).bindparams(bindparam('csp', type_=Text))
+                sqlite_content_search_clause = text(sqlite_content_search_sql)
                 query = query.filter(
                     or_(
-                        Chat.title.ilike(bindparam('tsp')),
+                        Chat.title.ilike(bindparam('final_title_param')),
                         sqlite_content_search_clause
-                    ).params(tsp=f"%{search_text}%", csp=search_text)
+                    ).params(final_title_param=f"%{search_text}%", final_content_param=search_text)
                 )
 
                 # Check if there are any tags to filter, it should have all the tags
@@ -666,15 +666,15 @@ class ChatTable:
                     EXISTS (
                         SELECT 1
                         FROM json_array_elements(Chat.chat->'messages') AS message
-                        WHERE LOWER(REPLACE(message->>'content', '\u0000', '')) LIKE '%' || :csp || '%'
+                        WHERE LOWER(REPLACE(message->>'content', '\u0000', '')) LIKE '%' || :final_content_param || '%'
                     )
                 """
-                postgres_content_search_clause = text(postgres_content_search_sql).bindparams(bindparam('csp', type_=Text))
+                postgres_content_search_clause = text(postgres_content_search_sql)
                 query = query.filter(
                     or_(
-                        Chat.title.ilike(bindparam('tsp')),
+                        Chat.title.ilike(bindparam('final_title_param')),
                         postgres_content_search_clause
-                    ).params(tsp=f"%{search_text}%", csp=search_text)
+                    ).params(final_title_param=f"%{search_text}%", final_content_param=search_text)
                 )
 
                 # Check if there are any tags to filter, it should have all the tags
