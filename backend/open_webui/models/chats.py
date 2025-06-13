@@ -626,7 +626,8 @@ class ChatTable:
                 )
                 """
                 sqlite_combined_clause = text(sqlite_combined_sql)
-                query = query.filter(sqlite_combined_clause.params(search_key=search_text))
+                query = query.filter(sqlite_combined_clause)
+                query = query.params(search_key=search_text)
 
                 # Check if there are any tags to filter, it should have all the tags
                 if "none" in tag_ids:
@@ -671,7 +672,8 @@ class ChatTable:
                 )
                 """
                 postgres_combined_clause = text(postgres_combined_sql)
-                query = query.filter(postgres_combined_clause.params(search_key=search_text))
+                query = query.filter(postgres_combined_clause)
+                query = query.params(search_key=search_text)
 
                 # Check if there are any tags to filter, it should have all the tags
                 if "none" in tag_ids:
