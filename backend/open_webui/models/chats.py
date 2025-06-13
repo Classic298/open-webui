@@ -623,11 +623,11 @@ class ChatTable:
                             EXISTS (
                                 SELECT 1 
                                 FROM json_each(Chat.chat, '$.messages') AS message 
-                                WHERE LOWER(REPLACE(message.value->>'content', '\u0000', '')) LIKE '%' || :search_text || '%'
+                                WHERE LOWER(REPLACE(message.value->>'content', '\u0000', '')) LIKE '%' || :content_search_pattern || '%'
                             )
                             """
                         )
-                    ).params(search_text=search_text, title_search_pattern=f"%{search_text}%")
+                    ).params(title_search_pattern=f"%{search_text}%", content_search_pattern=search_text)
                 )
 
                 # Check if there are any tags to filter, it should have all the tags
@@ -670,11 +670,11 @@ class ChatTable:
                             EXISTS (
                                 SELECT 1
                                 FROM json_array_elements(Chat.chat->'messages') AS message
-                                WHERE LOWER(REPLACE(message->>'content', '\u0000', '')) LIKE '%' || :search_text || '%'
+                                WHERE LOWER(REPLACE(message->>'content', '\u0000', '')) LIKE '%' || :content_search_pattern || '%'
                             )
                             """
                         )
-                    ).params(search_text=search_text, title_search_pattern=f"%{search_text}%")
+                    ).params(title_search_pattern=f"%{search_text}%", content_search_pattern=search_text)
                 )
 
                 # Check if there are any tags to filter, it should have all the tags
