@@ -580,7 +580,7 @@ class ChatTable:
         """
         Filters chats based on a search query using Python, allowing pagination using skip and limit.
         """
-        search_text = search_text.lower().strip()
+        search_text = search_text.replace("\u0000", "").lower().strip()
 
         if not search_text:
             return self.get_chat_list_by_user_id(
@@ -624,7 +624,7 @@ class ChatTable:
                             EXISTS (
                                 SELECT 1 
                                 FROM json_each(Chat.chat, '$.messages') AS message 
-                                WHERE LOWER(message.value->>'content') LIKE '%' || :search_text || '%'
+                                WHERE LOWER(REPLACE(message.value->>'content', '\u0000', '')) LIKE '%' || :search_text || '%'
                             )
                             """
                         )
@@ -673,7 +673,7 @@ class ChatTable:
                             EXISTS (
                                 SELECT 1
                                 FROM json_array_elements(Chat.chat->'messages') AS message
-                                WHERE LOWER(message->>'content') LIKE '%' || :search_text || '%'
+                                WHERE LOWER(REPLACE(message->>'content', '\u0000', '')) LIKE '%' || :search_text || '%'
                             )
                             """
                         )
