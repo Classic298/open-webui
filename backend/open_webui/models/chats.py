@@ -615,19 +615,19 @@ class ChatTable:
             dialect_name = db.bind.dialect.name
             if dialect_name == "sqlite":
                 # SQLite case: using JSON1 extension for JSON searching
+                sqlite_content_search_sql = """
+                    EXISTS (
+                        SELECT 1
+                        FROM json_each(Chat.chat, '$.messages') AS message
+                        WHERE LOWER(REPLACE(message.value->>'content', '\u0000', '')) LIKE '%' || :csp || '%'
+                    )
+                """
+                sqlite_content_search_clause = text(sqlite_content_search_sql).bindparams(bindparam('csp', type_=Text))
                 query = query.filter(
                     or_(
-                        Chat.title.ilike(bindparam('title_search_pattern')),  # Case-insensitive search in title
-                        text(
-                            """
-                            EXISTS (
-                                SELECT 1 
-                                FROM json_each(Chat.chat, '$.messages') AS message 
-                                WHERE LOWER(REPLACE(message.value->>'content', '\u0000', '')) LIKE '%' || :content_search_pattern || '%'
-                            )
-                            """
-                        )
-                    ).params(title_search_pattern=f"%{search_text}%", content_search_pattern=search_text)
+                        Chat.title.ilike(bindparam('tsp')),
+                        sqlite_content_search_clause
+                    ).params(tsp=f"%{search_text}%", csp=search_text)
                 )
 
                 # Check if there are any tags to filter, it should have all the tags
@@ -662,19 +662,19 @@ class ChatTable:
 
             elif dialect_name == "postgresql":
                 # PostgreSQL relies on proper JSON query for search
+                postgres_content_search_sql = """
+                    EXISTS (
+                        SELECT 1
+                        FROM json_array_elements(Chat.chat->'messages') AS message
+                        WHERE LOWER(REPLACE(message->>'content', '\u0000', '')) LIKE '%' || :csp || '%'
+                    )
+                """
+                postgres_content_search_clause = text(postgres_content_search_sql).bindparams(bindparam('csp', type_=Text))
                 query = query.filter(
                     or_(
-                        Chat.title.ilike(bindparam('title_search_pattern')),  # Case-insensitive search in title
-                        text(
-                            """
-                            EXISTS (
-                                SELECT 1
-                                FROM json_array_elements(Chat.chat->'messages') AS message
-                                WHERE LOWER(REPLACE(message->>'content', '\u0000', '')) LIKE '%' || :content_search_pattern || '%'
-                            )
-                            """
-                        )
-                    ).params(title_search_pattern=f"%{search_text}%", content_search_pattern=search_text)
+                        Chat.title.ilike(bindparam('tsp')),
+                        postgres_content_search_clause
+                    ).params(tsp=f"%{search_text}%", csp=search_text)
                 )
 
                 # Check if there are any tags to filter, it should have all the tags
