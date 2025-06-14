@@ -37,6 +37,7 @@
 			direct_tool_servers: false,
 			web_search: true,
 			image_generation: true,
+			video_generation: false, // Added video_generation permission
 			code_interpreter: true,
 			notes: true
 		}
@@ -176,6 +177,13 @@
 				{$i18n.t('Models Access')}
 			</div>
 			<Switch bind:state={permissions.workspace.models} />
+		</div>
+
+		<div class="  flex w-full justify-between my-2 pr-2">
+			<div class=" self-center text-xs font-medium">
+				{$i18n.t('Video Generation')}
+			</div>
+			<Switch bind:state={permissions.features.video_generation} />
 		</div>
 
 		<div class="  flex w-full justify-between my-2 pr-2">
@@ -372,6 +380,13 @@
 			</div>
 
 			<Switch bind:state={permissions.features.image_generation} />
+		</div>
+
+		<div class="  flex w-full justify-between my-2 pr-2">
+			<div class=" self-center text-xs font-medium">
+				{$i18n.t('Video Generation')}
+			</div>
+			<Switch bind:state={permissions.features.video_generation} />
 		</div>
 
 		<div class="  flex w-full justify-between my-2 pr-2">

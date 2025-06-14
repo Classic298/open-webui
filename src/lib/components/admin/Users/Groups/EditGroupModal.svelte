@@ -55,6 +55,7 @@
 			direct_tool_servers: false,
 			web_search: true,
 			image_generation: true,
+			video_generation: false, // Added video_generation permission
 			code_interpreter: true
 		}
 	};

@@ -7,6 +7,8 @@
 	import { updateUserById } from '$lib/apis/users';
 
 	import Modal from '$lib/components/common/Modal.svelte';
+	import Switch from '$lib/components/common/Switch.svelte'; // Import Switch
+	import Tooltip from '$lib/components/common/Tooltip.svelte'; // Import Tooltip for consistency
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
 
 	const i18n = getContext('i18n');
@@ -22,13 +24,54 @@
 		role: 'pending',
 		name: '',
 		email: '',
-		password: ''
+		password: '',
+		settings: {
+			// Ensure settings structure exists
+			permissions: {
+				features: {
+					video_generation: false // Default to false if not present
+				}
+			}
+		}
 	};
 
 	const submitHandler = async () => {
-		const res = await updateUserById(localStorage.token, selectedUser.id, _user).catch((error) => {
-			toast.error(`${error}`);
-		});
+		// Ensure all parts of _user are correctly structured before sending
+		const payload = {
+			role: _user.role,
+			name: _user.name,
+			email: _user.email,
+			profile_image_url: _user.profile_image_url,
+			...(typeof _user.password === 'string' && _user.password !== '' && { password: _user.password }),
+			settings: {
+				...(selectedUser.settings ?? {}), // Preserve other settings
+				permissions: {
+					...((selectedUser.settings?.permissions ?? {}).features // Preserve other feature permissions
+						? { features: { ...(selectedUser.settings.permissions.features ?? {}) } }
+						: { features: {} }), // Ensure features object exists
+					// Apply our specific changes
+					features: {
+						...(_user.settings?.permissions?.features ?? {}),
+						video_generation: _user.settings?.permissions?.features?.video_generation ?? false
+					}
+				}
+			}
+		};
+
+		// Clean up permissions if features is empty
+		if (Object.keys(payload.settings.permissions.features).length === 0) {
+			delete payload.settings.permissions.features;
+		}
+		if (Object.keys(payload.settings.permissions).length === 0) {
+			delete payload.settings.permissions;
+		}
+
+
+		const res = await updateUserById(localStorage.token, selectedUser.id, payload).catch(
+			(error) => {
+				toast.error(`${error}`);
+			}
+		);
 
 		if (res) {
 			dispatch('save');
@@ -38,8 +81,25 @@
 
 	onMount(() => {
 		if (selectedUser) {
-			_user = selectedUser;
+			_user = JSON.parse(JSON.stringify(selectedUser)); // Deep copy
 			_user.password = '';
+
+			// Ensure the path to video_generation permission exists
+			if (!_user.settings) {
+				_user.settings = {};
+			}
+			if (!_user.settings.permissions) {
+				_user.settings.permissions = {};
+			}
+			if (!_user.settings.permissions.features) {
+				_user.settings.permissions.features = {};
+			}
+			if (typeof _user.settings.permissions.features.video_generation !== 'boolean') {
+				// Initialize from global default or false if not found in selectedUser's specific settings
+				// This part might need refinement based on how global defaults are propagated to user settings upon creation
+				_user.settings.permissions.features.video_generation =
+					selectedUser.settings?.permissions?.features?.video_generation ?? false;
+			}
 		}
 	});
 </script>
@@ -157,6 +217,28 @@
 									/>
 								</div>
 							</div>
+
+							<!-- Video Generation Permission Toggle -->
+							<div class="border-t border-gray-200 dark:border-gray-700 pt-3 mt-3">
+								<div class="text-sm font-medium mb-2">{$i18n.t('Feature Permissions')}</div>
+								<div class="flex justify-between items-center py-1">
+									<div class="text-xs text-gray-600 dark:text-gray-400">
+										{$i18n.t('Enable Video Generation')}
+										<Tooltip
+											content={$i18n.t(
+												'Allow this user to access the video generation feature.'
+											)}
+										/>
+									</div>
+									<Switch
+										bind:state={_user.settings.permissions.features.video_generation}
+										on:change={() => {
+											// console.log('Video generation permission toggled:', _user.settings.permissions.features.video_generation);
+										}}
+									/>
+								</div>
+							</div>
+							<!-- End Video Generation Permission Toggle -->
 						</div>
 
 						<div class="flex justify-end pt-3 text-sm font-medium">

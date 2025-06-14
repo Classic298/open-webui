@@ -68,6 +68,7 @@ from open_webui.routers import (
     tasks,
     auths,
     channels,
+    videos,
     chats,
     notes,
     folders,
@@ -154,6 +155,12 @@ from open_webui.config import (
     IMAGES_OPENAI_API_KEY,
     IMAGES_GEMINI_API_BASE_URL,
     IMAGES_GEMINI_API_KEY,
+    # Video
+    ENABLE_VIDEO_GENERATION,
+    VIDEO_GENERATION_API_URL,
+    VIDEO_GENERATION_API_KEY,
+    VIDEO_GENERATION_DEFAULT_MODEL,
+    VIDEO_GENERATION_TIMEOUT,
     # Audio
     AUDIO_STT_ENGINE,
     AUDIO_STT_MODEL,
@@ -941,6 +948,17 @@ app.state.config.COMFYUI_WORKFLOW_NODES = COMFYUI_WORKFLOW_NODES
 app.state.config.IMAGE_SIZE = IMAGE_SIZE
 app.state.config.IMAGE_STEPS = IMAGE_STEPS
 
+########################################
+#
+# VIDEO
+#
+########################################
+
+app.state.config.ENABLE_VIDEO_GENERATION = ENABLE_VIDEO_GENERATION
+app.state.config.VIDEO_GENERATION_API_URL = VIDEO_GENERATION_API_URL
+app.state.config.VIDEO_GENERATION_API_KEY = VIDEO_GENERATION_API_KEY
+app.state.config.VIDEO_GENERATION_DEFAULT_MODEL = VIDEO_GENERATION_DEFAULT_MODEL
+app.state.config.VIDEO_GENERATION_TIMEOUT = VIDEO_GENERATION_TIMEOUT
 
 ########################################
 #
@@ -1116,6 +1134,9 @@ app.include_router(openai.router, prefix="/openai", tags=["openai"])
 app.include_router(pipelines.router, prefix="/api/v1/pipelines", tags=["pipelines"])
 app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["tasks"])
 app.include_router(images.router, prefix="/api/v1/images", tags=["images"])
+
+if app.state.config.ENABLE_VIDEO_GENERATION:
+    app.include_router(videos.router, prefix="/api/v1/videos", tags=["videos"])
 
 app.include_router(audio.router, prefix="/api/v1/audio", tags=["audio"])
 app.include_router(retrieval.router, prefix="/api/v1/retrieval", tags=["retrieval"])

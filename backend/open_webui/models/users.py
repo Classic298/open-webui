@@ -40,6 +40,8 @@ class User(Base):
 
 class UserSettings(BaseModel):
     ui: Optional[dict] = {}
+    permissions: Optional[dict] = {} # Standardized place for permissions
+    video_generation: Optional[bool] = None # Explicit field for video_generation
     model_config = ConfigDict(extra="allow")
     pass
 

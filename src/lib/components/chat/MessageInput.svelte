@@ -173,6 +173,12 @@
 		$config?.features?.enable_image_generation &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.image_generation);
 
+	let showVideoGenerationButton = false;
+	$: showVideoGenerationButton =
+		$config?.features?.enable_video_generation &&
+		($_user.role === 'admin' || $_user?.permissions?.features?.video_generation);
+	// TODO: Add videoGenerationCapableModels check if model-specific capability is planned
+
 	let showCodeInterpreterButton = false;
 	$: showCodeInterpreterButton =
 		(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length ===
@@ -1329,6 +1335,31 @@
 															<span
 																class="hidden @xl:block whitespace-nowrap overflow-hidden text-ellipsis leading-none pr-0.5"
 																>{$i18n.t('Image')}</span
+															>
+														</button>
+													</Tooltip>
+												{/if}
+
+												{#if showVideoGenerationButton}
+													<Tooltip content={$i18n.t('Generate a video')} placement="top">
+														<button
+															on:click|preventDefault={() => {
+																// Placeholder action
+																toast.info('Video generation clicked. Modal/workflow to be implemented.');
+																// Example: videoGenerationEnabled = !videoGenerationEnabled; (if a similar toggle state is needed)
+															}}
+															type="button"
+															class="px-2 @xl:px-2.5 py-2 flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden hover:bg-gray-50 dark:hover:bg-gray-800 {'bg-transparent text-gray-600 dark:text-gray-300 '}"
+															<!-- TODO: Add active class if video generation is toggled/active -->
+														>
+															<!-- Placeholder Icon (Film Icon from Heroicons) -->
+															<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4">
+																<path d="M3.25 4A2.25 2.25 0 0 0 1 6.25v7.5A2.25 2.25 0 0 0 3.25 16h7.5A2.25 2.25 0 0 0 13 13.75v-7.5A2.25 2.25 0 0 0 10.75 4h-7.5ZM2.5 6.25c0-.414.336-.75.75-.75h7.5c.414 0 .75.336.75.75v7.5c0 .414-.336.75-.75.75h-7.5a.75.75 0 0 1-.75-.75v-7.5Z" />
+																<path d="M15.25 5.5A.75.75 0 0 0 14.5 4.75h-1.5a.75.75 0 0 0 0 1.5h1.5a.75.75 0 0 0 .75-.75Zm.75 2.5a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5a.75.75 0 0 1 .75.75Zm-.75 3.25a.75.75 0 0 0-.75-.75h-1.5a.75.75 0 0 0 0 1.5h1.5a.75.75 0 0 0 .75-.75Zm.75 2.5a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5a.75.75 0 0 1 .75.75Z" />
+															</svg>
+															<span
+																class="hidden @xl:block whitespace-nowrap overflow-hidden text-ellipsis leading-none pr-0.5"
+																>{$i18n.t('Video')}</span
 															>
 														</button>
 													</Tooltip>

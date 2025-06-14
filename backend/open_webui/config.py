@@ -1137,6 +1137,11 @@ USER_PERMISSIONS_FEATURES_IMAGE_GENERATION = (
     == "true"
 )
 
+USER_PERMISSIONS_FEATURES_VIDEO_GENERATION = ( # New permission variable
+    os.environ.get("USER_PERMISSIONS_FEATURES_VIDEO_GENERATION", "False").lower() # Default to False
+    == "true"
+)
+
 USER_PERMISSIONS_FEATURES_CODE_INTERPRETER = (
     os.environ.get("USER_PERMISSIONS_FEATURES_CODE_INTERPRETER", "True").lower()
     == "true"
@@ -1178,6 +1183,7 @@ DEFAULT_USER_PERMISSIONS = {
         "direct_tool_servers": USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS,
         "web_search": USER_PERMISSIONS_FEATURES_WEB_SEARCH,
         "image_generation": USER_PERMISSIONS_FEATURES_IMAGE_GENERATION,
+        "video_generation": USER_PERMISSIONS_FEATURES_VIDEO_GENERATION, # Add to default permissions
         "code_interpreter": USER_PERMISSIONS_FEATURES_CODE_INTERPRETER,
         "notes": USER_PERMISSIONS_FEATURES_NOTES,
     },
@@ -2842,6 +2848,40 @@ IMAGE_GENERATION_MODEL = PersistentConfig(
     "IMAGE_GENERATION_MODEL",
     "image_generation.model",
     os.getenv("IMAGE_GENERATION_MODEL", ""),
+)
+
+####################################
+# Video Generation
+####################################
+
+ENABLE_VIDEO_GENERATION = PersistentConfig(
+    "ENABLE_VIDEO_GENERATION",
+    "video_generation.enable",
+    os.environ.get("ENABLE_VIDEO_GENERATION", "False").lower() == "true",
+)
+
+VIDEO_GENERATION_API_URL = PersistentConfig(
+    "VIDEO_GENERATION_API_URL",
+    "video_generation.api_url",
+    os.environ.get("VIDEO_GENERATION_API_URL", ""),
+)
+
+VIDEO_GENERATION_API_KEY = PersistentConfig(
+    "VIDEO_GENERATION_API_KEY",
+    "video_generation.api_key",
+    os.environ.get("VIDEO_GENERATION_API_KEY", ""),
+)
+
+VIDEO_GENERATION_DEFAULT_MODEL = PersistentConfig(
+    "VIDEO_GENERATION_DEFAULT_MODEL",
+    "video_generation.default_model",
+    os.environ.get("VIDEO_GENERATION_DEFAULT_MODEL", ""),
+)
+
+VIDEO_GENERATION_TIMEOUT = PersistentConfig(
+    "VIDEO_GENERATION_TIMEOUT",
+    "video_generation.timeout",
+    int(os.environ.get("VIDEO_GENERATION_TIMEOUT", "120")),  # Default to 120 seconds
 )
 
 ####################################
