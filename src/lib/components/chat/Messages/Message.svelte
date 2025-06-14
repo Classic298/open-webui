@@ -86,6 +86,7 @@
 				{regenerateResponse}
 				{addMessages}
 				{readOnly}
+				on:ignoreError
 			/>
 		{:else}
 			<MultiResponseMessages
@@ -106,6 +107,7 @@
 				{triggerScroll}
 				{addMessages}
 				{readOnly}
+				on:ignoreError
 			/>
 		{/if}
 	{/if}

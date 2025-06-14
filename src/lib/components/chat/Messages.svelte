@@ -453,6 +453,7 @@
 							{addMessages}
 							{triggerScroll}
 							{readOnly}
+							on:ignoreError={(event) => dispatch('ignoreError', event.detail)}
 						/>
 					{/each}
 				</div>
