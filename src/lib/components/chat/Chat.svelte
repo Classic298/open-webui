@@ -2116,6 +2116,19 @@
 												history.currentId = userMsgId;
 												console.log('Chat.svelte: Set history.currentId to userMsgId:', history.currentId);
 
+												// Reset taskIds to enable input and hide stop button
+												taskIds = null;
+												console.log('Chat.svelte: Cleared taskIds after ignoring error.');
+
+												// Ensure the parent user message is marked as done and has no error
+												if (userMsg) {
+													userMsg.done = true;
+													if (userMsg.error) {
+														delete userMsg.error;
+														console.log('Chat.svelte: Removed error property from parent user message.');
+													}
+												}
+
 												await saveChatHandler($chatId, history);
 												console.log('Chat.svelte: Called saveChatHandler.');
 												console.log('Chat.svelte: Calling tick() for UI update.');
