@@ -225,7 +225,7 @@
 					<div
 						class=" snap-center w-full max-w-full m-1 border {history.messages[messageId]
 							?.modelIdx == modelIdx
-							? `border-gray-300 dark:border-gray-600 border-2 bg-gray-100 dark:bg-gray-700 ${
+							? `border-gray-300 dark:border-gray-700 border-2 ${
 									$mobile ? 'min-w-full' : 'min-w-80'
 								}`
 							: `border-gray-100 dark:border-gray-850 border-dashed ${
