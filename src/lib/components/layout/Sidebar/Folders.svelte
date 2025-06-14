@@ -1,9 +1,16 @@
 <script lang="ts">
-	import { createEventDispatcher } from 'svelte';
+	import { createEventDispatcher, getContext } from 'svelte';
+	import { folders as foldersStore } from '$lib/stores';
+	import { toast } from 'svelte-sonner';
+
+	import RecursiveFolder from './RecursiveFolder.svelte';
+	import EditFolderModal from './Folders/EditFolderModal.svelte';
+	import { updateFolderById } from '$lib/apis/folders';
 
 	const dispatch = createEventDispatcher();
-	import RecursiveFolder from './RecursiveFolder.svelte';
-	export let folders = {};
+	const i18n = getContext('i18n');
+
+	export let folders = {}; // This seems to be locally derived data, not the store directly?
 
 	let folderList = [];
 	// Get the list of folders that have no parent, sorted by name alphabetically
@@ -15,7 +22,69 @@
 				sensitivity: 'base'
 			})
 		);
+
+	let showEditFolderModal = false;
+	let currentEditingFolder = null;
+
+	const handleEditFolderEvent = (event) => {
+		const folderToEdit = event.detail;
+		if (folderToEdit && folderToEdit.id) {
+			currentEditingFolder = { ...folderToEdit }; // Ensure we have a copy with all necessary fields
+			showEditFolderModal = true;
+		} else {
+			console.error('EditFolder event did not provide valid folder data:', event.detail);
+			toast.error($i18n.t('Failed to open edit dialog: Invalid folder data.'));
+		}
+	};
+
+	const handleSaveFolderEdit = async (event) => {
+		const { id, name, system_prompt, emoji } = event.detail;
+
+		try {
+			const updatedFolder = await updateFolderById(localStorage.token, id, {
+				name,
+				system_prompt,
+				emoji
+			});
+
+			if (updatedFolder && updatedFolder.id) {
+				foldersStore.update((currentFolders) => {
+					return currentFolders.map((f) => {
+						if (f.id === updatedFolder.id) {
+							return { ...f, ...updatedFolder };
+						}
+						return f;
+					});
+				});
+				toast.success($i18n.t('Folder updated successfully'));
+				showEditFolderModal = false;
+				currentEditingFolder = null;
+				dispatch('update', updatedFolder); // Notify parent about the update
+			} else {
+				// This case might indicate a backend validation error not caught by HTTP status (e.g. name conflict if not 400)
+				// Or if updateFolderById returns null on specific failures not throwing an error.
+				const errorDetail = updatedFolder?.detail || $i18n.t('Unknown error');
+				toast.error(`${$i18n.t('Failed to update folder')}: ${errorDetail}`);
+			}
+		} catch (error) {
+			console.error('Failed to update folder:', error);
+			const errorDetail = error?.detail || error?.message || $i18n.t('Unknown error');
+			toast.error(`${$i18n.t('Failed to update folder')}: ${errorDetail}`);
+		}
+	};
 </script>
+
+{#if showEditFolderModal && currentEditingFolder}
+	<EditFolderModal
+		bind:show={showEditFolderModal}
+		folder={currentEditingFolder}
+		on:saveFolder={handleSaveFolderEdit}
+		on:close={() => {
+			showEditFolderModal = false;
+			currentEditingFolder = null;
+		}}
+	/>
+{/if}
 
 {#each folderList as folderId (folderId)}
 	<RecursiveFolder
@@ -26,10 +95,13 @@
 			dispatch('import', e.detail);
 		}}
 		on:update={(e) => {
+			// This existing update event might be for drag/drop or other updates.
+			// We also dispatch 'update' after successful save in handleSaveFolderEdit.
 			dispatch('update', e.detail);
 		}}
 		on:change={(e) => {
 			dispatch('change', e.detail);
 		}}
+		on:editFolder={handleEditFolderEvent}
 	/>
 {/each}

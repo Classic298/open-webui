@@ -4,15 +4,11 @@ import shutil
 import uuid
 from pathlib import Path
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 import mimetypes
 
 
-from open_webui.models.folders import (
-    FolderForm,
-    FolderModel,
-    Folders,
-)
+from open_webui.models.folders import FolderModel, Folders
 from open_webui.models.chats import Chats
 
 from open_webui.config import UPLOAD_DIR
@@ -33,6 +29,13 @@ log.setLevel(SRC_LOG_LEVELS["MODELS"])
 
 
 router = APIRouter()
+
+
+class FolderForm(BaseModel):
+    name: str
+    system_prompt: Optional[str] = None
+    emoji: Optional[str] = None
+    model_config = ConfigDict(extra="allow")
 
 
 ############################
@@ -117,21 +120,28 @@ async def update_folder_name_by_id(
 ):
     folder = Folders.get_folder_by_id_and_user_id(id, user.id)
     if folder:
-        existing_folder = Folders.get_folder_by_parent_id_and_user_id_and_name(
-            folder.parent_id, user.id, form_data.name
-        )
-        if existing_folder:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.DEFAULT("Folder already exists"),
-            )
-
+        # The unique name check (for the same parent_id) should be handled by
+        # Folders.update_folder_details_by_id_and_user_id as per its specification.
+        # If it returns None, it means there was a conflict or another error.
         try:
-            folder = Folders.update_folder_name_by_id_and_user_id(
-                id, user.id, form_data.name
+            updated_folder = Folders.update_folder_details_by_id_and_user_id(
+                id=id,
+                user_id=user.id,
+                name=form_data.name,
+                system_prompt=form_data.system_prompt,
+                emoji=form_data.emoji,
             )
 
-            return folder
+            if updated_folder:
+                return updated_folder
+            else:
+                # This could be due to name conflict or other validation error in the model method
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=ERROR_MESSAGES.DEFAULT(
+                        "Could not update folder. It might be due to a name conflict or invalid data."
+                    ),
+                )
         except Exception as e:
             log.exception(e)
             log.error(f"Error updating folder: {id}")
