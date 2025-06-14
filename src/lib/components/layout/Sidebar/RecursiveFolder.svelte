@@ -18,7 +18,7 @@
 	import {
 		deleteFolderById,
 		updateFolderIsExpandedById,
-		updateFolderNameById,
+		// updateFolderNameById, // Removed as per instructions
 		updateFolderParentIdById
 	} from '$lib/apis/folders';
 	import { toast } from 'svelte-sonner';
@@ -43,12 +43,11 @@
 
 	let folderElement;
 
-	let edit = false;
-
 	let draggedOver = false;
 	let dragged = false;
 
-	let name = '';
+	// let name = ''; // Removed
+	// let edit = false; // Removed
 
 	const onDragOver = (e) => {
 		e.preventDefault();
@@ -216,12 +215,12 @@
 			folderElement.addEventListener('dragend', onDragEnd);
 		}
 
-		if (folders[folderId]?.new) {
-			delete folders[folderId].new;
-
-			await tick();
-			editHandler();
-		}
+		// Removed editHandler logic from onMount
+		// if (folders[folderId]?.new) {
+		// 	delete folders[folderId].new;
+		//	await tick();
+		//	editHandler();
+		// }
 	});
 
 	onDestroy(() => {
@@ -250,35 +249,7 @@
 		}
 	};
 
-	const nameUpdateHandler = async () => {
-		if (name === '') {
-			toast.error($i18n.t('Folder name cannot be empty.'));
-			return;
-		}
-
-		if (name === folders[folderId].name) {
-			edit = false;
-			return;
-		}
-
-		const currentName = folders[folderId].name;
-
-		name = name.trim();
-		folders[folderId].name = name;
-
-		const res = await updateFolderNameById(localStorage.token, folderId, name).catch((error) => {
-			toast.error(`${error}`);
-
-			folders[folderId].name = currentName;
-			return null;
-		});
-
-		if (res) {
-			folders[folderId].name = name;
-			toast.success($i18n.t('Folder name updated successfully'));
-			dispatch('update');
-		}
-	};
+	// const nameUpdateHandler = async () => { ... }; // Removed entire function
 
 	const isExpandedUpdateHandler = async () => {
 		const res = await updateFolderIsExpandedById(localStorage.token, folderId, open).catch(
@@ -300,20 +271,7 @@
 
 	$: isExpandedUpdateDebounceHandler(open);
 
-	const editHandler = async () => {
-		console.log('Edit');
-		await tick();
-		name = folders[folderId].name;
-
-		edit = true;
-		await tick();
-
-		const input = document.getElementById(`folder-${folderId}-input`);
-
-		if (input) {
-			input.focus();
-		}
-	};
+	// const editHandler = async () => { ... }; // Removed entire function
 
 	const exportHandler = async () => {
 		const chats = await getChatsByFolderId(localStorage.token, folderId).catch((error) => {
@@ -383,9 +341,6 @@
 			<button
 				id="folder-{folderId}-button"
 				class="relative w-full py-1.5 px-2 rounded-md flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-500 font-medium hover:bg-gray-100 dark:hover:bg-gray-900 transition"
-				on:dblclick={() => {
-					editHandler();
-				}}
 			>
 				<div class="text-gray-300 dark:text-gray-600">
 					{#if open}
@@ -396,37 +351,7 @@
 				</div>
 
 				<div class="translate-y-[0.5px] flex-1 justify-start text-start line-clamp-1">
-					{#if edit}
-						<input
-							id="folder-{folderId}-input"
-							type="text"
-							bind:value={name}
-							on:focus={(e) => {
-								e.target.select();
-							}}
-							on:blur={() => {
-								nameUpdateHandler();
-								edit = false;
-							}}
-							on:click={(e) => {
-								// Prevent accidental collapse toggling when clicking inside input
-								e.stopPropagation();
-							}}
-							on:mousedown={(e) => {
-								// Prevent accidental collapse toggling when clicking inside input
-								e.stopPropagation();
-							}}
-							on:keydown={(e) => {
-								if (e.key === 'Enter') {
-									nameUpdateHandler();
-									edit = false;
-								}
-							}}
-							class="w-full h-full bg-transparent text-gray-500 dark:text-gray-500 outline-hidden"
-						/>
-					{:else}
-						{folders[folderId].name}
-					{/if}
+					{folders[folderId].name}
 				</div>
 
 				<button
@@ -436,11 +361,8 @@
 					}}
 				>
 					<FolderMenu
-						on:rename={() => {
-							// Requires a timeout to prevent the click event from closing the dropdown
-							setTimeout(() => {
-								editHandler();
-							}, 200);
+						on:editFolder={() => {
+							dispatch('editFolder', folders[folderId]);
 						}}
 						on:delete={() => {
 							showDeleteConfirm = true;
