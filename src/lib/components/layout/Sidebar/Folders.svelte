@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createEventDispatcher, getContext } from 'svelte';
-	import { folders as foldersStore } from '$lib/stores';
+	// import { folders as foldersStore } from '$lib/stores'; // Removed incorrect import
 	import { toast } from 'svelte-sonner';
 
 	import RecursiveFolder from './RecursiveFolder.svelte';
@@ -48,14 +48,15 @@
 			});
 
 			if (updatedFolder && updatedFolder.id) {
-				foldersStore.update((currentFolders) => {
-					return currentFolders.map((f) => {
-						if (f.id === updatedFolder.id) {
-							return { ...f, ...updatedFolder };
-						}
-						return f;
-					});
-				});
+				// The local 'folders' prop (which is an object) should not be directly mutated here
+				// for collection-wide updates. Instead, rely on the parent component that owns
+				// the 'folders' object to update it based on the 'update' event.
+				// The 'dispatch' call below handles notifying the parent.
+				// If 'folders' were an array passed as a prop, one might do:
+				// folders = folders.map(f => f.id === updatedFolder.id ? {...f, ...updatedFolder} : f);
+				// But since 'folders' is an object (dictionary-like), and its structure is managed
+				// by the parent, dispatching the event is the cleaner way.
+
 				toast.success($i18n.t('Folder updated successfully'));
 				showEditFolderModal = false;
 				currentEditingFolder = null;
