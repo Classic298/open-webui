@@ -1332,8 +1332,12 @@
 
 	const submitPrompt = async (userPrompt, { _raw = false } = {}) => {
 		console.log('submitPrompt', userPrompt, $chatId);
+		console.log('Current history.currentId before creating messages list:', history.currentId);
 
 		const messages = createMessagesList(history, history.currentId);
+		if (messages.length > 0) {
+			console.log('Last message in list for submitPrompt:', messages.at(-1).role, messages.at(-1).id);
+		}
 		const _selectedModels = selectedModels.map((modelId) =>
 			$models.map((m) => m.id).includes(modelId) ? modelId : ''
 		);
@@ -2083,6 +2087,29 @@
 										{mergeResponses}
 										{chatActionHandler}
 										{addMessages}
+										on:ignoreError={async (e) => {
+											const errorMsgId = e.detail;
+											const errorMsg = history.messages[errorMsgId];
+
+											if (errorMsg) {
+												const userMsgId = errorMsg.parentId;
+
+												if (userMsgId && history.messages[userMsgId]) {
+													history.messages[userMsgId].childrenIds = history.messages[
+														userMsgId
+													].childrenIds.filter((id) => id !== errorMsgId);
+
+													delete history.messages[errorMsgId];
+													history.currentId = userMsgId;
+
+													await saveChatHandler($chatId, history);
+													await tick();
+													console.log(
+														`Ignored error message ${errorMsgId} and set currentId to ${userMsgId}`
+													);
+												}
+											}
+										}}
 										bottomPadding={files.length > 0}
 									/>
 								</div>
