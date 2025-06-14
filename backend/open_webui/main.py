@@ -447,6 +447,9 @@ from open_webui.tasks import (
 
 from open_webui.utils.redis import get_sentinels_from_env
 
+# Import the original list
+from open_webui.config import CORS_ALLOW_ORIGIN as IMPORTED_CORS_ALLOW_ORIGIN
+
 
 if SAFE_MODE:
     print("SAFE MODE ENABLED")
@@ -1097,9 +1100,28 @@ async def inspect_websocket(request: Request, call_next):
     return await call_next(request)
 
 
+# Prepare effective CORS origins
+final_cors_origins = []
+if IMPORTED_CORS_ALLOW_ORIGIN == ["*"]:
+    final_cors_origins = ["*"]
+else:
+    # Ensure all original non-empty origins are included
+    final_cors_origins = [origin for origin in IMPORTED_CORS_ALLOW_ORIGIN if origin]
+
+    dev_origin = "http://localhost:5173"
+    if dev_origin not in final_cors_origins:
+        final_cors_origins.append(dev_origin)
+
+    # If the list ended up empty and it wasn't originally ["*"],
+    # it might mean CORS_ALLOW_ORIGIN was an empty string or just ";".
+    # In such a case, defaulting to allowing the dev_origin seems reasonable.
+    if not final_cors_origins:
+        final_cors_origins = [dev_origin]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ALLOW_ORIGIN,
+    allow_origins=final_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

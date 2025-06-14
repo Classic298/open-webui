@@ -67,10 +67,30 @@ except Exception:
 ####################################
 
 GLOBAL_LOG_LEVEL = os.environ.get("GLOBAL_LOG_LEVEL", "").upper()
-if GLOBAL_LOG_LEVEL in logging.getLevelNamesMapping():
-    logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL, force=True)
-else:
+
+# Compatibility for Python < 3.11 for logging.getLevelNamesMapping()
+if hasattr(logging, 'getLevelNamesMapping'):
+    # Python 3.11+
+    if GLOBAL_LOG_LEVEL not in logging.getLevelNamesMapping():
+        logging.warning(
+            f"Invalid GLOBAL_LOG_LEVEL: {GLOBAL_LOG_LEVEL}. Defaulting to INFO."
+        )
+        GLOBAL_LOG_LEVEL = "INFO"
+elif GLOBAL_LOG_LEVEL not in logging._nameToLevel:
+    # Python 3.10 and older
+    logging.warning(
+        f"Invalid GLOBAL_LOG_LEVEL: {GLOBAL_LOG_LEVEL}. Defaulting to INFO."
+    )
     GLOBAL_LOG_LEVEL = "INFO"
+
+# If GLOBAL_LOG_LEVEL was empty string and became "INFO", or was valid from start
+if not GLOBAL_LOG_LEVEL: # handles case where it was empty and not caught by above
+    GLOBAL_LOG_LEVEL = "INFO"
+    logging.warning(
+        f"Empty GLOBAL_LOG_LEVEL. Defaulting to INFO."
+    )
+
+logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL, force=True)
 
 log = logging.getLogger(__name__)
 log.info(f"GLOBAL_LOG_LEVEL: {GLOBAL_LOG_LEVEL}")
@@ -99,9 +119,26 @@ SRC_LOG_LEVELS = {}
 
 for source in log_sources:
     log_env_var = source + "_LOG_LEVEL"
-    SRC_LOG_LEVELS[source] = os.environ.get(log_env_var, "").upper()
-    if SRC_LOG_LEVELS[source] not in logging.getLevelNamesMapping():
+    level_val = os.environ.get(log_env_var, "").upper()
+
+    valid_level = False
+    if hasattr(logging, 'getLevelNamesMapping'):
+        # Python 3.11+
+        if level_val in logging.getLevelNamesMapping():
+            valid_level = True
+    elif level_val in logging._nameToLevel:
+        # Python 3.10 and older
+        valid_level = True
+
+    if valid_level and level_val:
+        SRC_LOG_LEVELS[source] = level_val
+    else:
         SRC_LOG_LEVELS[source] = GLOBAL_LOG_LEVEL
+        if level_val: # Log only if there was an attempt to set an invalid level
+             log.warning(
+                f"Invalid {log_env_var}: {level_val}. Defaulting to GLOBAL_LOG_LEVEL: {GLOBAL_LOG_LEVEL}."
+            )
+
     log.info(f"{log_env_var}: {SRC_LOG_LEVELS[source]}")
 
 log.setLevel(SRC_LOG_LEVELS["CONFIG"])

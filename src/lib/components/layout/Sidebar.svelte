@@ -81,10 +81,14 @@
 	let newFolderId = null;
 
 	const initFolders = async () => {
-		const folderList = await getFolders(localStorage.token).catch((error) => {
-			toast.error(`${error}`);
-			return [];
+		const rawFolderList = await getFolders(localStorage.token).catch((error) => {
+			console.error("Error fetching folders:", error);
+			toast.error($i18n.t('Could not load folders.'));
+			return null; // Return null on error to be explicitly checked
 		});
+
+		// Ensure folderList is always an array before iteration
+		const folderList = (rawFolderList && Array.isArray(rawFolderList)) ? rawFolderList : [];
 
 		folders = {};
 
