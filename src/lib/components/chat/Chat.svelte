@@ -2087,27 +2087,44 @@
 										{mergeResponses}
 										{chatActionHandler}
 										{addMessages}
-										on:ignoreError={async (e) => {
-											const errorMsgId = e.detail;
+										on:ignoreError={async (event) => {
+											console.log('Chat.svelte: ignoreError event received, errorMsgId:', event.detail);
+											const errorMsgId = event.detail;
 											const errorMsg = history.messages[errorMsgId];
+											console.log('Chat.svelte: Error message object:', JSON.parse(JSON.stringify(errorMsg)));
 
 											if (errorMsg) {
-												const userMsgId = errorMsg.parentId;
-
-												if (userMsgId && history.messages[userMsgId]) {
-													history.messages[userMsgId].childrenIds = history.messages[
-														userMsgId
-													].childrenIds.filter((id) => id !== errorMsgId);
-
-													delete history.messages[errorMsgId];
-													history.currentId = userMsgId;
-
-													await saveChatHandler($chatId, history);
-													await tick();
-													console.log(
-														`Ignored error message ${errorMsgId} and set currentId to ${userMsgId}`
-													);
+												const userMsgId = errorMsg?.parentId;
+												console.log('Chat.svelte: Parent userMsgId:', userMsgId);
+												if (!userMsgId) {
+													console.error('Chat.svelte: userMsgId is null or undefined. Cannot proceed with ignoreError.');
+													return;
 												}
+												const userMsg = history.messages[userMsgId];
+												if (!userMsg) {
+													console.error('Chat.svelte: Parent userMsg object not found for id:', userMsgId);
+													return;
+												}
+
+												console.log('Chat.svelte: userMsg.childrenIds before change:', JSON.parse(JSON.stringify(userMsg.childrenIds)));
+												userMsg.childrenIds = userMsg.childrenIds.filter((id) => id !== errorMsgId);
+												console.log('Chat.svelte: userMsg.childrenIds after change:', JSON.parse(JSON.stringify(userMsg.childrenIds)));
+
+												delete history.messages[errorMsgId];
+												console.log('Chat.svelte: Deleted errorMsg from history.messages. errorMsgId:', errorMsgId);
+
+												history.currentId = userMsgId;
+												console.log('Chat.svelte: Set history.currentId to userMsgId:', history.currentId);
+
+												await saveChatHandler($chatId, history);
+												console.log('Chat.svelte: Called saveChatHandler.');
+												console.log('Chat.svelte: Calling tick() for UI update.');
+												await tick();
+												console.log(
+													`Chat.svelte: Ignored error message ${errorMsgId} and set currentId to ${userMsgId}`
+												);
+											} else {
+												console.error('Chat.svelte: Error message not found in history for id:', errorMsgId);
 											}
 										}}
 										bottomPadding={files.length > 0}

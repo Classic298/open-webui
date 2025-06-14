@@ -855,7 +855,10 @@
 										</button>
 										<button
 											class="px-3 py-1.5 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 border border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200 transition rounded-lg"
-											on:click={() => dispatch('ignoreError', message.id)}
+											on:click={() => {
+												console.log('ResponseMessage.svelte: Dispatching ignoreError with message.id:', message.id);
+												dispatch('ignoreError', message.id);
+											}}
 										>
 											{$i18n.t('Ignore')}
 										</button>
