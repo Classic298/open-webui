@@ -846,15 +846,15 @@
 
 								{#if message?.error}
 									<Error content={message?.error?.content ?? message.content} />
-									<div class="flex space-x-1.5 mt-2">
+									<div class="flex space-x-2 mt-2.5">
 										<button
-											class="px-3 py-1.5 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 border border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200 transition rounded-lg"
+											class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800 text-white font-medium transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
 											on:click={() => regenerateResponse(message)}
 										>
 											{$i18n.t('Retry')}
 										</button>
 										<button
-											class="px-3 py-1.5 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 border border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200 transition rounded-lg"
+											class="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 font-medium transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-50"
 											on:click={() => {
 												console.log('ResponseMessage.svelte: Dispatching ignoreError with message.id:', message.id);
 												dispatch('ignoreError', message.id);
