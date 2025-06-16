@@ -87,11 +87,13 @@
 
 		{#if promptRawContent}
 			<div
-				class="max-h-48 overflow-y-auto bg-gray-50 dark:bg-gray-800 p-2 rounded-md my-3 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words mx-5"
+				class="max-h-56 overflow-y-auto bg-gray-50 dark:bg-gray-800 p-2 rounded-md my-3 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words mx-5"
 			>
 				{@html formattedPromptDisplay}
 			</div>
 		{/if}
+
+		<p class="text-sm text-gray-600 dark:text-gray-400 mt-3 px-5">{$i18n.t('You may replace the placeholder variables with values below. Note that if you do not enter a value, the placeholder will be removed from the text.')}</p>
 
 		<div class="p-5 max-h-[60vh] overflow-y-auto">
 			{#each variables as variable (variable)}
