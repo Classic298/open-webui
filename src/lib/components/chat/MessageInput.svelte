@@ -633,6 +633,8 @@
 							if (customVars.length > 0) {
 								activePromptVariables = customVars;
 								currentPromptTextForModal = prompt;
+								console.log('[MessageInput] currentPromptTextForModal before showing modal:', currentPromptTextForModal);
+								console.log('[MessageInput] activePromptVariables before showing modal:', activePromptVariables);
 								showVariableInputModal = true;
 							}
 							const chatInputElement = document.getElementById('chat-input');
