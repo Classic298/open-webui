@@ -13,11 +13,7 @@
 
 	let variableValues: { [key: string]: string } = {};
 
-	$: console.log('[VariableInputModal] promptRawContent current value:', promptRawContent);
-	$: if (variables) { console.log('[VariableInputModal] variables received:', variables); }
-
 	$: formattedPromptDisplay = (() => {
-		console.log('[VariableInputModal] Calculating formattedPromptDisplay. promptRawContent:', promptRawContent, 'variables:', variables);
 		if (!promptRawContent) {
 			return '';
 		}
@@ -31,7 +27,6 @@
 				escapedPrompt = escapedPrompt.replace(regex, `<strong>{{${variable}}}</strong>`);
 			});
 		}
-		console.log('[VariableInputModal] formattedPromptDisplay result:', escapedPrompt);
 		return escapedPrompt;
 	})();
 
