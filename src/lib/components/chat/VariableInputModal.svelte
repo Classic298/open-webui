@@ -13,12 +13,12 @@
 
 	let variableValues: { [key: string]: string } = {};
 
-	$: if (promptRawContent) { console.log('[VariableInputModal] promptRawContent received:', promptRawContent); }
+	$: console.log('[VariableInputModal] promptRawContent current value:', promptRawContent);
 	$: if (variables) { console.log('[VariableInputModal] variables received:', variables); }
 
 	$: formattedPromptDisplay = (() => {
+		console.log('[VariableInputModal] Calculating formattedPromptDisplay. promptRawContent:', promptRawContent, 'variables:', variables);
 		if (!promptRawContent) {
-			console.log('[VariableInputModal] formattedPromptDisplay: promptRawContent is empty');
 			return '';
 		}
 
@@ -31,7 +31,7 @@
 				escapedPrompt = escapedPrompt.replace(regex, `<strong>{{${variable}}}</strong>`);
 			});
 		}
-		console.log('[VariableInputModal] formattedPromptDisplay calculated:', escapedPrompt);
+		console.log('[VariableInputModal] formattedPromptDisplay result:', escapedPrompt);
 		return escapedPrompt;
 	})();
 
