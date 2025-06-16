@@ -87,7 +87,7 @@
 
 		{#if promptRawContent}
 			<div
-				class="max-h-24 overflow-y-auto bg-gray-50 dark:bg-gray-800 p-2 rounded-md my-3 text-sm text-gray-700 dark:text-gray-300 w-full whitespace-pre-wrap break-words mx-5"
+				class="max-h-48 overflow-y-auto bg-gray-50 dark:bg-gray-800 p-2 rounded-md my-3 text-sm text-gray-700 dark:text-gray-300 w-full whitespace-pre-wrap break-words"
 			>
 				{@html formattedPromptDisplay}
 			</div>
