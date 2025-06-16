@@ -91,6 +91,7 @@
 	export let codeInterpreterEnabled = false;
 
 	let showVariableInputModal = false;
+	let currentPromptTextForModal = '';
 	let activePromptVariables = [];
 	const RESERVED_VARIABLES = ['CLIPBOARD', 'USER_LOCATION', 'USER_NAME', 'USER_LANGUAGE', 'CURRENT_DATE', 'CURRENT_TIME', 'CURRENT_DATETIME', 'CURRENT_TIMEZONE', 'CURRENT_WEEKDAY'];
 
@@ -631,6 +632,7 @@
 							const customVars = extractCustomVariables(prompt);
 							if (customVars.length > 0) {
 								activePromptVariables = customVars;
+								currentPromptTextForModal = prompt;
 								showVariableInputModal = true;
 							}
 							const chatInputElement = document.getElementById('chat-input');
