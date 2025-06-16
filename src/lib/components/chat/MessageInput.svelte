@@ -91,7 +91,6 @@
 	export let codeInterpreterEnabled = false;
 
 	let showVariableInputModal = false;
-	let currentPromptTextForModal = '';
 	let activePromptVariables = [];
 	const RESERVED_VARIABLES = ['CLIPBOARD', 'USER_LOCATION', 'USER_NAME', 'USER_LANGUAGE', 'CURRENT_DATE', 'CURRENT_TIME', 'CURRENT_DATETIME', 'CURRENT_TIMEZONE', 'CURRENT_WEEKDAY'];
 
@@ -517,6 +516,7 @@
 <VariableInputModal
 	bind:show={showVariableInputModal}
 	variables={activePromptVariables}
+	promptRawContent={prompt}
 	subtitle={variableModalSubtitle}
 	on:submit={(e) => {
 		const submittedValues = e.detail;
@@ -632,8 +632,7 @@
 							const customVars = extractCustomVariables(prompt);
 							if (customVars.length > 0) {
 								activePromptVariables = customVars;
-								currentPromptTextForModal = prompt;
-								console.log('[MessageInput] currentPromptTextForModal before showing modal:', currentPromptTextForModal);
+								console.log('[MessageInput] currentPromptTextForModal before showing modal:', prompt);
 								console.log('[MessageInput] activePromptVariables before showing modal:', activePromptVariables);
 								showVariableInputModal = true;
 							}
