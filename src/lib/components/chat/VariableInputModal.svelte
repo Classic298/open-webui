@@ -13,8 +13,12 @@
 
 	let variableValues: { [key: string]: string } = {};
 
+	$: if (promptRawContent) { console.log('[VariableInputModal] promptRawContent received:', promptRawContent); }
+	$: if (variables) { console.log('[VariableInputModal] variables received:', variables); }
+
 	$: formattedPromptDisplay = (() => {
 		if (!promptRawContent) {
+			console.log('[VariableInputModal] formattedPromptDisplay: promptRawContent is empty');
 			return '';
 		}
 
@@ -27,6 +31,7 @@
 				escapedPrompt = escapedPrompt.replace(regex, `<strong>{{${variable}}}</strong>`);
 			});
 		}
+		console.log('[VariableInputModal] formattedPromptDisplay calculated:', escapedPrompt);
 		return escapedPrompt;
 	})();
 
@@ -80,7 +85,7 @@
 			<p class="text-sm text-gray-600 dark:text-gray-400 mt-1 px-5">{@html subtitle}</p>
 		{/if}
 
-		{#if formattedPromptDisplay}
+		{#if promptRawContent}
 			<div
 				class="max-h-24 overflow-y-auto bg-gray-50 dark:bg-gray-800 p-2 rounded-md my-3 text-sm text-gray-700 dark:text-gray-300 w-full whitespace-pre-wrap break-words mx-5"
 			>
