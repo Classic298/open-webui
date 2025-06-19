@@ -13,6 +13,7 @@ async-timeout
 aiocache
 aiofiles
 starlette-compress==1.6.0
+fastapi-limiter==0.1.6
 
 sqlalchemy==2.0.38
 alembic==1.14.0

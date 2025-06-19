@@ -7,7 +7,7 @@ from aiohttp import ClientSession
 
 from open_webui.models.auths import (
     AddUserForm,
-    ApiKey,
+    # ApiKey,  <-- This old model is replaced by ApiKeyResponse
     Auths,
     Token,
     LdapForm,
@@ -40,7 +40,8 @@ from pydantic import BaseModel
 from open_webui.utils.misc import parse_duration, validate_email_format
 from open_webui.utils.auth import (
     decode_token,
-    create_api_key,
+    generate_api_key_string, # Renamed from create_api_key
+    hash_api_key,
     create_token,
     get_admin_user,
     get_verified_user,
@@ -1010,41 +1011,146 @@ async def update_ldap_config(
 # API Key
 ############################
 
+# Import necessary models and utilities
+# from fastapi_limiter.depends import RateLimiter # Would be imported if package was usable
+# from open_webui.env import RATE_LIMIT_USER_REGENERATE_API_KEY # Would be imported
+from open_webui.models.apikeys import ApiKey as DbApiKey  # Renaming to avoid confusion with old model
+from open_webui.routers.apikeys import ApiKeyResponse # Using the new response model
+from open_webui.utils.audit import log_application_event # Import audit logging function
+from sqlalchemy.orm import Session
+from open_webui.internal.db import get_db
 
-# create api key
-@router.post("/api_key", response_model=ApiKey)
-async def generate_api_key(request: Request, user=Depends(get_current_user)):
-    if not request.app.state.config.ENABLE_API_KEY:
+
+# create/regenerate api key for the current user
+@router.post("/api_key", response_model=ApiKeyResponse)
+# @Depends(RateLimiter(times=int(RATE_LIMIT_USER_REGENERATE_API_KEY.split('/')[0]), seconds=...)) # Placeholder
+# Actual RateLimiter setup would require parsing RATE_LIMIT_USER_REGENERATE_API_KEY properly
+# and having limiter instance initialized in main.py
+async def regenerate_user_api_key(
+    request_obj: Request, # Changed 'request' to 'request_obj' to match usage in apikeys.py for audit
+    user: Users = Depends(get_current_user), # Rate limit key could be user.id
+    db: Session = Depends(get_db)
+):
+    if not request_obj.app.state.config.ENABLE_API_KEY: # Use request_obj here
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.API_KEY_CREATION_NOT_ALLOWED,
         )
 
-    api_key = create_api_key()
-    success = Users.update_user_api_key_by_id(user.id, api_key)
+    # 1. Invalidate/delete any existing API keys for this user.
+    db.query(DbApiKey).filter(DbApiKey.user_id == user.id).delete()
+    # db.commit() # Commit can be done once after adding new key
 
-    if success:
-        return {
-            "api_key": api_key,
-        }
-    else:
-        raise HTTPException(500, detail=ERROR_MESSAGES.CREATE_API_KEY_ERROR)
+    # 2. Generate new key
+    plain_api_key = generate_api_key_string()
+    hashed_key = hash_api_key(plain_api_key)
+
+    # 3. Create new ApiKey entry
+    db_apikey = DbApiKey(
+        key_hash=hashed_key,
+        user_id=user.id,
+        name=f"{user.name}'s API Key", # Or some other default naming convention
+        created_at=int(time.time()),
+        # email and role for user-keys are derived from the user record, not stored on ApiKey itself
+    )
+    db.add(db_apikey)
+    db.commit()
+    db.refresh(db_apikey)
+
+    # Audit Log
+    log_application_event(
+        user=user, # This is the UserModel performing the action
+        action="user_api_key_regenerated",
+        target_type="apikey",
+        target_id=db_apikey.id, # ID of the new key
+        details={"user_id": user.id, "new_key_name": db_apikey.name},
+        request=request_obj
+    )
+
+    key_display_prefix = plain_api_key[:5]
+    key_display_suffix = plain_api_key[-4:]
+    key_display = f"{key_display_prefix}...{key_display_suffix}"
+
+    return ApiKeyResponse(
+        id=db_apikey.id,
+        key_hash=None, # Never send hash back
+        name=db_apikey.name,
+        email=user.email, # User's email
+        role=user.role,   # User's role
+        user_id=db_apikey.user_id,
+        created_at=db_apikey.created_at,
+        last_used_at=db_apikey.last_used_at,
+        expires_at=db_apikey.expires_at,
+        info=db_apikey.info,
+        key=plain_api_key, # Send plain key back ONLY on creation
+        is_standalone=False,
+        user_name=user.name,
+        user_email=user.email,
+        key_display=key_display,
+    )
 
 
-# delete api key
+# delete api key for the current user
 @router.delete("/api_key", response_model=bool)
-async def delete_api_key(user=Depends(get_current_user)):
-    success = Users.update_user_api_key_by_id(user.id, None)
-    return success
+async def delete_user_api_key(
+    request_obj: Request, # Added Request for audit logging
+    user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Find key(s) for the current user BEFORE deleting to log their IDs if needed
+    keys_to_delete = db.query(DbApiKey.id).filter(DbApiKey.user_id == user.id).all()
+    key_ids_deleted = [key_id_tuple[0] for key_id_tuple in keys_to_delete]
+
+    if not key_ids_deleted:
+        return False # No keys found to delete
+
+    result = db.query(DbApiKey).filter(DbApiKey.user_id == user.id).delete()
+    db.commit()
+
+    if result > 0:
+        # Audit Log
+        log_application_event(
+            user=user,
+            action="user_api_key_revoked",
+            target_type="apikey",
+            # If multiple keys could exist and are deleted, logging all IDs might be too verbose.
+            # Logging the count or just the fact that keys for this user were revoked.
+            target_id=key_ids_deleted[0] if len(key_ids_deleted) == 1 else None, # Log first key ID if only one
+            details={"user_id": user.id, "deleted_key_ids": key_ids_deleted, "count": result},
+            request=request_obj
+        )
+        return True
+    return False
 
 
-# get api key
-@router.get("/api_key", response_model=ApiKey)
-async def get_api_key(user=Depends(get_current_user)):
-    api_key = Users.get_user_api_key_by_id(user.id)
-    if api_key:
-        return {
-            "api_key": api_key,
-        }
+# get api key for the current user
+@router.get("/api_key", response_model=ApiKeyResponse)
+async def get_user_api_key(
+    user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    db_apikey = db.query(DbApiKey).filter(DbApiKey.user_id == user.id).first()
+
+    if db_apikey:
+        key_display_prefix = db_apikey.id[:4] # Using ID for display as key is not stored
+        key_display = f"sk-{key_display_prefix}...XXXX"
+
+        return ApiKeyResponse(
+            id=db_apikey.id,
+            key_hash=None, # Never send hash
+            name=db_apikey.name,
+            email=user.email,
+            role=user.role,
+            user_id=db_apikey.user_id,
+            created_at=db_apikey.created_at,
+            last_used_at=db_apikey.last_used_at,
+            expires_at=db_apikey.expires_at,
+            info=db_apikey.info,
+            key=None, # Never send plain key
+            is_standalone=False,
+            user_name=user.name,
+            user_email=user.email,
+            key_display=key_display,
+        )
     else:
-        raise HTTPException(404, detail=ERROR_MESSAGES.API_KEY_NOT_FOUND)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.API_KEY_NOT_FOUND)

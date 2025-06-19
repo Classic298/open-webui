@@ -68,6 +68,7 @@ from open_webui.routers import (
     retrieval,
     pipelines,
     tasks,
+    apikeys, # Added new router
     auths,
     channels,
     chats,
@@ -1133,6 +1134,7 @@ app.include_router(ollama.router, prefix="/ollama", tags=["ollama"])
 app.include_router(openai.router, prefix="/openai", tags=["openai"])
 
 
+app.include_router(apikeys.router, prefix="/api/v1", tags=["apikeys"]) # Added new router
 app.include_router(pipelines.router, prefix="/api/v1/pipelines", tags=["pipelines"])
 app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["tasks"])
 app.include_router(images.router, prefix="/api/v1/images", tags=["images"])

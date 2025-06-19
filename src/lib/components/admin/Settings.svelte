@@ -45,6 +45,7 @@
 			'audio',
 			'images',
 			'pipelines',
+			'apikeys', // Added apikeys
 			'db'
 		].includes(tabFromPath)
 			? tabFromPath
@@ -404,6 +405,34 @@
 		</button>
 
 		<button
+			id="apikeys"
+			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
+			'apikeys'
+				? ''
+				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+			on:click={() => {
+				goto('/admin/apikeys'); // Changed path to /admin/apikeys
+			}}
+		>
+			<div class=" self-center mr-2">
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					viewBox="0 0 20 20"
+					fill="currentColor"
+					class="w-4 h-4"
+				>
+					<path
+						fill-rule="evenodd"
+						d="M11.013 2.513a1.75 1.75 0 00-3.026 0l-1.75 3.5a1.75 1.75 0 00-.607.607l-3.5 1.75a1.75 1.75 0 000 3.026l3.5 1.75a1.75 1.75 0 00.607.607l1.75 3.5a1.75 1.75 0 003.026 0l1.75-3.5a1.75 1.75 0 00.607-.607l3.5-1.75a1.75 1.75 0 000-3.026l-3.5-1.75a1.75 1.75 0 00-.607-.607l-1.75-3.5zM12.25 12.25a.75.75 0 000-1.5.75.75 0 000 1.5z"
+						clip-rule="evenodd"
+					/>
+					<path d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a.75.75 0 000 1.5A.75.75 0 007 9z" />
+				</svg>
+			</div>
+			<div class=" self-center">{$i18n.t('API Keys')}</div>
+		</button>
+
+		<button
 			id="db"
 			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
 			'db'
@@ -512,6 +541,9 @@
 					toast.success($i18n.t('Settings saved successfully!'));
 				}}
 			/>
+		{:else if selectedTab === 'apikeys'}
+			<div>{$i18n.t('API Keys Management Page - Content to be added')}</div>
+			<!-- Later, this will be replaced by the ApiKeyList component -->
 		{/if}
 	</div>
 </div>

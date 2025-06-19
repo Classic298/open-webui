@@ -87,6 +87,37 @@ class AuditLogger:
             **entry,
         )
 
+# Instance of the logger for application-level events
+# We can bind 'auditable=True' to ensure it's processed by any Loguru sinks configured for audit logs.
+# We might want a different structured log format for these, or add specific fields.
+app_event_logger = logger.bind(auditable=True, event_type="application")
+
+def log_application_event(
+    user: Optional[UserModel], # User performing the action
+    action: str,               # Verb describing the action, e.g., "api_key_created"
+    target_type: Optional[str] = None, # Type of the entity being acted upon, e.g., "apikey"
+    target_id: Optional[str] = None,   # ID of the entity
+    details: Optional[Dict[str, Any]] = None, # Additional context
+    request: Optional[Request] = None # Optional request for IP/User-Agent
+):
+    """
+    Logs a specific application-level event.
+    """
+    log_payload = {
+        "action": action,
+        "user_id": user.id if user else None,
+        "user_email": user.email if user else None, # For convenience
+        "target_type": target_type,
+        "target_id": target_id,
+        "details": details or {},
+    }
+    if request:
+        log_payload["source_ip"] = request.client.host if request.client else None
+        log_payload["user_agent"] = request.headers.get("user-agent")
+
+    # Using info level, but could be configurable
+    app_event_logger.info(log_payload)
+
 
 class AuditContext:
     """

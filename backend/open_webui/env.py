@@ -552,6 +552,20 @@ OTEL_TRACES_SAMPLER = os.environ.get(
 ).lower()
 
 ####################################
+# RATE LIMITING
+####################################
+
+# Default rate limits for API key operations
+# Format: "count/period", e.g., "10/hour", "5/minute", "1/second"
+RATE_LIMIT_ADMIN_CREATE_API_KEY = os.environ.get(
+    "RATE_LIMIT_ADMIN_CREATE_API_KEY", "20/hour"
+)
+RATE_LIMIT_USER_REGENERATE_API_KEY = os.environ.get(
+    "RATE_LIMIT_USER_REGENERATE_API_KEY", "5/hour"
+)
+
+
+####################################
 # TOOLS/FUNCTIONS PIP OPTIONS
 ####################################
 
