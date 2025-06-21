@@ -19,18 +19,18 @@
 		extractCurlyBraceWords
 	} from '$lib/utils';
 	import { uploadFile } from '$lib/apis/files';
-	import { generateAutoCompletion } from '$lib/apis';
-		type Model,
-		mobile,
-		settings,
-		showSidebar,
-		models,
-		config,
-		showCallOverlay,
-		tools,
-		user as _user,
-		showControls,
-		TTSWorker
+	import {
+	    type Model,
+	    mobile,
+	    settings,
+	    showSidebar,
+	    models,
+	    config,
+	    showCallOverlay,
+	    tools,
+	    user as _user,
+	    showControls,
+	    TTSWorker
 	} from '$lib/stores';
 
 	import {
