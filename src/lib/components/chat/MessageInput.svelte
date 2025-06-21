@@ -84,13 +84,16 @@
 	let debouncedPrompt = prompt;
 	
 	const updatePrompt = debounce((value) => {
-		prompt = value;
+		// Only update if prompt hasn't been explicitly cleared
+		if (prompt !== '' || value !== '') {
+			prompt = value;
+		}
 	}, 300);
 	
 	$: updatePrompt(debouncedPrompt);
 	
-	// Sync debouncedPrompt when prompt is cleared externally
-	$: if (prompt === '' && debouncedPrompt !== '') {
+	// Watch for external prompt changes and sync debouncedPrompt
+	$: if (prompt === '') {
 		debouncedPrompt = '';
 	}
 
