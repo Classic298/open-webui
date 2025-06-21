@@ -108,9 +108,15 @@
 	export let messageId;
 
 	let message: MessageType = JSON.parse(JSON.stringify(history.messages[messageId]));
-	$: if (history.messages) {
-		if (JSON.stringify(message) !== JSON.stringify(history.messages[messageId])) {
-			message = JSON.parse(JSON.stringify(history.messages[messageId]));
+	let lastMessageUpdate = '';
+	
+	$: {
+		const currentMessage = history.messages[messageId];
+		const currentMessageStr = `${currentMessage?.content?.length || 0}-${currentMessage?.done || false}-${currentMessage?.timestamp || 0}`;
+		
+		if (lastMessageUpdate !== currentMessageStr) {
+			lastMessageUpdate = currentMessageStr;
+			message = JSON.parse(JSON.stringify(currentMessage));
 		}
 	}
 
