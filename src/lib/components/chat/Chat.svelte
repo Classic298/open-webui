@@ -115,6 +115,25 @@
 
 	let chatIdUnsubscriber: Unsubscriber | undefined;
 
+	// Debounce utility
+	function debounce(func, timeout = 150) {
+		let timer;
+		const debounced = (...args) => {
+			clearTimeout(timer);
+			timer = setTimeout(() => {
+				func.apply(this, args);
+			}, timeout);
+		};
+		debounced.cancel = () => {
+			clearTimeout(timer);
+		};
+		return debounced;
+	}
+
+	// Stores for debounced updaters and stream buffers
+	let debouncedMessageUpdaters: Record<string, ReturnType<typeof debounce>> = {};
+	let streamBuffers: Record<string, string> = {};
+
 	let selectedModels = [''];
 	let atSelectedModel: Model | undefined;
 	let selectedModelIds = [];
@@ -307,6 +326,16 @@
 						scrollToBottom('smooth');
 					}
 				} else if (type === 'chat:title') {
+			// Clear any pending debounced updates for this message on event
+			if (debouncedMessageUpdaters[event.message_id]) {
+				debouncedMessageUpdaters[event.message_id].cancel();
+				if (streamBuffers[event.message_id] && history.messages[event.message_id]) {
+					history.messages[event.message_id].content += streamBuffers[event.message_id];
+					streamBuffers[event.message_id] = '';
+				}
+				delete debouncedMessageUpdaters[event.message_id];
+				delete streamBuffers[event.message_id];
+			}
 					chatTitle.set(data);
 					currentChatPage.set(1);
 					await chats.set(await getChatList(localStorage.token, $currentChatPage));
@@ -1201,64 +1230,116 @@
 			message.sources = sources;
 		}
 
+		const messageId = message.id;
+
+		if (error) {
+			await handleOpenAIError(error, message);
+			// Clear any pending debounced updates for this message on error
+			if (debouncedMessageUpdaters[messageId]) {
+				debouncedMessageUpdaters[messageId].cancel();
+				delete debouncedMessageUpdaters[messageId];
+				delete streamBuffers[messageId];
+			}
+		}
+
+		if (sources) {
+			message.sources = sources;
+		}
+
 		if (choices) {
 			if (choices[0]?.message?.content) {
 				// Non-stream response
-				message.content += choices[0]?.message?.content;
-			} else {
+				// Flush any pending stream for this message before applying full content
+				if (debouncedMessageUpdaters[messageId]) {
+					debouncedMessageUpdaters[messageId].cancel();
+					if (streamBuffers[messageId] && history.messages[messageId]) {
+						history.messages[messageId].content += streamBuffers[messageId];
+						streamBuffers[messageId] = '';
+					}
+					delete debouncedMessageUpdaters[messageId];
+				}
+				if (history.messages[messageId]) {
+					history.messages[messageId].content += choices[0].message.content;
+				}
+			} else if (choices[0]?.delta?.content) {
 				// Stream response
-				let value = choices[0]?.delta?.content ?? '';
-				if (message.content == '' && value == '\n') {
-					console.log('Empty response');
-				} else {
-					message.content += value;
-
-					if (navigator.vibrate && ($settings?.hapticFeedback ?? false)) {
-						navigator.vibrate(5);
+				let value = choices[0].delta.content;
+				if (!(message.content === '' && value === '\n')) {
+					if (!streamBuffers[messageId]) {
+						streamBuffers[messageId] = '';
 					}
+					streamBuffers[messageId] += value;
 
-					// Emit chat event for TTS
-					const messageContentParts = getMessageContentParts(
-						removeAllDetails(message.content),
-						$config?.audio?.tts?.split_on ?? 'punctuation'
-					);
-					messageContentParts.pop();
+					if (!debouncedMessageUpdaters[messageId]) {
+						debouncedMessageUpdaters[messageId] = debounce(() => {
+							if (streamBuffers[messageId] && history.messages[messageId]) {
+								history.messages[messageId].content += streamBuffers[messageId];
+								streamBuffers[messageId] = ''; // Clear buffer after applying
 
-					// dispatch only last sentence and make sure it hasn't been dispatched before
-					if (
-						messageContentParts.length > 0 &&
-						messageContentParts[messageContentParts.length - 1] !== message.lastSentence
-					) {
-						message.lastSentence = messageContentParts[messageContentParts.length - 1];
-						eventTarget.dispatchEvent(
-							new CustomEvent('chat', {
-								detail: {
-									id: message.id,
-									content: messageContentParts[messageContentParts.length - 1]
+								// Force Svelte to recognize the change
+								history = { ...history };
+
+								if (navigator.vibrate && ($settings?.hapticFeedback ?? false)) {
+									navigator.vibrate(5);
 								}
-							})
-						);
+
+								// Emit chat event for TTS for the flushed chunk
+								const flushedTTSParts = getMessageContentParts(
+									removeAllDetails(history.messages[messageId].content), // Use current content
+									$config?.audio?.tts?.split_on ?? 'punctuation'
+								);
+								flushedTTSParts.pop();
+								if (
+									flushedTTSParts.length > 0 &&
+									flushedTTSParts[flushedTTSParts.length - 1] !== message.lastSentence_flushed // Use a different tracking var
+								) {
+									message.lastSentence_flushed = flushedTTSParts[flushedTTSParts.length - 1];
+									eventTarget.dispatchEvent(
+										new CustomEvent('chat', {
+											detail: {
+												id: messageId,
+												content: flushedTTSParts[flushedTTSParts.length - 1]
+											}
+										})
+									);
+								}
+
+								if (autoScroll) {
+									scrollToBottom();
+								}
+							}
+						});
 					}
+					debouncedMessageUpdaters[messageId](); // Call the debounced function
 				}
 			}
 		}
 
 		if (content) {
-			// REALTIME_CHAT_SAVE is disabled
-			message.content = content;
+			// REALTIME_CHAT_SAVE is disabled or similar direct content update
+			// Flush any pending stream for this message
+			if (debouncedMessageUpdaters[messageId]) {
+				debouncedMessageUpdaters[messageId].cancel();
+				if (streamBuffers[messageId] && history.messages[messageId]) {
+					history.messages[messageId].content += streamBuffers[messageId];
+					streamBuffers[messageId] = '';
+				}
+				delete debouncedMessageUpdaters[messageId];
+			}
+			if (history.messages[messageId]) {
+				history.messages[messageId].content = content; // Overwrites
+			}
 
 			if (navigator.vibrate && ($settings?.hapticFeedback ?? false)) {
 				navigator.vibrate(5);
 			}
 
-			// Emit chat event for TTS
+			// Emit chat event for TTS (similar to above, for full content)
 			const messageContentParts = getMessageContentParts(
 				removeAllDetails(message.content),
 				$config?.audio?.tts?.split_on ?? 'punctuation'
 			);
 			messageContentParts.pop();
-
-			// dispatch only last sentence and make sure it hasn't been dispatched before
 			if (
 				messageContentParts.length > 0 &&
 				messageContentParts[messageContentParts.length - 1] !== message.lastSentence
@@ -1266,10 +1347,7 @@
 				message.lastSentence = messageContentParts[messageContentParts.length - 1];
 				eventTarget.dispatchEvent(
 					new CustomEvent('chat', {
-						detail: {
-							id: message.id,
-							content: messageContentParts[messageContentParts.length - 1]
-						}
+						detail: { id: messageId, content: messageContentParts[messageContentParts.length - 1] }
 					})
 				);
 			}
@@ -1287,6 +1365,15 @@
 		history.messages[message.id] = message;
 
 		if (done) {
+			// Ensure any final buffered content is flushed immediately
+			if (debouncedMessageUpdaters[messageId]) {
+				debouncedMessageUpdaters[messageId].cancel(); // Cancel any pending debounce
+				if (streamBuffers[messageId] && streamBuffers[messageId].length > 0 && history.messages[messageId]) {
+					history.messages[messageId].content += streamBuffers[messageId];
+					streamBuffers[messageId] = '';
+				}
+			}
+
 			message.done = true;
 
 			if ($settings.responseAutoCopy) {
@@ -1324,14 +1411,23 @@
 			await chatCompletedHandler(
 				chatId,
 				message.model,
-				message.id,
-				createMessagesList(history, message.id)
+				messageId,
+				createMessagesList(history, messageId)
 			);
+
+			// Clean up
+			delete streamBuffers[messageId];
+			delete debouncedMessageUpdaters[messageId];
 		}
 
-		console.log(data);
-		if (autoScroll) {
+		// This assignment might be redundant if history = { ...history } is used in the debounced function
+		// history.messages[messageId] = message;
+		history = { ...history }; // Ensure reactivity
+
+		if (autoScroll && !done) { // Scroll if not done, as 'done' block and debounced function handle their own scroll
 			scrollToBottom();
+		} else if (done && autoScroll) {
+			scrollToBottom(); // Final scroll on done
 		}
 	};
 
