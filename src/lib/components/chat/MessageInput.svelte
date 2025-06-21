@@ -19,28 +19,21 @@
 		extractCurlyBraceWords
 	} from '$lib/utils';
 	import { uploadFile } from '$lib/apis/files';
+	import { generateAutoCompletion } from '$lib/apis';
 	import {
-	    type Model,
-	    mobile,
-	    settings,
-	    showSidebar,
-	    models,
-	    config,
-	    showCallOverlay,
-	    tools,
-	    user as _user,
-	    showControls,
-	    TTSWorker
+		type Model,
+		mobile,
+		settings,
+		showSidebar,
+		models,
+		config,
+		showCallOverlay,
+		tools,
+		user as _user,
+		showControls,
+		TTSWorker
 	} from '$lib/stores';
 
-	import {
-		blobToFile,
-		compressImage,
-		createMessagesList,
-		extractCurlyBraceWords
-	} from '$lib/utils';
-	import { uploadFile } from '$lib/apis/files';
-	import { generateAutoCompletion } from '$lib/apis';
 	import { deleteFileById } from '$lib/apis/files';
 
 	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
