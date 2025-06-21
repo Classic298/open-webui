@@ -82,12 +82,17 @@
 	export let files = [];
 
 	let debouncedPrompt = prompt;
-
+	
 	const updatePrompt = debounce((value) => {
 		prompt = value;
 	}, 300);
-
+	
 	$: updatePrompt(debouncedPrompt);
+	
+	// Sync debouncedPrompt when prompt is cleared externally
+	$: if (prompt === '' && debouncedPrompt !== '') {
+		debouncedPrompt = '';
+	}
 
 	export let toolServers = [];
 
