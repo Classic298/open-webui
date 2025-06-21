@@ -198,30 +198,41 @@
 		});
 	};
 
+	let processedContentCache = '';
+	let processedContentResult = '';
+	
 	const toggleSpeakMessage = async () => {
 		if (speaking) {
 			try {
 				speechSynthesis.cancel();
-
+	
 				if (speakingIdx !== undefined && audioParts[speakingIdx]) {
 					audioParts[speakingIdx]!.pause();
 					audioParts[speakingIdx]!.currentTime = 0;
 				}
 			} catch {}
-
+	
 			speaking = false;
 			speakingIdx = undefined;
 			return;
 		}
-
+	
 		if (!(message?.content ?? '').trim().length) {
 			toast.info($i18n.t('No content to speak'));
 			return;
 		}
-
+	
 		speaking = true;
-
-		const content = removeAllDetails(message.content);
+	
+		// Cache content processing
+		let content;
+		if (processedContentCache === message.content) {
+			content = processedContentResult;
+		} else {
+			content = removeAllDetails(message.content);
+			processedContentCache = message.content;
+			processedContentResult = content;
+		}
 
 		if ($config.audio.tts.engine === '') {
 			let voices = [];
@@ -353,30 +364,41 @@
 	};
 
 	let preprocessedDetailsCache = [];
-
+	let preprocessCache = new Map();
+	
 	function preprocessForEditing(content: string): string {
+		// Check cache first
+		if (preprocessCache.has(content)) {
+			const cached = preprocessCache.get(content);
+			preprocessedDetailsCache = cached.blocks;
+			return cached.processed;
+		}
+	
 		// Replace <details>...</details> with unique ID placeholder
 		const detailsBlocks = [];
 		let i = 0;
-
-		content = content.replace(/<details[\s\S]*?<\/details>/gi, (match) => {
+	
+		const processed = content.replace(/<details[\s\S]*?<\/details>/gi, (match) => {
 			detailsBlocks.push(match);
 			return `<details id="__DETAIL_${i++}__"/>`;
 		});
-
-		// Store original blocks in the editedContent or globally (see merging later)
+	
+		// Cache the result
+		preprocessCache.set(content, { blocks: detailsBlocks, processed });
+		if (preprocessCache.size > 10) {
+			const firstKey = preprocessCache.keys().next().value;
+			preprocessCache.delete(firstKey);
+		}
+	
 		preprocessedDetailsCache = detailsBlocks;
-
-		return content;
+		return processed;
 	}
-
+	
 	function postprocessAfterEditing(content: string): string {
-		const restoredContent = content.replace(
+		return content.replace(
 			/<details id="__DETAIL_(\d+)__"\/>/g,
 			(_, index) => preprocessedDetailsCache[parseInt(index)] || ''
 		);
-
-		return restoredContent;
 	}
 
 	const editMessageHandler = async () => {
@@ -569,26 +591,52 @@
 		})();
 	}
 
+	let isVisible = true;
+	let intersectionObserver;
+
 	onMount(async () => {
-		// console.log('ResponseMessage mounted');
-
 		await tick();
+		
+		// Set up intersection observer for performance
+		const messageElement = document.getElementById(`message-${message.id}`);
+		if (messageElement) {
+			intersectionObserver = new IntersectionObserver(
+				(entries) => {
+					entries.forEach(entry => {
+						isVisible = entry.isIntersecting;
+					});
+				},
+				{ 
+					threshold: 0.1,
+					rootMargin: '100px'
+				}
+			);
+			intersectionObserver.observe(messageElement);
+		}
+		
 		if (buttonsContainerElement) {
-			console.log(buttonsContainerElement);
-
-			buttonsContainerElement.addEventListener('wheel', function (event) {
+			const wheelHandler = (event) => {
 				if (buttonsContainerElement.scrollWidth <= buttonsContainerElement.clientWidth) {
-					// If the container is not scrollable, horizontal scroll
 					return;
 				} else {
 					event.preventDefault();
-
 					if (event.deltaY !== 0) {
-						// Adjust horizontal scroll position based on vertical scroll
 						buttonsContainerElement.scrollLeft += event.deltaY;
 					}
 				}
-			});
+			};
+			
+			buttonsContainerElement.addEventListener('wheel', wheelHandler, { passive: false });
+			
+			return () => {
+				buttonsContainerElement?.removeEventListener('wheel', wheelHandler);
+			};
+		}
+	});
+	
+	onDestroy(() => {
+		if (intersectionObserver) {
+			intersectionObserver.disconnect();
 		}
 	});
 </script>
@@ -798,56 +846,57 @@
 								{:else if message.content && message.error !== true}
 									<!-- always show message contents even if there's an error -->
 									<!-- unless message.error === true which is legacy error handling, where the error message is stored in message.content -->
-									<ContentRenderer
-										id={message.id}
-										{history}
-										content={message.content}
-										sources={message.sources}
-										floatingButtons={message?.done && !readOnly}
-										save={!readOnly}
-										preview={!readOnly}
-										{model}
-										onTaskClick={async (e) => {
-											console.log(e);
-										}}
-										onSourceClick={async (id, idx) => {
-											console.log(id, idx);
-											let sourceButton = document.getElementById(`source-${message.id}-${idx}`);
-											const sourcesCollapsible = document.getElementById(
-												`collapsible-${message.id}`
-											);
-
-											if (sourceButton) {
-												sourceButton.click();
-											} else if (sourcesCollapsible) {
-												// Open sources collapsible so we can click the source button
-												sourcesCollapsible
-													.querySelector('div:first-child')
-													.dispatchEvent(new PointerEvent('pointerup', {}));
-
-												// Wait for next frame to ensure DOM updates
-												await new Promise((resolve) => {
-													requestAnimationFrame(() => {
-														requestAnimationFrame(resolve);
+									{#if isVisible}
+										<ContentRenderer
+											id={message.id}
+											{history}
+											content={message.content}
+											sources={message.sources}
+											floatingButtons={message?.done && !readOnly}
+											save={!readOnly}
+											preview={!readOnly}
+											{model}
+											onTaskClick={async (e) => {
+												console.log(e);
+											}}
+											onSourceClick={async (id, idx) => {
+												console.log(id, idx);
+												let sourceButton = document.getElementById(`source-${message.id}-${idx}`);
+												const sourcesCollapsible = document.getElementById(
+													`collapsible-${message.id}`
+												);
+									
+												if (sourceButton) {
+													sourceButton.click();
+												} else if (sourcesCollapsible) {
+													sourcesCollapsible
+														.querySelector('div:first-child')
+														.dispatchEvent(new PointerEvent('pointerup', {}));
+									
+													await new Promise((resolve) => {
+														requestAnimationFrame(() => {
+															requestAnimationFrame(resolve);
+														});
 													});
-												});
-
-												// Try clicking the source button again
-												sourceButton = document.getElementById(`source-${message.id}-${idx}`);
-												sourceButton && sourceButton.click();
-											}
-										}}
-										onAddMessages={({ modelId, parentId, messages }) => {
-											addMessages({ modelId, parentId, messages });
-										}}
-										onSave={({ raw, oldContent, newContent }) => {
-											history.messages[message.id].content = history.messages[
-												message.id
-											].content.replace(raw, raw.replace(oldContent, newContent));
-
-											updateChat();
-										}}
-									/>
+									
+													sourceButton = document.getElementById(`source-${message.id}-${idx}`);
+													sourceButton && sourceButton.click();
+												}
+											}}
+											onAddMessages={({ modelId, parentId, messages }) => {
+												addMessages({ modelId, parentId, messages });
+											}}
+											onSave={({ raw, oldContent, newContent }) => {
+												history.messages[message.id].content = history.messages[
+													message.id
+												].content.replace(raw, raw.replace(oldContent, newContent));
+									
+												updateChat();
+											}}
+										/>
+									{:else}
+										<div class="h-20 bg-gray-50 dark:bg-gray-800 rounded-lg animate-pulse"></div>
+									{/if}
 								{/if}
 
 								{#if message?.error}
