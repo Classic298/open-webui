@@ -50,7 +50,8 @@
 		removeDetails,
 		getPromptVariables,
 		processDetails,
-		removeAllDetails
+		removeAllDetails,
+		debounce
 	} from '$lib/utils';
 
 	import { generateChatCompletion } from '$lib/apis/ollama';
@@ -2239,11 +2240,11 @@
 								class=" pb-2.5 flex flex-col justify-between w-full flex-auto overflow-auto h-0 max-w-full z-10 scrollbar-hidden"
 								id="messages-container"
 								bind:this={messagesContainerElement}
-								on:scroll={(e) => {
+								on:scroll={debounce((e) => {
 									autoScroll =
 										messagesContainerElement.scrollHeight - messagesContainerElement.scrollTop <=
 										messagesContainerElement.clientHeight + 5;
-								}}
+								}, 16)}
 							>
 								<div class=" h-full w-full flex flex-col">
 									<Messages
