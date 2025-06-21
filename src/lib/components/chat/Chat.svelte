@@ -1382,39 +1382,6 @@
 						buffer.pending = true;
 						debouncedMessageUpdaters[messageId]();
 					}
-
-								if (navigator.vibrate && ($settings?.hapticFeedback ?? false)) {
-									navigator.vibrate(5);
-								}
-
-								// Emit chat event for TTS for the flushed chunk
-								const flushedTTSParts = getMessageContentParts(
-									removeAllDetails(history.messages[messageId].content), // Use current content
-									$config?.audio?.tts?.split_on ?? 'punctuation'
-								);
-								flushedTTSParts.pop();
-								if (
-									flushedTTSParts.length > 0 &&
-									flushedTTSParts[flushedTTSParts.length - 1] !== message.lastSentence_flushed // Use a different tracking var
-								) {
-									message.lastSentence_flushed = flushedTTSParts[flushedTTSParts.length - 1];
-									eventTarget.dispatchEvent(
-										new CustomEvent('chat', {
-											detail: {
-												id: messageId,
-												content: flushedTTSParts[flushedTTSParts.length - 1]
-											}
-										})
-									);
-								}
-
-								if (autoScroll) {
-									scrollToBottom();
-								}
-							}
-						});
-					}
-					debouncedMessageUpdaters[messageId](); // Call the debounced function
 				}
 			}
 		}
