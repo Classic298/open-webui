@@ -89,6 +89,20 @@ export const sanitizeResponseContent = (content: string) => {
 		.trim();
 };
 
+export const debounce = (func: Function, timeout = 150) => {
+	let timer: NodeJS.Timeout;
+	const debounced = (...args: any[]) => {
+		clearTimeout(timer);
+		timer = setTimeout(() => {
+			func.apply(this, args);
+		}, timeout);
+	};
+	debounced.cancel = () => {
+		clearTimeout(timer);
+	};
+	return debounced;
+};
+
 export const processResponseContent = (content: string) => {
 	content = processChineseContent(content);
 	return content.trim();
@@ -108,7 +122,7 @@ function processChineseContent(content: string): string {
 			/* Discription:
 			 *   When `*` has Chinese delimiters on the inside, markdown parser ignore bold or italic style.
 			 *   - e.g. `**中文名（English）**中文内容` will be parsed directly,
-			 *          instead of `<strong>中文名（English）</strong>中文内容`.
+			 *		  instead of `<strong>中文名（English）</strong>中文内容`.
 			 * Solution:
 			 *   Adding a `space` before and after the bold/italic part can solve the problem.
 			 *   - e.g. `**中文名（English）**中文内容` -> ` **中文名（English）** 中文内容`
