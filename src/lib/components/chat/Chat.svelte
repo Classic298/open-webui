@@ -132,12 +132,53 @@
 
 	// Stores for debounced updaters and stream buffers
 	let debouncedMessageUpdaters: Record<string, ReturnType<typeof debounce>> = {};
-	let streamBuffers: Record<string, string> = {};
+	let streamBuffers: Record<string, { content: string; lastFlush: number; pending: boolean }> = {};
+	
+	const getOptimalDebounceTime = (contentLength: number) => {
+		if (contentLength < 100) return 50;   // Fast for short content
+		if (contentLength < 1000) return 100; // Medium for normal content
+		return 200; // Slower for long content
+	};
+	
+	const createStreamBuffer = (messageId: string) => {
+		if (!streamBuffers[messageId]) {
+			streamBuffers[messageId] = {
+				content: '',
+				lastFlush: 0,
+				pending: false
+			};
+		}
+		return streamBuffers[messageId];
+	};
+	
+	const flushMessageBuffer = (messageId: string) => {
+		const buffer = streamBuffers[messageId];
+		if (!buffer || !buffer.content) return;
+		
+		if (history.messages[messageId]) {
+			history.messages[messageId].content += buffer.content;
+			buffer.content = '';
+			buffer.lastFlush = Date.now();
+			buffer.pending = false;
+			
+			// Trigger reactive update more efficiently
+			history = { ...history };
+		}
+	};
 
 	let selectedModels = [''];
 	let atSelectedModel: Model | undefined;
 	let selectedModelIds = [];
-	$: selectedModelIds = atSelectedModel !== undefined ? [atSelectedModel.id] : selectedModels;
+	
+	// Optimized reactive statement with memoization
+	let lastSelectedModelsStr = '';
+	$: {
+		const currentSelectedModelsStr = JSON.stringify(selectedModels) + (atSelectedModel?.id || '');
+		if (currentSelectedModelsStr !== lastSelectedModelsStr) {
+			selectedModelIds = atSelectedModel !== undefined ? [atSelectedModel.id] : selectedModels;
+			lastSelectedModelsStr = currentSelectedModelsStr;
+		}
+	}
 
 	let selectedToolIds = [];
 	let selectedFilterIds = [];
@@ -964,14 +1005,23 @@
 		}
 	};
 
+	let scrollPending = false;
+	
 	const scrollToBottom = async (behavior = 'auto') => {
+		if (scrollPending) return;
+		
+		scrollPending = true;
 		await tick();
-		if (messagesContainerElement) {
-			messagesContainerElement.scrollTo({
-				top: messagesContainerElement.scrollHeight,
-				behavior
-			});
-		}
+		
+		requestAnimationFrame(() => {
+			if (messagesContainerElement) {
+				messagesContainerElement.scrollTo({
+					top: messagesContainerElement.scrollHeight,
+					behavior
+				});
+			}
+			scrollPending = false;
+		});
 	};
 	const chatCompletedHandler = async (chatId, modelId, responseMessageId, messages) => {
 		const res = await chatCompleted(localStorage.token, {
@@ -1265,19 +1315,51 @@
 				// Stream response
 				let value = choices[0].delta.content;
 				if (!(message.content === '' && value === '\n')) {
-					if (!streamBuffers[messageId]) {
-						streamBuffers[messageId] = '';
-					}
-					streamBuffers[messageId] += value;
-
+					const buffer = createStreamBuffer(messageId);
+					buffer.content += value;
+			
 					if (!debouncedMessageUpdaters[messageId]) {
+						const currentContentLength = (history.messages[messageId]?.content || '').length;
+						const debounceTime = getOptimalDebounceTime(currentContentLength);
+						
 						debouncedMessageUpdaters[messageId] = debounce(() => {
-							if (streamBuffers[messageId] && history.messages[messageId]) {
-								history.messages[messageId].content += streamBuffers[messageId];
-								streamBuffers[messageId] = ''; // Clear buffer after applying
-
-								// Force Svelte to recognize the change
-								history = { ...history };
+							flushMessageBuffer(messageId);
+			
+							if (navigator.vibrate && ($settings?.hapticFeedback ?? false)) {
+								navigator.vibrate(5);
+							}
+			
+							// Emit chat event for TTS for the flushed chunk
+							const flushedTTSParts = getMessageContentParts(
+								removeAllDetails(history.messages[messageId].content),
+								$config?.audio?.tts?.split_on ?? 'punctuation'
+							);
+							flushedTTSParts.pop();
+							if (
+								flushedTTSParts.length > 0 &&
+								flushedTTSParts[flushedTTSParts.length - 1] !== message.lastSentence_flushed
+							) {
+								message.lastSentence_flushed = flushedTTSParts[flushedTTSParts.length - 1];
+								eventTarget.dispatchEvent(
+									new CustomEvent('chat', {
+										detail: {
+											id: messageId,
+											content: flushedTTSParts[flushedTTSParts.length - 1]
+										}
+									})
+								);
+							}
+			
+							if (autoScroll) {
+								scrollToBottom();
+							}
+						}, debounceTime);
+					}
+					
+					if (!buffer.pending) {
+						buffer.pending = true;
+						debouncedMessageUpdaters[messageId]();
+					}
 
 								if (navigator.vibrate && ($settings?.hapticFeedback ?? false)) {
 									navigator.vibrate(5);
