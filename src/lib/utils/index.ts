@@ -24,7 +24,21 @@ import hljs from 'highlight.js';
 // Helper functions
 //////////////////////////
 
-export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+export const sleep = (ms: number) => Promise((resolve) => setTimeout(resolve, ms));
+
+export const debounce = (func: Function, timeout = 150) => {
+	let timer: NodeJS.Timeout;
+	const debounced = (...args: any[]) => {
+		clearTimeout(timer);
+		timer = setTimeout(() => {
+			func.apply(this, args);
+		}, timeout);
+	};
+	debounced.cancel = () => {
+		clearTimeout(timer);
+	};
+	return debounced;
+};
 
 function escapeRegExp(string: string): string {
 	return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -87,20 +101,6 @@ export const sanitizeResponseContent = (content: string) => {
 		.replaceAll('<', '&lt;')
 		.replaceAll('>', '&gt;')
 		.trim();
-};
-
-export const debounce = (func: Function, timeout = 150) => {
-	let timer: NodeJS.Timeout;
-	const debounced = (...args: any[]) => {
-		clearTimeout(timer);
-		timer = setTimeout(() => {
-			func.apply(this, args);
-		}, timeout);
-	};
-	debounced.cancel = () => {
-		clearTimeout(timer);
-	};
-	return debounced;
 };
 
 export const processResponseContent = (content: string) => {
