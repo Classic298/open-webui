@@ -24,7 +24,7 @@ import hljs from 'highlight.js';
 // Helper functions
 //////////////////////////
 
-export const sleep = (ms: number) => Promise((resolve) => setTimeout(resolve, ms));
+export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export const debounce = (func: Function, timeout = 150) => {
 	let timer: NodeJS.Timeout;
