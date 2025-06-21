@@ -12,6 +12,14 @@
 	const dispatch = createEventDispatcher();
 
 	import {
+		debounce,
+		blobToFile,
+		compressImage,
+		createMessagesList,
+		extractCurlyBraceWords
+	} from '$lib/utils';
+	import { uploadFile } from '$lib/apis/files';
+	import { generateAutoCompletion } from '$lib/apis';
 		type Model,
 		mobile,
 		settings,
@@ -79,6 +87,14 @@
 
 	export let prompt = '';
 	export let files = [];
+
+	let debouncedPrompt = prompt;
+
+	const updatePrompt = debounce((value) => {
+		prompt = value;
+	}, 300);
+
+	$: updatePrompt(debouncedPrompt);
 
 	export let toolServers = [];
 
@@ -752,7 +768,7 @@
 										>
 											<RichTextInput
 												bind:this={chatInputElement}
-												bind:value={prompt}
+												bind:value={debouncedPrompt}
 												id="chat-input"
 												messageInput={true}
 												shiftEnter={!($settings?.ctrlEnterToSend ?? false) &&
@@ -971,7 +987,7 @@
 											bind:this={chatInputElement}
 											class="scrollbar-hidden bg-transparent dark:text-gray-200 outline-hidden w-full pt-3 px-1 resize-none"
 											placeholder={placeholder ? placeholder : $i18n.t('Send a Message')}
-											bind:value={prompt}
+											bind:value={debouncedPrompt}
 											on:compositionstart={() => (isComposing = true)}
 											on:compositionend={() => (isComposing = false)}
 											on:keydown={async (e) => {
