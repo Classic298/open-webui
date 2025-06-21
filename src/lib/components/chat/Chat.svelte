@@ -102,6 +102,25 @@
 	let autoScroll = true;
 	let processing = '';
 	let messagesContainerElement: HTMLDivElement;
+	
+	const MESSAGE_HISTORY_LIMIT = 1000;
+	
+	const cleanupOldMessages = () => {
+		const messageIds = Object.keys(history.messages);
+		if (messageIds.length > MESSAGE_HISTORY_LIMIT) {
+			const sortedIds = messageIds.sort((a, b) => 
+				history.messages[a].timestamp - history.messages[b].timestamp
+			);
+			
+			// Keep recent messages and clean up old ones
+			const toDelete = sortedIds.slice(0, messageIds.length - MESSAGE_HISTORY_LIMIT);
+			toDelete.forEach(id => {
+				delete history.messages[id];
+			});
+			
+			history = { ...history };
+		}
+	};
 
 	let navbarElement;
 
@@ -1074,12 +1093,15 @@
 					params: params,
 					files: chatFiles
 				});
-
+	
 				currentChatPage.set(1);
 				await chats.set(await getChatList(localStorage.token, $currentChatPage));
 			}
 		}
-
+	
+		// Cleanup old messages to prevent memory issues
+		cleanupOldMessages();
+	
 		taskIds = null;
 	};
 
