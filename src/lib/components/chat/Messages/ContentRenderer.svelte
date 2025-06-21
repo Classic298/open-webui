@@ -35,7 +35,11 @@
 
 	let floatingButtonsElement;
 
+let updatePositionPending = false;
+
 	const updateButtonPosition = (event) => {
+		if (updatePositionPending) return;
+		
 		const buttonsContainerElement = document.getElementById(`floating-buttons-${id}`);
 		if (
 			!contentContainerElement?.contains(event.target) &&
@@ -44,46 +48,48 @@
 			closeFloatingButtons();
 			return;
 		}
-
-		setTimeout(async () => {
+	
+		updatePositionPending = true;
+		requestAnimationFrame(async () => {
 			await tick();
-
+			updatePositionPending = false;
+	
 			if (!contentContainerElement?.contains(event.target)) return;
-
+	
 			let selection = window.getSelection();
-
+	
 			if (selection.toString().trim().length > 0) {
 				const range = selection.getRangeAt(0);
 				const rect = range.getBoundingClientRect();
-
 				const parentRect = contentContainerElement.getBoundingClientRect();
-
-				// Adjust based on parent rect
-				const top = rect.bottom - parentRect.top;
-				const left = rect.left - parentRect.left;
-
+	
+				// Batch DOM writes
 				if (buttonsContainerElement) {
-					buttonsContainerElement.style.display = 'block';
-
-					// Calculate space available on the right
+					const top = rect.bottom - parentRect.top;
+					const left = rect.left - parentRect.left;
 					const spaceOnRight = parentRect.width - left;
-					let halfScreenWidth = $mobile ? window.innerWidth / 2 : window.innerWidth / 3;
-
+					const halfScreenWidth = $mobile ? window.innerWidth / 2 : window.innerWidth / 3;
+	
+					// Batch all style changes
+					const styles = {
+						display: 'block',
+						top: `${top + 5}px`
+					};
+	
 					if (spaceOnRight < halfScreenWidth) {
-						const right = parentRect.right - rect.right;
-						buttonsContainerElement.style.right = `${right}px`;
-						buttonsContainerElement.style.left = 'auto'; // Reset left
+						styles.right = `${parentRect.right - rect.right}px`;
+						styles.left = 'auto';
 					} else {
-						// Enough space, position using 'left'
-						buttonsContainerElement.style.left = `${left}px`;
-						buttonsContainerElement.style.right = 'auto'; // Reset right
+						styles.left = `${left}px`;
+						styles.right = 'auto';
 					}
-					buttonsContainerElement.style.top = `${top + 5}px`; // +5 to add some spacing
+	
+					Object.assign(buttonsContainerElement.style, styles);
 				}
 			} else {
 				closeFloatingButtons();
 			}
-		}, 0);
+		});
 	};
 
 	const closeFloatingButtons = () => {
