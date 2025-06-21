@@ -50,8 +50,7 @@
 		removeDetails,
 		getPromptVariables,
 		processDetails,
-		removeAllDetails,
-		debounce
+		removeAllDetails
 	} from '$lib/utils';
 
 	import { generateChatCompletion } from '$lib/apis/ollama';
