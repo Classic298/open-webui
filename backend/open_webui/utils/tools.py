@@ -1,645 +1,585 @@
-import inspect
 import logging
+from pathlib import Path
+from typing import Optional
+import time
 import re
-import inspect
 import aiohttp
-import asyncio
-import yaml
+from pydantic import BaseModel, HttpUrl
 
-from pydantic import BaseModel
-from pydantic.fields import FieldInfo
-from typing import (
-    Any,
-    Awaitable,
-    Callable,
-    get_type_hints,
-    get_args,
-    get_origin,
-    Dict,
-    List,
-    Tuple,
-    Union,
-    Optional,
-    Type,
+from open_webui.models.tools import (
+    ToolForm,
+    ToolModel,
+    ToolResponse,
+    ToolUserResponse,
+    Tools,
 )
-from functools import update_wrapper, partial
+from open_webui.utils.plugin import load_tool_module_by_id, replace_imports
+from open_webui.config import CACHE_DIR, RESPECT_USER_PRIVACY
+from open_webui.constants import ERROR_MESSAGES
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from open_webui.utils.tools import get_tool_specs
+from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.access_control import has_access, has_permission
+from open_webui.utils.privacy import filter_private_items
+from open_webui.env import SRC_LOG_LEVELS
 
+from open_webui.utils.tools import get_tool_servers_data
 
-from fastapi import Request
-from pydantic import BaseModel, Field, create_model
-
-from langchain_core.utils.function_calling import (
-    convert_to_openai_function as convert_pydantic_model_to_openai_function_spec,
-)
-
-
-from open_webui.models.tools import Tools
-from open_webui.models.users import UserModel
-from open_webui.utils.plugin import load_tool_module_by_id
-from open_webui.env import (
-    SRC_LOG_LEVELS,
-    AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER_DATA,
-    AIOHTTP_CLIENT_SESSION_TOOL_SERVER_SSL,
-)
-
-import copy
 
 log = logging.getLogger(__name__)
-log.setLevel(SRC_LOG_LEVELS["MODELS"])
+log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 
-def get_async_tool_function_and_apply_extra_params(
-    function: Callable, extra_params: dict
-) -> Callable[..., Awaitable]:
-    sig = inspect.signature(function)
-    extra_params = {k: v for k, v in extra_params.items() if k in sig.parameters}
-    partial_func = partial(function, **extra_params)
+router = APIRouter()
 
-    if inspect.iscoroutinefunction(function):
-        update_wrapper(partial_func, function)
-        return partial_func
-    else:
-        # Make it a coroutine function
-        async def new_function(*args, **kwargs):
-            return partial_func(*args, **kwargs)
+############################
+# GetTools
+############################
 
-        update_wrapper(new_function, function)
-        return new_function
 
+@router.get("/", response_model=list[ToolUserResponse])
+async def get_tools(request: Request, user=Depends(get_verified_user)):
 
-def get_tools(
-    request: Request, tool_ids: list[str], user: UserModel, extra_params: dict
-) -> dict[str, dict]:
-    tools_dict = {}
+    if not request.app.state.TOOL_SERVERS:
+        # If the tool servers are not set, we need to set them
+        # This is done only once when the server starts
+        # This is done to avoid loading the tool servers every time
 
-    for tool_id in tool_ids:
-        tool = Tools.get_tool_by_id(tool_id)
-        if tool is None:
-            if tool_id.startswith("server:"):
-                server_idx = int(tool_id.split(":")[1])
-                tool_server_connection = (
-                    request.app.state.config.TOOL_SERVER_CONNECTIONS[server_idx]
-                )
-                tool_server_data = None
-                for server in request.app.state.TOOL_SERVERS:
-                    if server["idx"] == server_idx:
-                        tool_server_data = server
-                        break
-                assert tool_server_data is not None
-                specs = tool_server_data.get("specs", [])
-
-                for spec in specs:
-                    function_name = spec["name"]
-
-                    auth_type = tool_server_connection.get("auth_type", "bearer")
-                    token = None
-
-                    if auth_type == "bearer":
-                        token = tool_server_connection.get("key", "")
-                    elif auth_type == "session":
-                        token = request.state.token.credentials
-
-                    def make_tool_function(function_name, token, tool_server_data):
-                        async def tool_function(**kwargs):
-                            return await execute_tool_server(
-                                token=token,
-                                url=tool_server_data["url"],
-                                name=function_name,
-                                params=kwargs,
-                                server_data=tool_server_data,
-                            )
-
-                        return tool_function
-
-                    tool_function = make_tool_function(
-                        function_name, token, tool_server_data
-                    )
-
-                    callable = get_async_tool_function_and_apply_extra_params(
-                        tool_function,
-                        {},
-                    )
-
-                    tool_dict = {
-                        "tool_id": tool_id,
-                        "callable": callable,
-                        "spec": spec,
-                    }
-
-                    # TODO: if collision, prepend toolkit name
-                    if function_name in tools_dict:
-                        log.warning(
-                            f"Tool {function_name} already exists in another tools!"
-                        )
-                        log.warning(f"Discarding {tool_id}.{function_name}")
-                    else:
-                        tools_dict[function_name] = tool_dict
-            else:
-                continue
-        else:
-            module = request.app.state.TOOLS.get(tool_id, None)
-            if module is None:
-                module, _ = load_tool_module_by_id(tool_id)
-                request.app.state.TOOLS[tool_id] = module
-
-            extra_params["__id__"] = tool_id
-
-            # Set valves for the tool
-            if hasattr(module, "valves") and hasattr(module, "Valves"):
-                valves = Tools.get_tool_valves_by_id(tool_id) or {}
-                module.valves = module.Valves(**valves)
-            if hasattr(module, "UserValves"):
-                extra_params["__user__"]["valves"] = module.UserValves(  # type: ignore
-                    **Tools.get_user_valves_by_id_and_user_id(tool_id, user.id)
-                )
-
-            for spec in tool.specs:
-                # TODO: Fix hack for OpenAI API
-                # Some times breaks OpenAI but others don't. Leaving the comment
-                for val in spec.get("parameters", {}).get("properties", {}).values():
-                    if val.get("type") == "str":
-                        val["type"] = "string"
-
-                # Remove internal reserved parameters (e.g. __id__, __user__)
-                spec["parameters"]["properties"] = {
-                    key: val
-                    for key, val in spec["parameters"]["properties"].items()
-                    if not key.startswith("__")
-                }
-
-                # convert to function that takes only model params and inserts custom params
-                function_name = spec["name"]
-                tool_function = getattr(module, function_name)
-                callable = get_async_tool_function_and_apply_extra_params(
-                    tool_function, extra_params
-                )
-
-                # TODO: Support Pydantic models as parameters
-                if callable.__doc__ and callable.__doc__.strip() != "":
-                    s = re.split(":(param|return)", callable.__doc__, 1)
-                    spec["description"] = s[0]
-                else:
-                    spec["description"] = function_name
-
-                tool_dict = {
-                    "tool_id": tool_id,
-                    "callable": callable,
-                    "spec": spec,
-                    # Misc info
-                    "metadata": {
-                        "file_handler": hasattr(module, "file_handler")
-                        and module.file_handler,
-                        "citation": hasattr(module, "citation") and module.citation,
-                    },
-                }
-
-                # TODO: if collision, prepend toolkit name
-                if function_name in tools_dict:
-                    log.warning(
-                        f"Tool {function_name} already exists in another tools!"
-                    )
-                    log.warning(f"Discarding {tool_id}.{function_name}")
-                else:
-                    tools_dict[function_name] = tool_dict
-
-    return tools_dict
-
-
-def parse_description(docstring: str | None) -> str:
-    """
-    Parse a function's docstring to extract the description.
-
-    Args:
-        docstring (str): The docstring to parse.
-
-    Returns:
-        str: The description.
-    """
-
-    if not docstring:
-        return ""
-
-    lines = [line.strip() for line in docstring.strip().split("\n")]
-    description_lines: list[str] = []
-
-    for line in lines:
-        if re.match(r":param", line) or re.match(r":return", line):
-            break
-
-        description_lines.append(line)
-
-    return "\n".join(description_lines)
-
-
-def parse_docstring(docstring):
-    """
-    Parse a function's docstring to extract parameter descriptions in reST format.
-
-    Args:
-        docstring (str): The docstring to parse.
-
-    Returns:
-        dict: A dictionary where keys are parameter names and values are descriptions.
-    """
-    if not docstring:
-        return {}
-
-    # Regex to match `:param name: description` format
-    param_pattern = re.compile(r":param (\w+):\s*(.+)")
-    param_descriptions = {}
-
-    for line in docstring.splitlines():
-        match = param_pattern.match(line.strip())
-        if not match:
-            continue
-        param_name, param_description = match.groups()
-        if param_name.startswith("__"):
-            continue
-        param_descriptions[param_name] = param_description
-
-    return param_descriptions
-
-
-def convert_function_to_pydantic_model(func: Callable) -> type[BaseModel]:
-    """
-    Converts a Python function's type hints and docstring to a Pydantic model,
-    including support for nested types, default values, and descriptions.
-
-    Args:
-        func: The function whose type hints and docstring should be converted.
-        model_name: The name of the generated Pydantic model.
-
-    Returns:
-        A Pydantic model class.
-    """
-    type_hints = get_type_hints(func)
-    signature = inspect.signature(func)
-    parameters = signature.parameters
-
-    docstring = func.__doc__
-
-    function_description = parse_description(docstring)
-    function_param_descriptions = parse_docstring(docstring)
-
-    field_defs = {}
-    for name, param in parameters.items():
-
-        type_hint = type_hints.get(name, Any)
-        default_value = param.default if param.default is not param.empty else ...
-
-        param_description = function_param_descriptions.get(name, None)
-
-        if param_description:
-            field_defs[name] = type_hint, Field(
-                default_value, description=param_description
-            )
-        else:
-            field_defs[name] = type_hint, default_value
-
-    model = create_model(func.__name__, **field_defs)
-    model.__doc__ = function_description
-
-    return model
-
-
-def get_functions_from_tool(tool: object) -> list[Callable]:
-    return [
-        getattr(tool, func)
-        for func in dir(tool)
-        if callable(
-            getattr(tool, func)
-        )  # checks if the attribute is callable (a method or function).
-        and not func.startswith(
-            "__"
-        )  # filters out special (dunder) methods like init, str, etc. — these are usually built-in functions of an object that you might not need to use directly.
-        and not inspect.isclass(
-            getattr(tool, func)
-        )  # ensures that the callable is not a class itself, just a method or function.
-    ]
-
-
-def get_tool_specs(tool_module: object) -> list[dict]:
-    function_models = map(
-        convert_function_to_pydantic_model, get_functions_from_tool(tool_module)
-    )
-
-    specs = [
-        convert_pydantic_model_to_openai_function_spec(function_model)
-        for function_model in function_models
-    ]
-
-    return specs
-
-
-def resolve_schema(schema, components):
-    """
-    Recursively resolves a JSON schema using OpenAPI components.
-    """
-    if not schema:
-        return {}
-
-    if "$ref" in schema:
-        ref_path = schema["$ref"]
-        ref_parts = ref_path.strip("#/").split("/")
-        resolved = components
-        for part in ref_parts[1:]:  # Skip the initial 'components'
-            resolved = resolved.get(part, {})
-        return resolve_schema(resolved, components)
-
-    resolved_schema = copy.deepcopy(schema)
-
-    # Recursively resolve inner schemas
-    if "properties" in resolved_schema:
-        for prop, prop_schema in resolved_schema["properties"].items():
-            resolved_schema["properties"][prop] = resolve_schema(
-                prop_schema, components
-            )
-
-    if "items" in resolved_schema:
-        resolved_schema["items"] = resolve_schema(resolved_schema["items"], components)
-
-    return resolved_schema
-
-
-def convert_openapi_to_tool_payload(openapi_spec):
-    """
-    Converts an OpenAPI specification into a custom tool payload structure.
-
-    Args:
-        openapi_spec (dict): The OpenAPI specification as a Python dict.
-
-    Returns:
-        list: A list of tool payloads.
-    """
-    tool_payload = []
-
-    for path, methods in openapi_spec.get("paths", {}).items():
-        for method, operation in methods.items():
-            if operation.get("operationId"):
-                tool = {
-                    "type": "function",
-                    "name": operation.get("operationId"),
-                    "description": operation.get(
-                        "description",
-                        operation.get("summary", "No description available."),
-                    ),
-                    "parameters": {"type": "object", "properties": {}, "required": []},
-                }
-
-                # Extract path and query parameters
-                for param in operation.get("parameters", []):
-                    param_name = param["name"]
-                    param_schema = param.get("schema", {})
-                    description = param_schema.get("description", "")
-                    if not description:
-                        description = param.get("description") or ""
-                    if param_schema.get("enum") and isinstance(
-                        param_schema.get("enum"), list
-                    ):
-                        description += (
-                            f". Possible values: {', '.join(param_schema.get('enum'))}"
-                        )
-                    tool["parameters"]["properties"][param_name] = {
-                        "type": param_schema.get("type"),
-                        "description": description,
-                    }
-                    if param.get("required"):
-                        tool["parameters"]["required"].append(param_name)
-
-                # Extract and resolve requestBody if available
-                request_body = operation.get("requestBody")
-                if request_body:
-                    content = request_body.get("content", {})
-                    json_schema = content.get("application/json", {}).get("schema")
-                    if json_schema:
-                        resolved_schema = resolve_schema(
-                            json_schema, openapi_spec.get("components", {})
-                        )
-
-                        if resolved_schema.get("properties"):
-                            tool["parameters"]["properties"].update(
-                                resolved_schema["properties"]
-                            )
-                            if "required" in resolved_schema:
-                                tool["parameters"]["required"] = list(
-                                    set(
-                                        tool["parameters"]["required"]
-                                        + resolved_schema["required"]
-                                    )
-                                )
-                        elif resolved_schema.get("type") == "array":
-                            tool["parameters"] = (
-                                resolved_schema  # special case for array
-                            )
-
-                tool_payload.append(tool)
-
-    return tool_payload
-
-
-async def get_tool_server_data(token: str, url: str) -> Dict[str, Any]:
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-    }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-
-    error = None
-    try:
-        timeout = aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER_DATA)
-        async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
-            async with session.get(
-                url, headers=headers, ssl=AIOHTTP_CLIENT_SESSION_TOOL_SERVER_SSL
-            ) as response:
-                if response.status != 200:
-                    error_body = await response.json()
-                    raise Exception(error_body)
-
-                # Check if URL ends with .yaml or .yml to determine format
-                if url.lower().endswith((".yaml", ".yml")):
-                    text_content = await response.text()
-                    res = yaml.safe_load(text_content)
-                else:
-                    res = await response.json()
-    except Exception as err:
-        log.exception(f"Could not fetch tool server spec from {url}")
-        if isinstance(err, dict) and "detail" in err:
-            error = err["detail"]
-        else:
-            error = str(err)
-        raise Exception(error)
-
-    data = {
-        "openapi": res,
-        "info": res.get("info", {}),
-        "specs": convert_openapi_to_tool_payload(res),
-    }
-
-    log.info(f"Fetched data: {data}")
-    return data
-
-
-async def get_tool_servers_data(
-    servers: List[Dict[str, Any]], session_token: Optional[str] = None
-) -> List[Dict[str, Any]]:
-    # Prepare list of enabled servers along with their original index
-    server_entries = []
-    for idx, server in enumerate(servers):
-        if server.get("config", {}).get("enable"):
-            # Path (to OpenAPI spec URL) can be either a full URL or a path to append to the base URL
-            openapi_path = server.get("path", "openapi.json")
-            if "://" in openapi_path:
-                # If it contains "://", it's a full URL
-                full_url = openapi_path
-            else:
-                if not openapi_path.startswith("/"):
-                    # Ensure the path starts with a slash
-                    openapi_path = f"/{openapi_path}"
-
-                full_url = f"{server.get('url')}{openapi_path}"
-
-            info = server.get("info", {})
-
-            auth_type = server.get("auth_type", "bearer")
-            token = None
-
-            if auth_type == "bearer":
-                token = server.get("key", "")
-            elif auth_type == "session":
-                token = session_token
-            server_entries.append((idx, server, full_url, info, token))
-
-    # Create async tasks to fetch data
-    tasks = [
-        get_tool_server_data(token, url) for (_, _, url, _, token) in server_entries
-    ]
-
-    # Execute tasks concurrently
-    responses = await asyncio.gather(*tasks, return_exceptions=True)
-
-    # Build final results with index and server metadata
-    results = []
-    for (idx, server, url, info, _), response in zip(server_entries, responses):
-        if isinstance(response, Exception):
-            log.error(f"Failed to connect to {url} OpenAPI tool server")
-            continue
-
-        openapi_data = response.get("openapi", {})
-
-        if info and isinstance(openapi_data, dict):
-            if "name" in info:
-                openapi_data["info"]["title"] = info.get("name", "Tool Server")
-
-            if "description" in info:
-                openapi_data["info"]["description"] = info.get("description", "")
-
-        results.append(
-            {
-                "idx": idx,
-                "url": server.get("url"),
-                "openapi": openapi_data,
-                "info": response.get("info"),
-                "specs": response.get("specs"),
-            }
+        request.app.state.TOOL_SERVERS = await get_tool_servers_data(
+            request.app.state.config.TOOL_SERVER_CONNECTIONS
         )
 
-    return results
+    # Get database tools
+    db_tools = Tools.get_tools()
+    
+    # Get tool server tools
+    server_tools = []
+    for server in request.app.state.TOOL_SERVERS:
+        server_tools.append(
+            ToolUserResponse(
+                **{
+                    "id": f"server:{server['idx']}",
+                    "user_id": f"server:{server['idx']}",
+                    "name": server.get("openapi", {})
+                    .get("info", {})
+                    .get("title", "Tool Server"),
+                    "meta": {
+                        "description": server.get("openapi", {})
+                        .get("info", {})
+                        .get("description", ""),
+                    },
+                    "access_control": request.app.state.config.TOOL_SERVER_CONNECTIONS[
+                        server["idx"]
+                    ]
+                    .get("config", {})
+                    .get("access_control", None),
+                    "updated_at": int(time.time()),
+                    "created_at": int(time.time()),
+                }
+            )
+        )
+
+    # Combine all tools
+    all_tools = db_tools + server_tools
+
+    # Apply filtering based on user role and privacy settings
+    if user.role == "admin":
+        # Filter private database tools if privacy is enabled
+        filtered_db_tools = filter_private_items(
+            db_tools, 
+            user, 
+            RESPECT_USER_PRIVACY.value
+        )
+        
+        # For admins, include all server tools (they have access to configure them)
+        filtered_tools = filtered_db_tools + server_tools
+    else:
+        # For non-admin users, filter based on access permissions
+        filtered_tools = [
+            tool
+            for tool in all_tools
+            if tool.user_id == user.id
+            or has_access(user.id, "read", tool.access_control)
+        ]
+
+    return filtered_tools
 
 
-async def execute_tool_server(
-    token: str, url: str, name: str, params: Dict[str, Any], server_data: Dict[str, Any]
-) -> Any:
-    error = None
+############################
+# GetToolList
+############################
+
+
+@router.get("/list", response_model=list[ToolUserResponse])
+async def get_tool_list(user=Depends(get_verified_user)):
+    if user.role == "admin":
+        tools = Tools.get_tools()
+        tools = filter_private_items(tools, user, RESPECT_USER_PRIVACY.value)
+    else:
+        tools = Tools.get_tools_by_user_id(user.id, "write")
+    
+    return tools
+
+
+############################
+# LoadFunctionFromLink
+############################
+
+
+class LoadUrlForm(BaseModel):
+    url: HttpUrl
+
+
+def github_url_to_raw_url(url: str) -> str:
+    # Handle 'tree' (folder) URLs (add main.py at the end)
+    m1 = re.match(r"https://github\.com/([^/]+)/([^/]+)/tree/([^/]+)/(.*)", url)
+    if m1:
+        org, repo, branch, path = m1.groups()
+        return f"https://raw.githubusercontent.com/{org}/{repo}/refs/heads/{branch}/{path.rstrip('/')}/main.py"
+
+    # Handle 'blob' (file) URLs
+    m2 = re.match(r"https://github\.com/([^/]+)/([^/]+)/blob/([^/]+)/(.*)", url)
+    if m2:
+        org, repo, branch, path = m2.groups()
+        return (
+            f"https://raw.githubusercontent.com/{org}/{repo}/refs/heads/{branch}/{path}"
+        )
+
+    # No match; return as-is
+    return url
+
+
+@router.post("/load/url", response_model=Optional[dict])
+async def load_tool_from_url(
+    request: Request, form_data: LoadUrlForm, user=Depends(get_admin_user)
+):
+    # NOTE: This is NOT a SSRF vulnerability:
+    # This endpoint is admin-only (see get_admin_user), meant for *trusted* internal use,
+    # and does NOT accept untrusted user input. Access is enforced by authentication.
+
+    url = str(form_data.url)
+    if not url:
+        raise HTTPException(status_code=400, detail="Please enter a valid URL")
+
+    url = github_url_to_raw_url(url)
+    url_parts = url.rstrip("/").split("/")
+
+    file_name = url_parts[-1]
+    tool_name = (
+        file_name[:-3]
+        if (
+            file_name.endswith(".py")
+            and (not file_name.startswith(("main.py", "index.py", "__init__.py")))
+        )
+        else url_parts[-2] if len(url_parts) > 1 else "function"
+    )
+
     try:
-        openapi = server_data.get("openapi", {})
-        paths = openapi.get("paths", {})
-
-        matching_route = None
-        for route_path, methods in paths.items():
-            for http_method, operation in methods.items():
-                if isinstance(operation, dict) and operation.get("operationId") == name:
-                    matching_route = (route_path, methods)
-                    break
-            if matching_route:
-                break
-
-        if not matching_route:
-            raise Exception(f"No matching route found for operationId: {name}")
-
-        route_path, methods = matching_route
-
-        method_entry = None
-        for http_method, operation in methods.items():
-            if operation.get("operationId") == name:
-                method_entry = (http_method.lower(), operation)
-                break
-
-        if not method_entry:
-            raise Exception(f"No matching method found for operationId: {name}")
-
-        http_method, operation = method_entry
-
-        path_params = {}
-        query_params = {}
-        body_params = {}
-
-        for param in operation.get("parameters", []):
-            param_name = param["name"]
-            param_in = param["in"]
-            if param_name in params:
-                if param_in == "path":
-                    path_params[param_name] = params[param_name]
-                elif param_in == "query":
-                    query_params[param_name] = params[param_name]
-
-        final_url = f"{url}{route_path}"
-        for key, value in path_params.items():
-            final_url = final_url.replace(f"{{{key}}}", str(value))
-
-        if query_params:
-            query_string = "&".join(f"{k}={v}" for k, v in query_params.items())
-            final_url = f"{final_url}?{query_string}"
-
-        if operation.get("requestBody", {}).get("content"):
-            if params:
-                body_params = params
-            else:
-                raise Exception(
-                    f"Request body expected for operation '{name}' but none found."
-                )
-
-        headers = {"Content-Type": "application/json"}
-
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-
         async with aiohttp.ClientSession(trust_env=True) as session:
-            request_method = getattr(session, http_method.lower())
+            async with session.get(
+                url, headers={"Content-Type": "application/json"}
+            ) as resp:
+                if resp.status != 200:
+                    raise HTTPException(
+                        status_code=resp.status, detail="Failed to fetch the tool"
+                    )
+                data = await resp.text()
+                if not data:
+                    raise HTTPException(
+                        status_code=400, detail="No data received from the URL"
+                    )
+        return {
+            "name": tool_name,
+            "content": data,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error importing tool: {e}")
 
-            if http_method in ["post", "put", "patch"]:
-                async with request_method(
-                    final_url,
-                    json=body_params,
-                    headers=headers,
-                    ssl=AIOHTTP_CLIENT_SESSION_TOOL_SERVER_SSL,
-                ) as response:
-                    if response.status >= 400:
-                        text = await response.text()
-                        raise Exception(f"HTTP error {response.status}: {text}")
-                    return await response.json()
+
+############################
+# ExportTools
+############################
+
+
+@router.get("/export", response_model=list[ToolModel])
+async def export_tools(user=Depends(get_admin_user)):
+    tools = Tools.get_tools()
+    return tools
+
+
+############################
+# CreateNewTools
+############################
+
+
+@router.post("/create", response_model=Optional[ToolResponse])
+async def create_new_tools(
+    request: Request,
+    form_data: ToolForm,
+    user=Depends(get_verified_user),
+):
+    if user.role != "admin" and not has_permission(
+        user.id, "workspace.tools", request.app.state.config.USER_PERMISSIONS
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.UNAUTHORIZED,
+        )
+
+    if not form_data.id.isidentifier():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only alphanumeric characters and underscores are allowed in the id",
+        )
+
+    form_data.id = form_data.id.lower()
+
+    tools = Tools.get_tool_by_id(form_data.id)
+    if tools is None:
+        try:
+            form_data.content = replace_imports(form_data.content)
+            tool_module, frontmatter = load_tool_module_by_id(
+                form_data.id, content=form_data.content
+            )
+            form_data.meta.manifest = frontmatter
+
+            TOOLS = request.app.state.TOOLS
+            TOOLS[form_data.id] = tool_module
+
+            specs = get_tool_specs(TOOLS[form_data.id])
+            tools = Tools.insert_new_tool(user.id, form_data, specs)
+
+            tool_cache_dir = CACHE_DIR / "tools" / form_data.id
+            tool_cache_dir.mkdir(parents=True, exist_ok=True)
+
+            if tools:
+                return tools
             else:
-                async with request_method(
-                    final_url,
-                    headers=headers,
-                    ssl=AIOHTTP_CLIENT_SESSION_TOOL_SERVER_SSL,
-                ) as response:
-                    if response.status >= 400:
-                        text = await response.text()
-                        raise Exception(f"HTTP error {response.status}: {text}")
-                    return await response.json()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=ERROR_MESSAGES.DEFAULT("Error creating tools"),
+                )
+        except Exception as e:
+            log.exception(f"Failed to load the tool by id {form_data.id}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.DEFAULT(str(e)),
+            )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.ID_TAKEN,
+        )
 
-    except Exception as err:
-        error = str(err)
-        log.exception(f"API Request Error: {error}")
-        return {"error": error}
+
+############################
+# GetToolsById
+############################
+
+
+@router.get("/id/{id}", response_model=Optional[ToolModel])
+async def get_tools_by_id(id: str, user=Depends(get_verified_user)):
+    tools = Tools.get_tool_by_id(id)
+
+    if tools:
+        if (
+            user.role == "admin"
+            or tools.user_id == user.id
+            or has_access(user.id, "read", tools.access_control)
+        ):
+            return tools
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+
+############################
+# UpdateToolsById
+############################
+
+
+@router.post("/id/{id}/update", response_model=Optional[ToolModel])
+async def update_tools_by_id(
+    request: Request,
+    id: str,
+    form_data: ToolForm,
+    user=Depends(get_verified_user),
+):
+    tools = Tools.get_tool_by_id(id)
+    if not tools:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    # Is the user the original creator, in a group with write access, or an admin
+    if (
+        tools.user_id != user.id
+        and not has_access(user.id, "write", tools.access_control)
+        and user.role != "admin"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.UNAUTHORIZED,
+        )
+
+    try:
+        form_data.content = replace_imports(form_data.content)
+        tool_module, frontmatter = load_tool_module_by_id(id, content=form_data.content)
+        form_data.meta.manifest = frontmatter
+
+        TOOLS = request.app.state.TOOLS
+        TOOLS[id] = tool_module
+
+        specs = get_tool_specs(TOOLS[id])
+
+        updated = {
+            **form_data.model_dump(exclude={"id"}),
+            "specs": specs,
+        }
+
+        log.debug(updated)
+        tools = Tools.update_tool_by_id(id, updated)
+
+        if tools:
+            return tools
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.DEFAULT("Error updating tools"),
+            )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT(str(e)),
+        )
+
+
+############################
+# DeleteToolsById
+############################
+
+
+@router.delete("/id/{id}/delete", response_model=bool)
+async def delete_tools_by_id(
+    request: Request, id: str, user=Depends(get_verified_user)
+):
+    tools = Tools.get_tool_by_id(id)
+    if not tools:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    if (
+        tools.user_id != user.id
+        and not has_access(user.id, "write", tools.access_control)
+        and user.role != "admin"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.UNAUTHORIZED,
+        )
+
+    result = Tools.delete_tool_by_id(id)
+    if result:
+        TOOLS = request.app.state.TOOLS
+        if id in TOOLS:
+            del TOOLS[id]
+
+    return result
+
+
+############################
+# GetToolValves
+############################
+
+
+@router.get("/id/{id}/valves", response_model=Optional[dict])
+async def get_tools_valves_by_id(id: str, user=Depends(get_verified_user)):
+    tools = Tools.get_tool_by_id(id)
+    if tools:
+        try:
+            valves = Tools.get_tool_valves_by_id(id)
+            return valves
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.DEFAULT(str(e)),
+            )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+
+############################
+# GetToolValvesSpec
+############################
+
+
+@router.get("/id/{id}/valves/spec", response_model=Optional[dict])
+async def get_tools_valves_spec_by_id(
+    request: Request, id: str, user=Depends(get_verified_user)
+):
+    tools = Tools.get_tool_by_id(id)
+    if tools:
+        if id in request.app.state.TOOLS:
+            tools_module = request.app.state.TOOLS[id]
+        else:
+            tools_module, _ = load_tool_module_by_id(id)
+            request.app.state.TOOLS[id] = tools_module
+
+        if hasattr(tools_module, "Valves"):
+            Valves = tools_module.Valves
+            return Valves.schema()
+        return None
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+
+############################
+# UpdateToolValves
+############################
+
+
+@router.post("/id/{id}/valves/update", response_model=Optional[dict])
+async def update_tools_valves_by_id(
+    request: Request, id: str, form_data: dict, user=Depends(get_verified_user)
+):
+    tools = Tools.get_tool_by_id(id)
+    if not tools:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    if (
+        tools.user_id != user.id
+        and not has_access(user.id, "write", tools.access_control)
+        and user.role != "admin"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    if id in request.app.state.TOOLS:
+        tools_module = request.app.state.TOOLS[id]
+    else:
+        tools_module, _ = load_tool_module_by_id(id)
+        request.app.state.TOOLS[id] = tools_module
+
+    if not hasattr(tools_module, "Valves"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+    Valves = tools_module.Valves
+
+    try:
+        form_data = {k: v for k, v in form_data.items() if v is not None}
+        valves = Valves(**form_data)
+        Tools.update_tool_valves_by_id(id, valves.model_dump())
+        return valves.model_dump()
+    except Exception as e:
+        log.exception(f"Failed to update tool valves by id {id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT(str(e)),
+        )
+
+
+############################
+# ToolUserValves
+############################
+
+
+@router.get("/id/{id}/valves/user", response_model=Optional[dict])
+async def get_tools_user_valves_by_id(id: str, user=Depends(get_verified_user)):
+    tools = Tools.get_tool_by_id(id)
+    if tools:
+        try:
+            user_valves = Tools.get_user_valves_by_id_and_user_id(id, user.id)
+            return user_valves
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.DEFAULT(str(e)),
+            )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+
+@router.get("/id/{id}/valves/user/spec", response_model=Optional[dict])
+async def get_tools_user_valves_spec_by_id(
+    request: Request, id: str, user=Depends(get_verified_user)
+):
+    tools = Tools.get_tool_by_id(id)
+    if tools:
+        if id in request.app.state.TOOLS:
+            tools_module = request.app.state.TOOLS[id]
+        else:
+            tools_module, _ = load_tool_module_by_id(id)
+            request.app.state.TOOLS[id] = tools_module
+
+        if hasattr(tools_module, "UserValves"):
+            UserValves = tools_module.UserValves
+            return UserValves.schema()
+        return None
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+
+@router.post("/id/{id}/valves/user/update", response_model=Optional[dict])
+async def update_tools_user_valves_by_id(
+    request: Request, id: str, form_data: dict, user=Depends(get_verified_user)
+):
+    tools = Tools.get_tool_by_id(id)
+
+    if tools:
+        if id in request.app.state.TOOLS:
+            tools_module = request.app.state.TOOLS[id]
+        else:
+            tools_module, _ = load_tool_module_by_id(id)
+            request.app.state.TOOLS[id] = tools_module
+
+        if hasattr(tools_module, "UserValves"):
+            UserValves = tools_module.UserValves
+
+            try:
+                form_data = {k: v for k, v in form_data.items() if v is not None}
+                user_valves = UserValves(**form_data)
+                Tools.update_user_valves_by_id_and_user_id(
+                    id, user.id, user_valves.model_dump()
+                )
+                return user_valves.model_dump()
+            except Exception as e:
+                log.exception(f"Failed to update user valves by id {id}: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=ERROR_MESSAGES.DEFAULT(str(e)),
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=ERROR_MESSAGES.NOT_FOUND,
+            )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
