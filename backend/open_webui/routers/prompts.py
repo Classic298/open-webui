@@ -31,9 +31,8 @@ async def get_prompts(user=Depends(get_verified_user)):
 
 @router.get("/list", response_model=list[PromptUserResponse])
 async def get_prompt_list(user=Depends(get_verified_user)):
-    if user.role == "admin":
+    if user.role == "admin" and not RESPECT_USER_WORKSPACE_PRIVACY.value:
         prompts = Prompts.get_prompts()
-        prompts = filter_private_items(prompts, user, RESPECT_USER_WORKSPACE_PRIVACY.value)
     else:
         prompts = Prompts.get_prompts_by_user_id(user.id, "write")
 
