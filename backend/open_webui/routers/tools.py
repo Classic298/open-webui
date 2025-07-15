@@ -14,12 +14,13 @@ from open_webui.models.tools import (
     Tools,
 )
 from open_webui.utils.plugin import load_tool_module_by_id, replace_imports
-from open_webui.config import CACHE_DIR
+from open_webui.config import CACHE_DIR, RESPECT_USER_PRIVACY
 from open_webui.constants import ERROR_MESSAGES
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from open_webui.utils.tools import get_tool_specs
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_access, has_permission
+from open_webui.utils.privacy import filter_private_items
 from open_webui.env import SRC_LOG_LEVELS
 
 from open_webui.utils.tools import get_tool_servers_data
@@ -48,9 +49,13 @@ async def get_tools(request: Request, user=Depends(get_verified_user)):
             request.app.state.config.TOOL_SERVER_CONNECTIONS
         )
 
-    tools = Tools.get_tools()
+    # Get database tools
+    db_tools = Tools.get_tools()
+    
+    # Get tool server tools
+    server_tools = []
     for server in request.app.state.TOOL_SERVERS:
-        tools.append(
+        server_tools.append(
             ToolUserResponse(
                 **{
                     "id": f"server:{server['idx']}",
@@ -74,15 +79,30 @@ async def get_tools(request: Request, user=Depends(get_verified_user)):
             )
         )
 
-    if user.role != "admin":
-        tools = [
+    # Combine all tools
+    all_tools = db_tools + server_tools
+
+    # Apply filtering based on user role and privacy settings
+    if user.role == "admin":
+        # Filter private database tools if privacy is enabled
+        filtered_db_tools = filter_private_items(
+            db_tools, 
+            user, 
+            RESPECT_USER_PRIVACY.value
+        )
+        
+        # For admins, include all server tools (they have access to configure them)
+        filtered_tools = filtered_db_tools + server_tools
+    else:
+        # For non-admin users, filter based on access permissions
+        filtered_tools = [
             tool
-            for tool in tools
+            for tool in all_tools
             if tool.user_id == user.id
             or has_access(user.id, "read", tool.access_control)
         ]
 
-    return tools
+    return filtered_tools
 
 
 ############################
@@ -94,8 +114,10 @@ async def get_tools(request: Request, user=Depends(get_verified_user)):
 async def get_tool_list(user=Depends(get_verified_user)):
     if user.role == "admin":
         tools = Tools.get_tools()
+        tools = filter_private_items(tools, user, RESPECT_USER_PRIVACY.value)
     else:
         tools = Tools.get_tools_by_user_id(user.id, "write")
+    
     return tools
 
 
