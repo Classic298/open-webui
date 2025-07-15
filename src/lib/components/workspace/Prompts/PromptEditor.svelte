@@ -185,7 +185,7 @@
 						{$i18n.t('Create custom input variables with types like')} <span class="text-gray-600 dark:text-gray-300 font-medium">{'{{name | text}}'}</span>, <span class="text-gray-600 dark:text-gray-300 font-medium">{'{{options | select}}'}</span> {$i18n.t('to build interactive forms.')}
 					</div>
 					<div>
-						{$i18n.t('This transforms static prompts into powerful, reusable templates that users can fill out through a popup interface.')}
+						{$i18n.t('This transforms static prompts into powerful, reusable templates that users can fill out through a popup interface.')} {$i18n.t('For more information visit the')} <a href="https://docs.openwebui.com/features/workspace/prompts" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">{$i18n.t('docs')}</a>.
 					</div>
 				</div>
 			</div>
