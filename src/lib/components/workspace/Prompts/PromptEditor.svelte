@@ -93,7 +93,7 @@
 			submitHandler();
 		}}
 	>
-		<div class="my-2">
+		<div class="my-6">
 			<Tooltip
 				content={`${$i18n.t('Only alphanumeric characters and hyphens are allowed')} - ${$i18n.t(
 					'Activate this command by typing "/{{COMMAND}}" to chat input.',
@@ -103,7 +103,7 @@
 				)}`}
 				placement="bottom-start"
 			>
-				<div class="flex flex-col w-full">
+				<div class="flex flex-col w-full space-y-3">
 					<div class="flex items-center">
 						<input
 							class="text-2xl font-semibold w-full bg-transparent outline-hidden"
@@ -129,10 +129,10 @@
 						</div>
 					</div>
 
-					<div class="flex gap-0.5 items-center text-xs text-gray-500">
-						<div class="">/</div>
+					<div class="flex gap-1 items-center text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/50 rounded-lg px-3 py-2.5">
+						<div class="text-gray-500 dark:text-gray-500">/</div>
 						<input
-							class=" w-full bg-transparent outline-hidden"
+							class="flex-1 bg-transparent outline-hidden text-sm placeholder:text-gray-400"
 							placeholder={$i18n.t('Command')}
 							bind:value={command}
 							on:input={handleCommandInput}
@@ -144,15 +144,15 @@
 			</Tooltip>
 		</div>
 
-		<div class="my-2">
-			<div class="flex w-full justify-between">
-				<div class=" self-center text-sm font-semibold">{$i18n.t('Prompt Content')}</div>
+		<div class="my-6">
+			<div class="flex w-full justify-between mb-4">
+				<div class="self-center text-sm font-semibold">{$i18n.t('Prompt Content')}</div>
 			</div>
 
-			<div class="mt-2">
-				<div>
+			<div class="space-y-3">
+				<div class="bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-gray-200/50 dark:border-gray-700/50 p-4 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500/30 transition-all">
 					<Textarea
-						className="text-sm w-full bg-transparent outline-hidden overflow-y-hidden resize-none"
+						className="text-sm w-full bg-transparent outline-hidden overflow-y-hidden resize-none placeholder:text-gray-400 dark:placeholder:text-gray-500"
 						placeholder={$i18n.t('Write a summary in 50 words that summarizes [topic or keyword].')}
 						bind:value={content}
 						rows={6}
@@ -160,35 +160,37 @@
 					/>
 				</div>
 
-				<div class="text-xs text-gray-400 dark:text-gray-500">
-					ⓘ {$i18n.t('Format your variables using brackets like this:')}&nbsp;<span
-						class=" text-gray-600 dark:text-gray-300 font-medium"
-						>{'{{'}{$i18n.t('variable')}{'}}'}</span
-					>.
-					{$i18n.t('Make sure to enclose them with')}
-					<span class=" text-gray-600 dark:text-gray-300 font-medium">{'{{'}</span>
-					{$i18n.t('and')}
-					<span class=" text-gray-600 dark:text-gray-300 font-medium">{'}}'}</span>.
-				</div>
+				<div class="space-y-1 text-xs text-gray-400 dark:text-gray-500">
+					<div>
+						ⓘ {$i18n.t('Format your variables using brackets like this:')}&nbsp;<span
+							class="text-gray-600 dark:text-gray-300 font-medium"
+							>{'{{'}{$i18n.t('variable')}{'}}'}</span
+						>.
+						{$i18n.t('Make sure to enclose them with')}
+						<span class="text-gray-600 dark:text-gray-300 font-medium">{'{{'}</span>
+						{$i18n.t('and')}
+						<span class="text-gray-600 dark:text-gray-300 font-medium">{'}}'}</span>.
+					</div>
 
-				<div class="text-xs text-gray-400 dark:text-gray-500">
-					{$i18n.t('Utilize')}<span class=" text-gray-600 dark:text-gray-300 font-medium">
-						{` {{CLIPBOARD}}`}</span
-					>
-					{$i18n.t('variable to have them replaced with clipboard content.')}
+					<div>
+						{$i18n.t('Utilize')}<span class="text-gray-600 dark:text-gray-300 font-medium">
+							{` {{CLIPBOARD}}`}</span
+						>
+						{$i18n.t('variable to have them replaced with clipboard content.')}
+					</div>
 				</div>
 			</div>
 		</div>
 
-		<div class="my-4 flex justify-end pb-20">
+		<div class="my-6 flex justify-end pb-20">
 			<button
-				class=" text-sm w-full lg:w-fit px-4 py-2 transition rounded-lg {loading
+				class="text-sm w-full lg:w-fit px-4 py-2 transition rounded-lg {loading
 					? ' cursor-not-allowed bg-black hover:bg-gray-900 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black'
 					: 'bg-black hover:bg-gray-900 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black'} flex w-full justify-center"
 				type="submit"
 				disabled={loading}
 			>
-				<div class=" self-center font-medium">{$i18n.t('Save & Create')}</div>
+				<div class="self-center font-medium">{$i18n.t('Save & Create')}</div>
 
 				{#if loading}
 					<div class="ml-1.5 self-center">
