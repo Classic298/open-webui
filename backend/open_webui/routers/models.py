@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_access, has_permission
-from open_webui.config import RESPECT_USER_PRIVACY
+from open_webui.config import RESPECT_USER_WORKSPACE_PRIVACY
 from open_webui.utils.privacy import filter_private_items
 
 
@@ -28,7 +28,7 @@ router = APIRouter()
 async def get_models(id: Optional[str] = None, user=Depends(get_verified_user)):
     if user.role == "admin":
         models = Models.get_models()
-        models = filter_private_items(models, user, RESPECT_USER_PRIVACY.value)
+        models = filter_private_items(models, user, RESPECT_USER_WORKSPACE_PRIVACY.value)
         return models
     else:
         return Models.get_models_by_user_id(user.id)
