@@ -93,7 +93,7 @@
 			submitHandler();
 		}}
 	>
-		<div class="my-4">
+		<div class="my-3">
 			<Tooltip
 				content={`${$i18n.t('Only alphanumeric characters and hyphens are allowed')} - ${$i18n.t(
 					'Activate this command by typing "/{{COMMAND}}" to chat input.',
@@ -103,24 +103,25 @@
 				)}`}
 				placement="bottom-start"
 			>
-				<div class="flex flex-col w-full space-y-3">
-					<div class="flex items-center bg-gray-50 dark:bg-gray-900/50 rounded-lg border border-gray-200/50 dark:border-gray-700/50 px-4 py-3 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500/30 transition-all">
+				<div class="flex flex-col w-full">
+					<div class="flex items-center bg-gray-50/50 dark:bg-gray-900/30 rounded-lg px-3 py-2 mb-2">
 						<input
-							class="text-2xl font-semibold flex-1 bg-transparent outline-hidden placeholder:text-gray-400"
+							class="text-2xl font-semibold w-full bg-transparent outline-hidden placeholder:text-gray-400"
 							placeholder={$i18n.t('Title')}
 							bind:value={title}
 							required
 						/>
 
-						<div class="self-center shrink-0 ml-3">
+						<div class="self-center shrink-0">
 							<button
-								class="bg-gray-100 hover:bg-gray-200 text-black dark:bg-gray-800 dark:hover:bg-gray-700 dark:text-white transition px-3 py-2 rounded-lg flex gap-2 items-center"
+								class="bg-gray-50 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
 								type="button"
 								on:click={() => {
 									showAccessControlModal = true;
 								}}
 							>
 								<LockClosed strokeWidth="2.5" className="size-3.5" />
+
 								<div class="text-sm font-medium shrink-0">
 									{$i18n.t('Access')}
 								</div>
@@ -128,10 +129,10 @@
 						</div>
 					</div>
 
-					<div class="flex gap-2 items-center bg-gray-50 dark:bg-gray-900/50 rounded-lg border border-gray-200/50 dark:border-gray-700/50 px-4 py-3 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500/30 transition-all">
-						<div class="text-lg text-gray-500 dark:text-gray-400 font-medium">/</div>
+					<div class="flex gap-1 items-center bg-gray-50/50 dark:bg-gray-900/30 rounded-lg px-3 py-2">
+						<div class="text-gray-500 dark:text-gray-500">/</div>
 						<input
-							class="flex-1 bg-transparent outline-hidden text-lg placeholder:text-gray-400"
+							class="w-full bg-transparent outline-hidden placeholder:text-gray-400"
 							placeholder={$i18n.t('Command')}
 							bind:value={command}
 							on:input={handleCommandInput}
@@ -143,35 +144,35 @@
 			</Tooltip>
 		</div>
 
-		<div class="my-4">
-			<div class="flex w-full justify-between mb-3">
-				<div class="self-center text-sm font-semibold">{$i18n.t('Prompt Content')}</div>
+		<div class="my-3">
+			<div class="flex w-full justify-between">
+				<div class=" self-center text-sm font-semibold">{$i18n.t('Prompt Content')}</div>
 			</div>
 
-			<div class="bg-gray-50 dark:bg-gray-900/50 rounded-lg border border-gray-200/50 dark:border-gray-700/50 p-4 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500/30 transition-all">
-				<Textarea
-					className="text-sm w-full bg-transparent outline-hidden overflow-y-hidden resize-none placeholder:text-gray-400 dark:placeholder:text-gray-500"
-					placeholder={$i18n.t('Write a summary in 50 words that summarizes [topic or keyword].')}
-					bind:value={content}
-					rows={6}
-					required
-				/>
-			</div>
+			<div class="mt-2">
+				<div class="bg-gray-50/50 dark:bg-gray-900/30 rounded-lg p-3 border border-gray-200/20 dark:border-gray-700/20">
+					<Textarea
+						className="text-sm w-full bg-transparent outline-hidden overflow-y-hidden resize-none placeholder:text-gray-400"
+						placeholder={$i18n.t('Write a summary in 50 words that summarizes [topic or keyword].')}
+						bind:value={content}
+						rows={6}
+						required
+					/>
+				</div>
 
-			<div class="mt-3 space-y-1 text-xs text-gray-400 dark:text-gray-500">
-				<div>
+				<div class="text-xs text-gray-400 dark:text-gray-500 mt-2">
 					ⓘ {$i18n.t('Format your variables using brackets like this:')}&nbsp;<span
-						class="text-gray-600 dark:text-gray-300 font-medium"
+						class=" text-gray-600 dark:text-gray-300 font-medium"
 						>{'{{'}{$i18n.t('variable')}{'}}'}</span
 					>.
 					{$i18n.t('Make sure to enclose them with')}
-					<span class="text-gray-600 dark:text-gray-300 font-medium">{'{{'}</span>
+					<span class=" text-gray-600 dark:text-gray-300 font-medium">{'{{'}</span>
 					{$i18n.t('and')}
-					<span class="text-gray-600 dark:text-gray-300 font-medium">{'}}'}</span>.
+					<span class=" text-gray-600 dark:text-gray-300 font-medium">{'}}'}</span>.
 				</div>
 
-				<div>
-					{$i18n.t('Utilize')}<span class="text-gray-600 dark:text-gray-300 font-medium">
+				<div class="text-xs text-gray-400 dark:text-gray-500">
+					{$i18n.t('Utilize')}<span class=" text-gray-600 dark:text-gray-300 font-medium">
 						{` {{CLIPBOARD}}`}</span
 					>
 					{$i18n.t('variable to have them replaced with clipboard content.')}
@@ -181,13 +182,13 @@
 
 		<div class="my-4 flex justify-end pb-20">
 			<button
-				class="text-sm w-full lg:w-fit px-4 py-2 transition rounded-lg {loading
+				class=" text-sm w-full lg:w-fit px-4 py-2 transition rounded-lg {loading
 					? ' cursor-not-allowed bg-black hover:bg-gray-900 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black'
 					: 'bg-black hover:bg-gray-900 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black'} flex w-full justify-center"
 				type="submit"
 				disabled={loading}
 			>
-				<div class="self-center font-medium">{$i18n.t('Save & Create')}</div>
+				<div class=" self-center font-medium">{$i18n.t('Save & Create')}</div>
 
 				{#if loading}
 					<div class="ml-1.5 self-center">
