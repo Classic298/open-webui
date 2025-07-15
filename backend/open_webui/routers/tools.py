@@ -20,7 +20,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from open_webui.utils.tools import get_tool_specs
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_access, has_permission
-from open_webui.utils.privacy import filter_private_items
 from open_webui.env import SRC_LOG_LEVELS
 
 from open_webui.utils.tools import get_tool_servers_data
@@ -83,18 +82,11 @@ async def get_tools(request: Request, user=Depends(get_verified_user)):
     all_tools = db_tools + server_tools
 
     # Apply filtering based on user role and privacy settings
-    if user.role == "admin":
-        # Filter private database tools if privacy is enabled
-        filtered_db_tools = filter_private_items(
-            db_tools, 
-            user, 
-            RESPECT_USER_WORKSPACE_PRIVACY.value
-        )
-        
-        # For admins, include all server tools (they have access to configure them)
-        filtered_tools = filtered_db_tools + server_tools
+    if user.role == "admin" and not RESPECT_USER_WORKSPACE_PRIVACY.value:
+        # Admin with full access sees all tools
+        filtered_tools = db_tools + server_tools
     else:
-        # For non-admin users, filter based on access permissions
+        # Regular users and privacy-enabled admins see only accessible tools
         filtered_tools = [
             tool
             for tool in all_tools
@@ -112,9 +104,8 @@ async def get_tools(request: Request, user=Depends(get_verified_user)):
 
 @router.get("/list", response_model=list[ToolUserResponse])
 async def get_tool_list(user=Depends(get_verified_user)):
-    if user.role == "admin":
+    if user.role == "admin" and not RESPECT_USER_WORKSPACE_PRIVACY.value:
         tools = Tools.get_tools()
-        tools = filter_private_items(tools, user, RESPECT_USER_WORKSPACE_PRIVACY.value)
     else:
         tools = Tools.get_tools_by_user_id(user.id, "write")
     
