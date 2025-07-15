@@ -14,7 +14,7 @@ from open_webui.models.tools import (
     Tools,
 )
 from open_webui.utils.plugin import load_tool_module_by_id, replace_imports
-from open_webui.config import CACHE_DIR, RESPECT_USER_PRIVACY
+from open_webui.config import CACHE_DIR, RESPECT_USER_WORKSPACE_PRIVACY
 from open_webui.constants import ERROR_MESSAGES
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from open_webui.utils.tools import get_tool_specs
@@ -88,7 +88,7 @@ async def get_tools(request: Request, user=Depends(get_verified_user)):
         filtered_db_tools = filter_private_items(
             db_tools, 
             user, 
-            RESPECT_USER_PRIVACY.value
+            RESPECT_USER_WORKSPACE_PRIVACY.value
         )
         
         # For admins, include all server tools (they have access to configure them)
@@ -114,7 +114,7 @@ async def get_tools(request: Request, user=Depends(get_verified_user)):
 async def get_tool_list(user=Depends(get_verified_user)):
     if user.role == "admin":
         tools = Tools.get_tools()
-        tools = filter_private_items(tools, user, RESPECT_USER_PRIVACY.value)
+        tools = filter_private_items(tools, user, RESPECT_USER_WORKSPACE_PRIVACY.value)
     else:
         tools = Tools.get_tools_by_user_id(user.id, "write")
     
