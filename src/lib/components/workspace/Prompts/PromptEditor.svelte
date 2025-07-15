@@ -177,10 +177,16 @@
 					{$i18n.t('variable to have them replaced with clipboard content.')}
 				</div>
 
-				<div>
-					{$i18n.t('Use system variables like')} <span class="text-gray-600 dark:text-gray-300 font-medium">{'{{CURRENT_DATE}}'}</span>, <span class="text-gray-600 dark:text-gray-300 font-medium">{'{{USER_NAME}}'}</span> {$i18n.t('for dynamic content.')} 
-					{$i18n.t('Create custom input variables with types like')} <span class="text-gray-600 dark:text-gray-300 font-medium">{'{{name | text}}'}</span>, <span class="text-gray-600 dark:text-gray-300 font-medium">{'{{options | select}}'}</span> {$i18n.t('to build interactive forms.')}
-					{$i18n.t('This transforms static prompts into powerful, reusable templates that users can fill out through a popup interface.')}
+				<div class="space-y-1">
+					<div>
+						{$i18n.t('Use system variables like')} <span class="text-gray-600 dark:text-gray-300 font-medium">{'{{CURRENT_DATE}}'}</span>, <span class="text-gray-600 dark:text-gray-300 font-medium">{'{{USER_NAME}}'}</span> {$i18n.t('for dynamic content.')}
+					</div>
+					<div>
+						{$i18n.t('Create custom input variables with types like')} <span class="text-gray-600 dark:text-gray-300 font-medium">{'{{name | text}}'}</span>, <span class="text-gray-600 dark:text-gray-300 font-medium">{'{{options | select}}'}</span> {$i18n.t('to build interactive forms.')}
+					</div>
+					<div>
+						{$i18n.t('This transforms static prompts into powerful, reusable templates that users can fill out through a popup interface.')}
+					</div>
 				</div>
 			</div>
 		</div>
