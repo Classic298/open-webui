@@ -34,9 +34,7 @@
 	}}
 >
 	<Tooltip content={$i18n.t('More')}>
-		<div class="flex items-center justify-center w-9 h-9 rounded-full bg-gray-200/80 dark:bg-gray-700/80 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
-			<slot />
-		</div>
+		<slot />
 	</Tooltip>
 
 	<div slot="content">
