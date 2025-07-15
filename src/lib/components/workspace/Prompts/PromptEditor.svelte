@@ -145,22 +145,21 @@
 		</div>
 
 		<div class="my-3">
-			<div class="flex w-full justify-between">
-				<div class=" self-center text-sm font-semibold">{$i18n.t('Prompt Content')}</div>
+			<div class="bg-gray-50/50 dark:bg-gray-900/30 rounded-lg p-3 border border-gray-200/20 dark:border-gray-700/20">
+				<div class="mb-2">
+					<div class="text-sm font-semibold">{$i18n.t('Prompt Content')}</div>
+				</div>
+				<Textarea
+					className="text-sm w-full bg-transparent outline-hidden overflow-y-hidden resize-none placeholder:text-gray-400"
+					placeholder={$i18n.t('Write a summary in 50 words that summarizes [topic or keyword].')}
+					bind:value={content}
+					rows={6}
+					required
+				/>
 			</div>
 
-			<div class="mt-2">
-				<div class="bg-gray-50/50 dark:bg-gray-900/30 rounded-lg p-3 border border-gray-200/20 dark:border-gray-700/20">
-					<Textarea
-						className="text-sm w-full bg-transparent outline-hidden overflow-y-hidden resize-none placeholder:text-gray-400"
-						placeholder={$i18n.t('Write a summary in 50 words that summarizes [topic or keyword].')}
-						bind:value={content}
-						rows={6}
-						required
-					/>
-				</div>
-
-				<div class="text-xs text-gray-400 dark:text-gray-500 mt-2">
+			<div class="text-xs text-gray-400 dark:text-gray-500 mt-2 space-y-1">
+				<div>
 					ⓘ {$i18n.t('Format your variables using brackets like this:')}&nbsp;<span
 						class=" text-gray-600 dark:text-gray-300 font-medium"
 						>{'{{'}{$i18n.t('variable')}{'}}'}</span
@@ -171,11 +170,17 @@
 					<span class=" text-gray-600 dark:text-gray-300 font-medium">{'}}'}</span>.
 				</div>
 
-				<div class="text-xs text-gray-400 dark:text-gray-500">
+				<div>
 					{$i18n.t('Utilize')}<span class=" text-gray-600 dark:text-gray-300 font-medium">
 						{` {{CLIPBOARD}}`}</span
 					>
 					{$i18n.t('variable to have them replaced with clipboard content.')}
+				</div>
+
+				<div>
+					{$i18n.t('Use system variables like')} <span class="text-gray-600 dark:text-gray-300 font-medium">{{CURRENT_DATE}}</span>, <span class="text-gray-600 dark:text-gray-300 font-medium">{{USER_NAME}}</span> {$i18n.t('for dynamic content.')} 
+					{$i18n.t('Create custom input variables with types like')} <span class="text-gray-600 dark:text-gray-300 font-medium">{{name | text}}</span>, <span class="text-gray-600 dark:text-gray-300 font-medium">{{options | select}}</span> {$i18n.t('to build interactive forms.')}
+					{$i18n.t('This transforms static prompts into powerful, reusable templates that users can fill out through a popup interface.')}
 				</div>
 			</div>
 		</div>
