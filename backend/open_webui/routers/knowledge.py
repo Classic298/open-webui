@@ -22,7 +22,7 @@ from open_webui.storage.provider import Storage
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.access_control import has_access, has_permission
-from open_webui.config import RESPECT_USER_PRIVACY
+from open_webui.config import RESPECT_USER_WORKSPACE_PRIVACY
 from open_webui.utils.privacy import filter_private_items
 
 from open_webui.env import SRC_LOG_LEVELS
@@ -48,7 +48,7 @@ async def get_knowledge(user=Depends(get_verified_user)):
         knowledge_bases = filter_private_items(
             knowledge_bases, 
             user, 
-            RESPECT_USER_PRIVACY.value
+            RESPECT_USER_WORKSPACE_PRIVACY.value
         )
     else:
         knowledge_bases = Knowledges.get_knowledge_bases_by_user_id(user.id, "read")
@@ -101,7 +101,7 @@ async def get_knowledge_list(user=Depends(get_verified_user)):
         knowledge_bases = filter_private_items(
             knowledge_bases, 
             user, 
-            RESPECT_USER_PRIVACY.value
+            RESPECT_USER_WORKSPACE_PRIVACY.value
         )
     else:
         knowledge_bases = Knowledges.get_knowledge_bases_by_user_id(user.id, "write")
