@@ -122,10 +122,9 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
 
         # Prune orphaned vector collections that have no corresponding entry in the main DB
         try:
-            # Get all collection names from the vector database
-            all_vector_collections = [
-                col.name for col in VECTOR_DB_CLIENT.list_collections()
-            ]
+            # Get all collection names from the vector database using the correct method
+            # This is the corrected line:
+            all_vector_collections = VECTOR_DB_CLIENT.get_collection_names()
 
             # Get all valid collection names from the main database
             # These are knowledge base IDs and file IDs
