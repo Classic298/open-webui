@@ -221,7 +221,8 @@ def cleanup_orphaned_vector_collections(active_file_ids: Set[str], active_kb_ids
     
     log.debug(f"Expected collections to preserve: {expected_collections}")
     
-    # Query ChromaDB metadata to get UUID -> collection_name mapping
+    # Query ChromaDB metadata to get the complete mapping chain:
+    # Directory UUID -> Collection ID -> Collection Name
     uuid_to_collection = {}
     try:
         import sqlite3
@@ -236,17 +237,32 @@ def cleanup_orphaned_vector_collections(active_file_ids: Set[str], active_kb_ids
             schema = conn.execute("PRAGMA table_info(collections)").fetchall()
             log.debug(f"Collections table schema: {schema}")
             
+            # Get Collection ID -> Collection Name mapping
+            collection_id_to_name = {}
             cursor = conn.execute("SELECT id, name FROM collections")
             rows = cursor.fetchall()
-            log.debug(f"Raw ChromaDB query results: {rows}")
+            log.debug(f"Raw ChromaDB collections query results: {rows}")
             
             for row in rows:
-                uuid_dir, collection_name = row
-                uuid_to_collection[uuid_dir] = collection_name
-                log.debug(f"Mapped UUID {uuid_dir} -> collection {collection_name}")
+                collection_id, collection_name = row
+                collection_id_to_name[collection_id] = collection_name
+                log.debug(f"Mapped collection ID {collection_id} -> name {collection_name}")
+            
+            # Get Directory UUID -> Collection ID mapping from segments table
+            # Only interested in VECTOR segments as those are the actual data directories
+            cursor = conn.execute("SELECT id, collection_id FROM segments WHERE scope = 'VECTOR'")
+            segment_rows = cursor.fetchall()
+            log.debug(f"Raw ChromaDB segments query results: {segment_rows}")
+            
+            for row in segment_rows:
+                segment_id, collection_id = row
+                if collection_id in collection_id_to_name:
+                    collection_name = collection_id_to_name[collection_id]
+                    uuid_to_collection[segment_id] = collection_name
+                    log.debug(f"Mapped directory UUID {segment_id} -> collection {collection_name}")
         
         log.debug(f"Final uuid_to_collection mapping: {uuid_to_collection}")
-        log.info(f"Found {len(uuid_to_collection)} collections in ChromaDB metadata")
+        log.info(f"Found {len(uuid_to_collection)} vector segments in ChromaDB metadata")
         
     except Exception as e:
         log.error(f"Error reading ChromaDB metadata: {e}")
