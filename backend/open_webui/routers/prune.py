@@ -19,6 +19,7 @@ from open_webui.models.models import Models
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.functions import Functions
 from open_webui.models.tools import Tools
+from open_webui.models.folders import Folders
 from open_webui.storage.provider import Storage
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT, VECTOR_DB
 from open_webui.constants import ERROR_MESSAGES
