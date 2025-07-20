@@ -66,14 +66,31 @@ def get_db_size():
 
 
 def get_vector_db_size():
+    vector_db_path = f"{DATA_DIR}/vector_db"
+    if not os.path.exists(vector_db_path):
+        return 0
     return sum(
-        f.stat().st_size
-        for f in os.scandir(f"{DATA_DIR}/vector_db")
-        if f.is_file()
+        f.stat().st_size for f in os.scandir(vector_db_path) if f.is_file()
     )
 
 
-def test_prune_data_and_check_db_size():
+def get_vector_db_collection_count():
+    # This is a bit of a hack, but it's the easiest way to check the number of collections
+    # without adding a new endpoint.
+    vector_db_path = f"{DATA_DIR}/vector_db/chroma.sqlite3"
+    if not os.path.exists(vector_db_path):
+        return 0
+    import sqlite3
+
+    con = sqlite3.connect(vector_db_path)
+    cur = con.cursor()
+    cur.execute("SELECT COUNT(*) FROM collections")
+    count = cur.fetchone()[0]
+    con.close()
+    return count
+
+
+def test_prune_data_and_check_db_and_collection_size():
     ADMIN_TOKEN = os.environ.get("OPEN_WEBUI_ADMIN_TOKEN")
     if not ADMIN_TOKEN:
         print("Skipping API test: OPEN_WEBUI_ADMIN_TOKEN not set")
@@ -81,9 +98,10 @@ def test_prune_data_and_check_db_size():
 
     headers = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
 
-    # 1. Get initial DB sizes
+    # 1. Get initial DB sizes and collection count
     initial_db_size = get_db_size()
     initial_vector_db_size = get_vector_db_size()
+    initial_collection_count = get_vector_db_collection_count()
 
     # 2. Create a user and some data
     email = f"prune-test-{random_string()}@example.com"
@@ -99,13 +117,15 @@ def test_prune_data_and_check_db_size():
     response = requests.post(f"{BASE_URL}/prune/", json=prune_data, headers=headers)
     response.raise_for_status()
 
-    # 4. Get final DB sizes
+    # 4. Get final DB sizes and collection count
     final_db_size = get_db_size()
     final_vector_db_size = get_vector_db_size()
+    final_collection_count = get_vector_db_collection_count()
 
-    # 5. Assert that the DB sizes have decreased
+    # 5. Assert that the DB sizes have decreased and collection count is the same or less
     assert final_db_size < initial_db_size
     assert final_vector_db_size < initial_vector_db_size
+    assert final_collection_count <= initial_collection_count
 
     # 6. Clean up the user
     delete_user(ADMIN_TOKEN, user["id"])
