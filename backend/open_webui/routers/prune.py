@@ -44,9 +44,10 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
     Prunes old and orphaned data from the database in a comprehensive, multi-stage process.
     """
     try:
-        # Stage 1: Prune old chats as defined by user criteria.
-        # This is the primary driver for orphaning other data.
         log.info("Pruning process started.")
+
+        # Stage 1: Prune old chats based on user-defined criteria.
+        # This is the primary driver for orphaning other data.
         chats_to_delete = Chats.get_chats()
         if form_data.days is not None:
             cutoff_time = int(time.time()) - (form_data.days * 86400)
@@ -62,7 +63,7 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
                 Chats.delete_chat_by_id(chat.id)
 
         # Stage 2: Logical Pruning.
-        # Use a single, authoritative snapshot of the current state to determine what's an orphan.
+        # Use a single, authoritative snapshot of the current database state.
         log.info("Starting logical pruning of orphaned database records.")
         
         # Source of Truth: Active users and active knowledge bases define what should be kept.
@@ -75,24 +76,32 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
         # Prune File records that are not in any active KB or belong to a deleted user.
         for file in Files.get_files():
             if file.id not in active_kb_file_ids or file.user_id not in user_ids:
-                log.debug(f"Logically pruning file record: {file.id}")
+                log.debug(f"Deleting orphaned file and its data: {file.id}")
                 try:
+                    # Delete the physical file, the vector collection, and the DB record.
+                    Storage.delete_file(file.path)
                     VECTOR_DB_CLIENT.delete_collection(collection_name=f"file-{file.id}")
+                    Files.delete_file_by_id(file.id)
                 except ValueError:
-                    pass  # It's okay if the collection is already gone.
-                Files.delete_file_by_id(file.id)
+                    # This handles cases where the vector collection is already gone.
+                    # We can safely ignore this and still delete the file record.
+                    if Files.get_file_by_id(file.id):
+                        Files.delete_file_by_id(file.id)
+                except Exception as e:
+                    log.error(f"An error occurred while deleting file {file.id}: {e}")
+
 
         # Prune Knowledge Base records from deleted users.
         for kb in all_kbs:
             if kb.user_id not in user_ids:
-                log.debug(f"Logically pruning knowledge base record: {kb.id}")
+                log.debug(f"Deleting orphaned knowledge base and its data: {kb.id}")
                 try:
                     VECTOR_DB_CLIENT.delete_collection(collection_name=kb.id)
                 except ValueError:
-                    pass
+                    pass  # Collection already gone, ignore.
                 Knowledges.delete_knowledge_by_id(kb.id)
 
-        # Prune all other user-owned data types.
+        # Prune all other user-owned data types (notes, prompts, etc.).
         for note in Notes.get_notes():
             if note.user_id not in user_ids:
                 Notes.delete_note_by_id(note.id)
@@ -106,15 +115,14 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
             if folder.user_id not in user_ids:
                 Folders.delete_folder_by_id_and_user_id(folder.id, folder.user_id, delete_chats=False)
 
-        # Stage 3: Physical Sweep.
-        # Clean up any files/directories on disk that do not have a corresponding DB record.
-        log.info("Starting physical sweep for stranded files and directories.")
-        
-        # Get a fresh, final list of all file/KB IDs that should exist after logical pruning.
+        # Stage 3: Physical Sweep for stranded data (files/directories without any DB record).
+        # This handles cleanup after incomplete deletions from other parts of the app.
+        log.info("Starting physical sweep for stranded files and vector directories.")
+
         final_file_ids_in_db = {file.id for file in Files.get_files()}
         final_kb_ids_in_db = {kb.id for kb in Knowledges.get_knowledge_bases()}
 
-        # Sweep /uploads directory
+        # Sweep /uploads directory for stranded files
         upload_dir = os.path.join(os.path.dirname(CACHE_DIR), "uploads")
         if os.path.isdir(upload_dir):
             for filename in os.listdir(upload_dir):
@@ -123,7 +131,7 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
                     log.debug(f"Physically deleting stranded upload file: {filename}")
                     os.remove(os.path.join(upload_dir, filename))
 
-        # Sweep /vector_db directory (ChromaDB-specific)
+        # Sweep /vector_db directory for stranded collections (ChromaDB-specific)
         if "chroma" in VECTOR_DB.lower():
             vector_dir = os.path.join(os.path.dirname(CACHE_DIR), "vector_db")
             if os.path.isdir(vector_dir):
@@ -135,12 +143,11 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
                         shutil.rmtree(dirpath)
         
         # Stage 4: Final Cleanup.
-        # Clean transient cache directories and vacuum the main database.
+        log.info("Cleaning cache and vacuuming database.")
         for cache_path in [f"{CACHE_DIR}/audio/transcriptions", f"{CACHE_DIR}/functions", f"{CACHE_DIR}/tools"]:
             if os.path.exists(cache_path):
                 shutil.rmtree(cache_path)
 
-        log.info("Vacuuming the main database.")
         with get_db() as db:
             if db.get_bind().dialect.name == "sqlite":
                 db.execute(text("VACUUM"))
