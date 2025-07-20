@@ -43,50 +43,6 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
     Prunes old and orphaned data from the database.
     """
     try:
-        try:
-            # This logic is specific to ChromaDB's file-based storage.
-            if "chroma" in VECTOR_DB.lower():
-                # Step 1: Construct the path to the vector database directory.
-                chroma_path = os.path.join(os.path.dirname(CACHE_DIR), "vector_db")
-
-                if os.path.isdir(chroma_path):
-                    # Step 2: Get the list of all expected collection names from the main DB.
-                    # This is the "source of truth".
-                    valid_knowledge_base_ids = {kb.id for kb in Knowledges.get_knowledge_bases()}
-                    valid_file_ids = {f"file-{file.id}" for file in Files.get_files()}
-                    expected_collections = valid_knowledge_base_ids.union(valid_file_ids)
-
-                    # Step 3: Get the list of all physical subdirectories that exist on disk.
-                    physical_dirs = [
-                        d for d in os.listdir(chroma_path) if os.path.isdir(os.path.join(chroma_path, d))
-                    ]
-
-                    # Step 4: Find directories that exist physically but are not expected.
-                    stranded_dirs = [
-                        dir_name for dir_name in physical_dirs if dir_name not in expected_collections
-                    ]
-
-                    if stranded_dirs:
-                        log.info(f"Pruning {len(stranded_dirs)} stranded physical vector directories.")
-                        for dir_name in stranded_dirs:
-                            try:
-                                # Physically remove the stranded directory
-                                collection_path = os.path.join(chroma_path, dir_name)
-                                log.debug(f"Physically removing stranded directory: {collection_path}")
-                                shutil.rmtree(collection_path)
-                            except Exception as e:
-                                # This will now only catch errors from shutil.rmtree (e.g., permissions)
-                                log.error(f"Error while removing stranded directory {dir_name}: {e}")
-                    else:
-                        log.info("No stranded physical vector directories found.")
-            else:
-                log.warning(
-                    f"Vector DB type '{VECTOR_DB}' does not support physical pruning. Skipping."
-                )
-
-        except Exception as e:
-            log.error(f"Error during physical vector directory pruning: {e}")
-        
         # Prune old chats
         chats_to_delete = Chats.get_chats()
 
@@ -126,7 +82,6 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
                     Files.delete_file_by_id(file.id)
                 except ValueError as e:
                     # This can happen if the collection was already deleted but the file record remains.
-                    # We can safely ignore this and proceed with deleting the file record.
                     log.warning(f"Could not delete vector collection for file {file.id} (may already be gone): {e}")
                     # Ensure the file record is deleted even if the vector part fails
                     if Files.get_file_by_id(file.id):
@@ -146,6 +101,12 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
         tool_cache_dir = f"{CACHE_DIR}/tools"
         if os.path.exists(tool_cache_dir):
             shutil.rmtree(tool_cache_dir)
+
+        # Folders
+        all_folders = Folders.get_all_folders()
+        for folder in all_folders:
+            if folder.user_id not in user_ids:
+                Folders.delete_folder_by_id_and_user_id(folder.id, folder.user_id)
 
         # Notes
         all_notes = Notes.get_notes()
