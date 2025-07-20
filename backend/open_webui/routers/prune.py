@@ -193,7 +193,7 @@ def cleanup_orphaned_uploads(active_file_ids: Set[str]) -> None:
 
 def cleanup_orphaned_vector_collections(active_file_ids: Set[str], active_kb_ids: Set[str]) -> None:
     """
-    Clean up orphaned vector collections.
+    Clean up orphaned vector collections by querying ChromaDB metadata.
     """
     if "chroma" not in VECTOR_DB.lower():
         return
@@ -201,6 +201,11 @@ def cleanup_orphaned_vector_collections(active_file_ids: Set[str], active_kb_ids
     vector_dir = Path(CACHE_DIR).parent / "vector_db"
     if not vector_dir.exists():
         log.debug("Vector DB directory does not exist")
+        return
+    
+    chroma_db_path = vector_dir / "chroma.sqlite3"
+    if not chroma_db_path.exists():
+        log.debug("ChromaDB metadata file does not exist")
         return
     
     # Build expected collection names
@@ -214,6 +219,25 @@ def cleanup_orphaned_vector_collections(active_file_ids: Set[str], active_kb_ids
     for kb_id in active_kb_ids:
         expected_collections.add(kb_id)
     
+    log.debug(f"Expected collections to preserve: {expected_collections}")
+    
+    # Query ChromaDB metadata to get UUID -> collection_name mapping
+    uuid_to_collection = {}
+    try:
+        import sqlite3
+        with sqlite3.connect(str(chroma_db_path)) as conn:
+            cursor = conn.execute("SELECT id, name FROM collections")
+            for row in cursor:
+                uuid_dir, collection_name = row
+                uuid_to_collection[uuid_dir] = collection_name
+        
+        log.debug(f"Found {len(uuid_to_collection)} collections in ChromaDB metadata")
+        
+    except Exception as e:
+        log.error(f"Error reading ChromaDB metadata: {e}")
+        # Fail safe: don't delete anything if we can't read metadata
+        return
+    
     deleted_count = 0
     
     try:
@@ -221,19 +245,36 @@ def cleanup_orphaned_vector_collections(active_file_ids: Set[str], active_kb_ids
             if not collection_dir.is_dir():
                 continue
                 
-            collection_name = collection_dir.name
+            dir_uuid = collection_dir.name
             
-            # Skip system/metadata directories
-            if collection_name.startswith('.') or collection_name in ['chroma.sqlite3']:
+            # Skip system/metadata files
+            if dir_uuid.startswith('.'):
                 continue
             
-            if collection_name not in expected_collections:
+            # Get the actual collection name from metadata
+            collection_name = uuid_to_collection.get(dir_uuid)
+            
+            if collection_name is None:
+                # Directory exists but no metadata entry - it's orphaned
+                log.debug(f"Directory {dir_uuid} has no metadata entry, deleting")
                 try:
                     shutil.rmtree(collection_dir)
                     deleted_count += 1
-                    log.debug(f"Deleted orphaned vector collection: {collection_name}")
                 except Exception as e:
-                    log.error(f"Failed to delete vector collection {collection_name}: {e}")
+                    log.error(f"Failed to delete orphaned directory {dir_uuid}: {e}")
+            
+            elif collection_name not in expected_collections:
+                # Collection exists but should be deleted
+                log.debug(f"Collection {collection_name} (UUID: {dir_uuid}) is orphaned, deleting")
+                try:
+                    shutil.rmtree(collection_dir)
+                    deleted_count += 1
+                except Exception as e:
+                    log.error(f"Failed to delete collection directory {dir_uuid}: {e}")
+            
+            else:
+                # Collection should be preserved
+                log.debug(f"Preserving collection {collection_name} (UUID: {dir_uuid})")
     
     except Exception as e:
         log.error(f"Error cleaning vector collections: {e}")
