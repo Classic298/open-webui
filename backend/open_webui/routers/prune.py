@@ -62,30 +62,21 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
         # Prune orphaned data
         user_ids = {user.id for user in Users.get_users()["users"]}
 
-        # Files
+        # Files: This section now handles both orphaned DB entries and stranded physical files.
+        
+        # Step 1: Identify and delete orphaned file records from the database.
         all_files = Files.get_files()
         all_kbs = Knowledges.get_knowledge_bases()
 
-        # Build a single set of all file IDs that are currently in any knowledge base
         active_kb_file_ids = set()
         for kb in all_kbs:
             if kb.data and "file_ids" in kb.data:
                 active_kb_file_ids.update(kb.data["file_ids"])
 
-        # DIAGNOSTIC LINE 1: Print the set of all known active file IDs
-        log.warning(f"DIAGNOSTIC: Active KB File IDs: {active_kb_file_ids}")
-
         for file in all_files:
-            is_orphaned_by_user = file.user_id not in user_ids
-            is_orphaned_by_kb = file.id not in active_kb_file_ids
-
-            # DIAGNOSTIC LINE 2: Print the evaluation for each file
-            log.warning(f"DIAGNOSTIC: Checking file {file.id}. OrphanByUser: {is_orphaned_by_user}. OrphanByKB: {is_orphaned_by_kb}. Will delete: {is_orphaned_by_user or is_orphaned_by_kb}")
-
-            if is_orphaned_by_user or is_orphaned_by_kb:
-                # This file is an orphan, proceed with deletion
+            if file.id not in active_kb_file_ids:
                 try:
-                    log.debug(f"Deleting orphaned file {file.id} (user orphan: {is_orphaned_by_user}, kb orphan: {is_orphaned_by_kb})")
+                    log.debug(f"Deleting orphaned file DB entry and associated data for file ID: {file.id}")
                     Storage.delete_file(file.path)
                     VECTOR_DB_CLIENT.delete_collection(collection_name=f"file-{file.id}")
                     Files.delete_file_by_id(file.id)
@@ -93,6 +84,28 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
                     log.warning(f"Could not delete vector collection for file {file.id} (may already be gone): {e}")
                     if Files.get_file_by_id(file.id):
                         Files.delete_file_by_id(file.id)
+
+        # Step 2: Identify and delete stranded physical files that have no DB record.
+        all_file_ids_in_db = {file.id for file in Files.get_files()}
+        upload_dir = os.path.join(os.path.dirname(CACHE_DIR), "uploads")
+        
+        if os.path.exists(upload_dir):
+            for filename in os.listdir(upload_dir):
+                # Extract UUID from the beginning of the filename
+                file_id_match = re.match(r"^([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})", filename)
+                if file_id_match:
+                    file_id = file_id_match.group(1)
+                    if file_id not in all_file_ids_in_db:
+                        try:
+                            log.debug(f"Deleting stranded physical file: {filename}")
+                            # Delete physical file from /uploads
+                            file_path = os.path.join(upload_dir, filename)
+                            os.remove(file_path)
+
+                            # Attempt to delete associated vector collection
+                            VECTOR_DB_CLIENT.delete_collection(collection_name=f"file-{file_id}")
+                        except Exception as e:
+                            log.warning(f"Error deleting stranded file {filename} or its vector collection: {e}")
 
         # Audio
         audio_cache_dir = f"{CACHE_DIR}/audio/transcriptions"
