@@ -7,7 +7,6 @@ import string
 import requests
 import json
 
-# It's better to get this from an environment variable or a config file
 BASE_URL = "http://localhost:8080/api/v1"
 
 
@@ -38,21 +37,12 @@ def login(email, password):
     return response.json()["token"]
 
 
-def create_chat(token, title, archived=False, old=False):
+def create_chat(token, title):
     headers = {"Authorization": f"Bearer {token}"}
     chat_data = {"chat": {"title": title}}
     response = requests.post(f"{BASE_URL}/chats/new", json=chat_data, headers=headers)
     response.raise_for_status()
-    chat = response.json()
-
-    if archived:
-        response = requests.post(
-            f"{BASE_URL}/chats/{chat['id']}/archive", headers=headers
-        )
-        response.raise_for_status()
-        chat = response.json()
-
-    return chat
+    return response.json()
 
 
 def upload_file(token, file_name, content_type="text/plain"):
@@ -67,7 +57,7 @@ def upload_file(token, file_name, content_type="text/plain"):
 def create_note(token, title):
     headers = {"Authorization": f"Bearer {token}"}
     note_data = {"title": title}
-    response = requests.post(f"{BASE_URL}/notes/new", json=note_data, headers=headers)
+    response = requests.post(f"{BASE_URL}/notes/create", json=note_data, headers=headers)
     response.raise_for_status()
     return response.json()
 
@@ -76,7 +66,7 @@ def create_prompt(token, command, title, content):
     headers = {"Authorization": f"Bearer {token}"}
     prompt_data = {"command": command, "title": title, "content": content}
     response = requests.post(
-        f"{BASE_URL}/prompts/new", json=prompt_data, headers=headers
+        f"{BASE_URL}/prompts/create", json=prompt_data, headers=headers
     )
     response.raise_for_status()
     return response.json()
@@ -91,7 +81,7 @@ def create_model(token, model_id):
         "params": {},
     }
     response = requests.post(
-        f"{BASE_URL}/models/new", json=model_data, headers=headers
+        f"{BASE_URL}/models/create", json=model_data, headers=headers
     )
     response.raise_for_status()
     return response.json()
@@ -101,8 +91,26 @@ def create_knowledge_base(token, name):
     headers = {"Authorization": f"Bearer {token}"}
     kb_data = {"name": name, "description": ""}
     response = requests.post(
-        f"{BASE_URL}/knowledge/new", json=kb_data, headers=headers
+        f"{BASE_URL}/knowledge/create", json=kb_data, headers=headers
     )
+    response.raise_for_status()
+    return response.json()
+
+
+def create_function(token, function_id, content):
+    headers = {"Authorization": f"Bearer {token}"}
+    function_data = {"id": function_id, "content": content, "meta": {}}
+    response = requests.post(
+        f"{BASE_URL}/functions/create", json=function_data, headers=headers
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def create_tool(token, tool_id, content):
+    headers = {"Authorization": f"Bearer {token}"}
+    tool_data = {"id": tool_id, "content": content, "meta": {}}
+    response = requests.post(f"{BASE_URL}/tools/create", json=tool_data, headers=headers)
     response.raise_for_status()
     return response.json()
 
@@ -113,7 +121,7 @@ def delete_user(token, user_id):
     response.raise_for_status()
 
 
-def test_prune_all_orphaned_data():
+def test_prune_all_orphaned_data_extensively():
     ADMIN_TOKEN = os.environ.get("OPEN_WEBUI_ADMIN_TOKEN")
     if not ADMIN_TOKEN:
         print("Skipping API test: OPEN_WEBUI_ADMIN_TOKEN not set")
@@ -138,6 +146,10 @@ def test_prune_all_orphaned_data():
     )
     model_to_delete = create_model(token_to_delete, "model-to-delete")
     kb_to_delete = create_knowledge_base(token_to_delete, "KB to Delete")
+    function_to_delete = create_function(
+        token_to_delete, "function-to-delete", "def main(): pass"
+    )
+    tool_to_delete = create_tool(token_to_delete, "tool-to-delete", "def main(): pass")
 
     # 3. Delete the user
     delete_user(ADMIN_TOKEN, user_to_delete["id"])
@@ -168,19 +180,31 @@ def test_prune_all_orphaned_data():
     assert response.status_code == 401
 
     response = requests.get(
-        f"{BASE_URL}/prompts/{prompt_to_delete['command']}",
+        f"{BASE_URL}/prompts/command/{prompt_to_delete['command']}",
         headers={"Authorization": f"Bearer {token_to_delete}"},
     )
     assert response.status_code == 401
 
     response = requests.get(
-        f"{BASE_URL}/models/{model_to_delete['id']}",
+        f"{BASE_URL}/models/model?id={model_to_delete['id']}",
         headers={"Authorization": f"Bearer {token_to_delete}"},
     )
     assert response.status_code == 401
 
     response = requests.get(
         f"{BASE_URL}/knowledge/{kb_to_delete['id']}",
+        headers={"Authorization": f"Bearer {token_to_delete}"},
+    )
+    assert response.status_code == 401
+
+    response = requests.get(
+        f"{BASE_URL}/functions/id/{function_to_delete['id']}",
+        headers={"Authorization": f"Bearer {token_to_delete}"},
+    )
+    assert response.status_code == 401
+
+    response = requests.get(
+        f"{BASE_URL}/tools/id/{tool_to_delete['id']}",
         headers={"Authorization": f"Bearer {token_to_delete}"},
     )
     assert response.status_code == 401

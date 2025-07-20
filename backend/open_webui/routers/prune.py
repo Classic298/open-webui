@@ -2,6 +2,8 @@ import logging
 import time
 from typing import Optional
 import re
+import os
+import shutil
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -14,10 +16,13 @@ from open_webui.models.notes import Notes
 from open_webui.models.prompts import Prompts
 from open_webui.models.models import Models
 from open_webui.models.knowledge import Knowledges
+from open_webui.models.functions import Functions
+from open_webui.models.tools import Tools
 from open_webui.storage.provider import Storage
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import SRC_LOG_LEVELS
+from open_webui.config import CACHE_DIR
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
@@ -53,14 +58,41 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
 
         # Prune orphaned data
         user_ids = {user.id for user in Users.get_users().users}
+        chat_ids = {chat.id for chat in Chats.get_chats()}
 
         # Files
         all_files = Files.get_files()
+        referenced_file_ids = set()
+        for chat in Chats.get_chats():
+            file_ids = re.findall(
+                r'"file_id":\s*"([^"]+)"', str(chat.chat)
+            )
+            referenced_file_ids.update(file_ids)
+
+        for kb in Knowledges.get_knowledge_bases():
+            if kb.data and "file_ids" in kb.data:
+                referenced_file_ids.update(kb.data["file_ids"])
+
         for file in all_files:
-            if file.user_id not in user_ids:
+            if file.user_id not in user_ids or file.id not in referenced_file_ids:
                 Storage.delete_file(file.path)
                 VECTOR_DB_CLIENT.delete(collection_name=f"file-{file.id}")
                 Files.delete_file_by_id(file.id)
+
+        # Audio
+        audio_cache_dir = f"{CACHE_DIR}/audio/transcriptions"
+        if os.path.exists(audio_cache_dir):
+            shutil.rmtree(audio_cache_dir)
+
+        # Functions
+        function_cache_dir = f"{CACHE_DIR}/functions"
+        if os.path.exists(function_cache_dir):
+            shutil.rmtree(function_cache_dir)
+
+        # Tools
+        tool_cache_dir = f"{CACHE_DIR}/tools"
+        if os.path.exists(tool_cache_dir):
+            shutil.rmtree(tool_cache_dir)
 
         # Notes
         all_notes = Notes.get_notes()
