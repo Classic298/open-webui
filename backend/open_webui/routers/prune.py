@@ -123,12 +123,12 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
         # Prune orphaned vector collections that have no corresponding entry in the main DB
         all_vector_collections = []
         try:
-            # Check the string value of VECTOR_DB, not its class name.
+            # Check the string value of VECTOR_DB to ensure this logic only runs for Chroma.
             if "chroma" in VECTOR_DB.lower():
                 import sqlite3
 
-                # CORRECTED: Use the already imported VECTOR_DB_CLIENT object to get its path.
-                chroma_path = VECTOR_DB_CLIENT._path
+                # The client does not expose a path. We construct it relative to the known CACHE_DIR.
+                chroma_path = os.path.join(os.path.dirname(CACHE_DIR), "vector_db")
                 db_file = os.path.join(chroma_path, "chroma.sqlite3")
 
                 log.debug(f"Attempting to read ChromaDB metadata from: {db_file}")
