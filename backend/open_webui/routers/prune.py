@@ -120,6 +120,36 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
                 VECTOR_DB_CLIENT.delete_collection(collection_name=knowledge.id)
                 Knowledges.delete_knowledge_by_id(knowledge.id)
 
+        # Prune orphaned vector collections that have no corresponding entry in the main DB
+        try:
+            # Get all collection names from the vector database
+            all_vector_collections = [
+                col.name for col in VECTOR_DB_CLIENT.list_collections()
+            ]
+
+            # Get all valid collection names from the main database
+            # These are knowledge base IDs and file IDs
+            valid_knowledge_base_ids = {kb.id for kb in Knowledges.get_knowledge_bases()}
+            valid_file_ids = {f"file-{file.id}" for file in Files.get_files()}
+            expected_collections = valid_knowledge_base_ids.union(valid_file_ids)
+
+            # Find and delete collections that exist in vector DB but not in the main DB
+            orphaned_collections = [
+                col_name
+                for col_name in all_vector_collections
+                if col_name not in expected_collections
+            ]
+
+            if orphaned_collections:
+                log.info(f"Pruning {len(orphaned_collections)} orphaned vector collections.")
+                for col_name in orphaned_collections:
+                    log.debug(f"Deleting orphaned vector collection: {col_name}")
+                    VECTOR_DB_CLIENT.delete_collection(collection_name=col_name)
+
+        except Exception as e:
+            log.error(f"Error pruning orphaned vector collections: {e}")
+            # We don't re-raise the exception to allow the main prune process to complete
+
         # Vacuum the database to reclaim space
         with get_db() as db:
             if db.get_bind().dialect.name == "sqlite":
