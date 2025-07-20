@@ -8,10 +8,14 @@
 	import { toast } from 'svelte-sonner';
 	import { getAllUserChats } from '$lib/apis/chats';
 	import { exportConfig, importConfig } from '$lib/apis/configs';
+	import PruneDataDialog from '$lib/components/common/PruneDataDialog.svelte';
+	import { pruneData } from '$lib/apis/prune';
 
 	const i18n = getContext('i18n');
 
 	export let saveHandler: Function;
+
+	let showPruneDataDialog = false;
 
 	const exportAllUserChats = async () => {
 		let blob = new Blob([JSON.stringify(await getAllUserChats(localStorage.token))], {
@@ -20,10 +24,26 @@
 		saveAs(blob, `all-chats-export-${Date.now()}.json`);
 	};
 
+	const handlePruneDataConfirm = async (event) => {
+		const { days, exempt_archived_chats } = event.detail;
+		const res = await pruneData(localStorage.token, days, exempt_archived_chats).catch(
+			(error) => {
+				toast.error(`${error}`);
+				return null;
+			}
+		);
+
+		if (res) {
+			toast.success('Data pruned successfully');
+		}
+	};
+
 	onMount(async () => {
 		// permissions = await getUserPermissions(localStorage.token);
 	});
 </script>
+
+<PruneDataDialog bind:show={showPruneDataDialog} on:confirm={handlePruneDataConfirm} />
 
 <form
 	class="flex flex-col h-full justify-between space-y-3 text-sm"
@@ -181,6 +201,34 @@
 					</div>
 				</button>
 			{/if}
+
+			<hr class="border-gray-100 dark:border-gray-850 my-1" />
+
+			<button
+				type="button"
+				class=" flex rounded-md py-2 px-3 w-full bg-yellow-500 hover:bg-yellow-600 text-white transition"
+				on:click={() => {
+					showPruneDataDialog = true;
+				}}
+			>
+				<div class=" self-center mr-3">
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						viewBox="0 0 16 16"
+						fill="currentColor"
+						class="w-4 h-4"
+					>
+						<path
+							fill-rule="evenodd"
+							d="M4.5 2a.5.5 0 0 0-.5.5v1a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5v-1a.5.5 0 0 0-.5-.5h-7ZM3 6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1H3Zm1 4a.5.5 0 0 1 .5-.5h6a.5.5 0 0 1 0 1H4.5a.5.5 0 0 1-.5-.5Z"
+							clip-rule="evenodd"
+						/>
+					</svg>
+				</div>
+				<div class=" self-center text-sm font-medium">
+					{$i18n.t('Prune Orphaned Data')}
+				</div>
+			</button>
 		</div>
 	</div>
 
