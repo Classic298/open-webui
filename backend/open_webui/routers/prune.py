@@ -57,7 +57,7 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
             Chats.delete_chat_by_id(chat.id)
 
         # Prune orphaned data
-        user_ids = {user.id for user in Users.get_users().users}
+        user_ids = {user.id for user in Users.get_users()["users"]}
         chat_ids = {chat.id for chat in Chats.get_chats()}
 
         # Files
