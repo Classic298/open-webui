@@ -225,13 +225,28 @@ def cleanup_orphaned_vector_collections(active_file_ids: Set[str], active_kb_ids
     uuid_to_collection = {}
     try:
         import sqlite3
+        log.debug(f"Attempting to connect to ChromaDB at: {chroma_db_path}")
+        
         with sqlite3.connect(str(chroma_db_path)) as conn:
+            # First, check what tables exist
+            tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+            log.debug(f"ChromaDB tables: {tables}")
+            
+            # Check the schema of collections table
+            schema = conn.execute("PRAGMA table_info(collections)").fetchall()
+            log.debug(f"Collections table schema: {schema}")
+            
             cursor = conn.execute("SELECT id, name FROM collections")
-            for row in cursor:
+            rows = cursor.fetchall()
+            log.debug(f"Raw ChromaDB query results: {rows}")
+            
+            for row in rows:
                 uuid_dir, collection_name = row
                 uuid_to_collection[uuid_dir] = collection_name
+                log.debug(f"Mapped UUID {uuid_dir} -> collection {collection_name}")
         
-        log.debug(f"Found {len(uuid_to_collection)} collections in ChromaDB metadata")
+        log.debug(f"Final uuid_to_collection mapping: {uuid_to_collection}")
+        log.info(f"Found {len(uuid_to_collection)} collections in ChromaDB metadata")
         
     except Exception as e:
         log.error(f"Error reading ChromaDB metadata: {e}")
