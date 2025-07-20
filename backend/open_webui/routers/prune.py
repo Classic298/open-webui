@@ -250,7 +250,7 @@ def cleanup_orphaned_vector_collections(active_file_ids: Set[str], active_kb_ids
             
             # Get Directory UUID -> Collection ID mapping from segments table
             # Only interested in VECTOR segments as those are the actual data directories
-            cursor = conn.execute("SELECT id, collection_id FROM segments WHERE scope = 'VECTOR'")
+            cursor = conn.execute("SELECT id, collection FROM segments WHERE scope = 'VECTOR'")
             segment_rows = cursor.fetchall()
             log.debug(f"Raw ChromaDB segments query results: {segment_rows}")
             
