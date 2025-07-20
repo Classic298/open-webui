@@ -52,12 +52,6 @@ def create_chat(token, title, archived=False, old=False):
         response.raise_for_status()
         chat = response.json()
 
-    # This part is tricky without direct DB access. We'll have to assume that if we can't
-    # modify the updated_at timestamp, we can't test the date-based pruning reliably
-    # in a pure API-based test. A potential workaround would be to have a separate
-    # endpoint for testing purposes to modify timestamps, but that's out of scope here.
-    # For now, we'll just have to trust that the days parameter works as implemented.
-
     return chat
 
 
@@ -70,24 +64,44 @@ def upload_file(token, file_name, content_type="text/plain"):
     return response.json()
 
 
-def associate_file_with_chat(token, chat, file):
+def create_note(token, title):
     headers = {"Authorization": f"Bearer {token}"}
-    response = requests.get(f"{BASE_URL}/chats/{chat['id']}", headers=headers)
+    note_data = {"title": title}
+    response = requests.post(f"{BASE_URL}/notes/new", json=note_data, headers=headers)
     response.raise_for_status()
-    chat_model = response.json()
+    return response.json()
 
-    chat_model["chat"]["history"] = {
-        "messages": {
-            str(uuid.uuid4()): {
-                "content": "test message",
-                "file": {"id": file["id"]},
-            }
-        }
+
+def create_prompt(token, command, title, content):
+    headers = {"Authorization": f"Bearer {token}"}
+    prompt_data = {"command": command, "title": title, "content": content}
+    response = requests.post(
+        f"{BASE_URL}/prompts/new", json=prompt_data, headers=headers
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def create_model(token, model_id):
+    headers = {"Authorization": f"Bearer {token}"}
+    model_data = {
+        "id": model_id,
+        "name": model_id,
+        "meta": {},
+        "params": {},
     }
     response = requests.post(
-        f"{BASE_URL}/chats/{chat['id']}",
-        json={"chat": chat_model["chat"]},
-        headers=headers,
+        f"{BASE_URL}/models/new", json=model_data, headers=headers
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def create_knowledge_base(token, name):
+    headers = {"Authorization": f"Bearer {token}"}
+    kb_data = {"name": name, "description": ""}
+    response = requests.post(
+        f"{BASE_URL}/knowledge/new", json=kb_data, headers=headers
     )
     response.raise_for_status()
     return response.json()
@@ -99,9 +113,7 @@ def delete_user(token, user_id):
     response.raise_for_status()
 
 
-def test_prune_data_api_only():
-    # This test assumes the server is running and accessible at BASE_URL.
-    # It also assumes that the user running the test has provided a valid admin JWT token.
+def test_prune_all_orphaned_data():
     ADMIN_TOKEN = os.environ.get("OPEN_WEBUI_ADMIN_TOKEN")
     if not ADMIN_TOKEN:
         print("Skipping API test: OPEN_WEBUI_ADMIN_TOKEN not set")
@@ -109,68 +121,71 @@ def test_prune_data_api_only():
 
     headers = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
 
-    # 1. Create a user and some data
-    email = f"prune-test-{random_string()}@example.com"
+    # 1. Create a user that will be deleted
+    email = f"deleted-user-{random_string()}@example.com"
     password = "password"
-    user = create_user(email, password, "Prune Test User")
-    token = login(email, password)
+    user_to_delete = create_user(email, password, "User to Delete")
+    token_to_delete = login(email, password)
 
-    chat1 = create_chat(token, "Chat 1")
-    chat2 = create_chat(token, "Chat 2 (Archived)", archived=True)
-    chat3 = create_chat(token, "Chat 3 (To be deleted)")
+    # 2. Create all types of data for this user
+    chat_to_delete = create_chat(token_to_delete, "Chat to Delete")
+    file_to_delete = upload_file(
+        token_to_delete, create_dummy_file("file_to_delete.txt")
+    )
+    note_to_delete = create_note(token_to_delete, "Note to Delete")
+    prompt_to_delete = create_prompt(
+        token_to_delete, "prompt-to-delete", "Prompt to Delete", "content"
+    )
+    model_to_delete = create_model(token_to_delete, "model-to-delete")
+    kb_to_delete = create_knowledge_base(token_to_delete, "KB to Delete")
 
-    file1 = upload_file(token, create_dummy_file("file1.txt"))
-    file2 = upload_file(token, create_dummy_file("file2.txt"))
-    file3 = upload_file(token, create_dummy_file("orphaned.txt"))
+    # 3. Delete the user
+    delete_user(ADMIN_TOKEN, user_to_delete["id"])
 
-    associate_file_with_chat(token, chat1, file1)
-    associate_file_with_chat(token, chat2, file2)
-
-    # Delete a chat, orphaning its file
-    requests.delete(f"{BASE_URL}/chats/{chat3['id']}", headers=headers)
-
-    # 2. Prune all non-archived data
-    prune_data = {"days": 0, "exempt_archived_chats": True}
-    response = requests.post(f"{BASE_URL}/prune/", json=prune_data, headers=headers)
-    response.raise_for_status()
-
-    # 3. Verify the results
-    # Chat 1 should be deleted
-    response = requests.get(f"{BASE_URL}/chats/{chat1['id']}", headers=headers)
-    assert response.status_code == 401
-
-    # Chat 2 (archived) should still exist
-    response = requests.get(f"{BASE_URL}/chats/{chat2['id']}", headers=headers)
-    assert response.status_code == 200
-
-    # File 1 (from Chat 1) should be deleted
-    response = requests.get(f"{BASE_URL}/files/{file1['id']}", headers=headers)
-    assert response.status_code == 404
-
-    # File 2 (from archived Chat 2) should still exist
-    response = requests.get(f"{BASE_URL}/files/{file2['id']}", headers=headers)
-    assert response.status_code == 200
-
-    # Orphaned file 3 should be deleted
-    response = requests.get(f"{BASE_URL}/files/{file3['id']}", headers=headers)
-    assert response.status_code == 404
-
-    # 4. Prune everything
+    # 4. Prune all data
     prune_data = {"days": 0, "exempt_archived_chats": False}
     response = requests.post(f"{BASE_URL}/prune/", json=prune_data, headers=headers)
     response.raise_for_status()
 
-    # 5. Verify everything is gone
-    response = requests.get(f"{BASE_URL}/chats/{chat2['id']}", headers=headers)
+    # 5. Verify that all data associated with the deleted user is gone
+    # We expect 401 because the user is deleted, so we can't use their token
+    response = requests.get(
+        f"{BASE_URL}/chats/{chat_to_delete['id']}",
+        headers={"Authorization": f"Bearer {token_to_delete}"},
+    )
     assert response.status_code == 401
 
-    response = requests.get(f"{BASE_URL}/files/{file2['id']}", headers=headers)
-    assert response.status_code == 404
+    response = requests.get(
+        f"{BASE_URL}/files/{file_to_delete['id']}",
+        headers={"Authorization": f"Bearer {token_to_delete}"},
+    )
+    assert response.status_code == 401
 
-    # 6. Clean up the user
-    delete_user(ADMIN_TOKEN, user["id"])
+    response = requests.get(
+        f"{BASE_URL}/notes/{note_to_delete['id']}",
+        headers={"Authorization": f"Bearer {token_to_delete}"},
+    )
+    assert response.status_code == 401
+
+    response = requests.get(
+        f"{BASE_URL}/prompts/{prompt_to_delete['command']}",
+        headers={"Authorization": f"Bearer {token_to_delete}"},
+    )
+    assert response.status_code == 401
+
+    response = requests.get(
+        f"{BASE_URL}/models/{model_to_delete['id']}",
+        headers={"Authorization": f"Bearer {token_to_delete}"},
+    )
+    assert response.status_code == 401
+
+    response = requests.get(
+        f"{BASE_URL}/knowledge/{kb_to_delete['id']}",
+        headers={"Authorization": f"Bearer {token_to_delete}"},
+    )
+    assert response.status_code == 401
 
     # Clean up dummy files
-    for f in ["file1.txt", "file2.txt", "orphaned.txt"]:
+    for f in ["file_to_delete.txt"]:
         if os.path.exists(f):
             os.remove(f)

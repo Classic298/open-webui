@@ -6,6 +6,13 @@ from open_webui.internal.db import Base, JSONField, get_db
 
 from open_webui.models.chats import Chats
 from open_webui.models.groups import Groups
+from open_webui.models.files import Files
+from open_webui.models.notes import Notes
+from open_webui.models.prompts import Prompts
+from open_webui.models.models import Models
+from open_webui.models.knowledge import Knowledges
+from open_webui.storage.provider import Storage
+from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
 
 
 from pydantic import BaseModel, ConfigDict
@@ -369,17 +376,38 @@ class UsersTable:
             Groups.remove_user_from_all_groups(id)
 
             # Delete User Chats
-            result = Chats.delete_chats_by_user_id(id)
-            if result:
-                with get_db() as db:
-                    # Delete User
-                    db.query(User).filter_by(id=id).delete()
-                    db.commit()
+            Chats.delete_chats_by_user_id(id)
 
-                return True
-            else:
-                return False
-        except Exception:
+            # Delete User Files
+            files = Files.get_files_by_user_id(id)
+            for file in files:
+                Storage.delete_file(file.path)
+                VECTOR_DB_CLIENT.delete(collection_name=f"file-{file.id}")
+            Files.delete_files_by_user_id(id)
+
+            # Delete User Notes
+            Notes.delete_notes_by_user_id(id)
+
+            # Delete User Prompts
+            Prompts.delete_prompts_by_user_id(id)
+
+            # Delete User Models
+            Models.delete_models_by_user_id(id)
+
+            # Delete User Knowledge Bases
+            knowledges = Knowledges.get_knowledge_bases_by_user_id(id)
+            for knowledge in knowledges:
+                Knowledges.delete_knowledge_base_by_id(knowledge.id)
+
+
+            with get_db() as db:
+                # Delete User
+                db.query(User).filter_by(id=id).delete()
+                db.commit()
+
+            return True
+        except Exception as e:
+            print(e)
             return False
 
     def update_user_api_key_by_id(self, id: str, api_key: str) -> bool:

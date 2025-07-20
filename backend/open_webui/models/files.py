@@ -231,5 +231,15 @@ class FilesTable:
             except Exception:
                 return False
 
+    def delete_files_by_user_id(self, user_id: str) -> bool:
+        with get_db() as db:
+            try:
+                db.query(File).filter_by(user_id=user_id).delete()
+                db.commit()
+
+                return True
+            except Exception:
+                return False
+
 
 Files = FilesTable()
