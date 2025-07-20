@@ -77,7 +77,6 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
         for file in all_files:
             if file.user_id not in user_ids or file.id not in referenced_file_ids:
                 Storage.delete_file(file.path)
-                VECTOR_DB_CLIENT.delete(collection_name=f"file-{file.id}", filter=None)
                 VECTOR_DB_CLIENT.delete_collection(collection_name=f"file-{file.id}")
                 Files.delete_file_by_id(file.id)
 
@@ -118,7 +117,6 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
         all_knowledge = Knowledges.get_knowledge_bases()
         for knowledge in all_knowledge:
             if knowledge.user_id not in user_ids:
-                VECTOR_DB_CLIENT.delete(collection_name=knowledge.id, filter=None)
                 VECTOR_DB_CLIENT.delete_collection(collection_name=knowledge.id)
                 Knowledges.delete_knowledge_by_id(knowledge.id)
 
