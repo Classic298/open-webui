@@ -126,9 +126,6 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
             # This logic is specific to ChromaDB's file-based storage.
             # We must check if the current vector DB is an instance of Chroma.
             if "chroma" in VECTOR_DB.__class__.__name__.lower():
-                import sqlite3
-                import os
-
                 # Access the internal path where ChromaDB stores its files.
                 # This is a more reliable way than guessing API methods.
                 chroma_path = VECTOR_DB._path
