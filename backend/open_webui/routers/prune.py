@@ -64,27 +64,27 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
 
         # Files
         all_files = Files.get_files()
-        referenced_file_ids = set()
-        for chat in Chats.get_chats():
-            file_ids = re.findall(
-                r'"file_id":\s*"([^"]+)"', str(chat.chat)
-            )
-            referenced_file_ids.update(file_ids)
+        all_kbs = Knowledges.get_knowledge_bases()
 
-        for kb in Knowledges.get_knowledge_bases():
+        # Build a single set of all file IDs that are currently in any knowledge base
+        active_kb_file_ids = set()
+        for kb in all_kbs:
             if kb.data and "file_ids" in kb.data:
-                referenced_file_ids.update(kb.data["file_ids"])
+                active_kb_file_ids.update(kb.data["file_ids"])
 
         for file in all_files:
-            if file.user_id not in user_ids or file.id not in referenced_file_ids:
+            is_orphaned_by_user = file.user_id not in user_ids
+            is_orphaned_by_kb = file.id not in active_kb_file_ids
+
+            if is_orphaned_by_user or is_orphaned_by_kb:
+                # This file is an orphan, proceed with deletion
                 try:
+                    log.debug(f"Deleting orphaned file {file.id} (user orphan: {is_orphaned_by_user}, kb orphan: {is_orphaned_by_kb})")
                     Storage.delete_file(file.path)
                     VECTOR_DB_CLIENT.delete_collection(collection_name=f"file-{file.id}")
                     Files.delete_file_by_id(file.id)
                 except ValueError as e:
-                    # This can happen if the collection was already deleted but the file record remains.
                     log.warning(f"Could not delete vector collection for file {file.id} (may already be gone): {e}")
-                    # Ensure the file record is deleted even if the vector part fails
                     if Files.get_file_by_id(file.id):
                         Files.delete_file_by_id(file.id)
 
