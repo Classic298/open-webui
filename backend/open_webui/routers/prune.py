@@ -90,8 +90,18 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
                 if orphaned_collections:
                     log.info(f"Pruning {len(orphaned_collections)} orphaned vector collections.")
                     for col_name in orphaned_collections:
-                        log.debug(f"Deleting orphaned vector collection: {col_name}")
-                        VECTOR_DB_CLIENT.delete_collection(collection_name=col_name)
+                        try:
+                            log.debug(f"Deleting orphaned vector collection: {col_name}")
+                            # Step 1: Logically delete the collection from Chroma's metadata
+                            VECTOR_DB_CLIENT.delete_collection(collection_name=col_name)
+
+                            # Step 2: Physically remove the orphaned collection's data directory
+                            collection_path = os.path.join(chroma_path, col_name)
+                            if os.path.isdir(collection_path):
+                                log.debug(f"Physically removing directory: {collection_path}")
+                                shutil.rmtree(collection_path)
+                        except Exception as e:
+                            log.error(f"Error while deleting collection {col_name}: {e}")
 
         except Exception as e:
             log.error(f"Error during orphaned vector collection pruning: {e}")
