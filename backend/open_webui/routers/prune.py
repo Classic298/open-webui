@@ -7,6 +7,7 @@ import shutil
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import text
 
 from open_webui.utils.auth import get_admin_user
 from open_webui.models.users import Users
@@ -19,10 +20,10 @@ from open_webui.models.knowledge import Knowledges
 from open_webui.models.functions import Functions
 from open_webui.models.tools import Tools
 from open_webui.storage.provider import Storage
-from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
+from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT, VECTOR_DB
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import SRC_LOG_LEVELS
-from open_webui.config import CACHE_DIR, DATA_DIR
+from open_webui.config import CACHE_DIR
 from open_webui.internal.db import get_db
 
 log = logging.getLogger(__name__)
@@ -76,7 +77,13 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
         for file in all_files:
             if file.user_id not in user_ids or file.id not in referenced_file_ids:
                 Storage.delete_file(file.path)
-                VECTOR_DB_CLIENT.delete_collection(collection_name=f"file-{file.id}")
+                if VECTOR_DB == "chroma":
+                    # Manually delete the collection directory
+                    collection_dir = f"{CACHE_DIR}/vector_db/chroma/{file.id}"
+                    if os.path.exists(collection_dir):
+                        shutil.rmtree(collection_dir)
+                else:
+                    VECTOR_DB_CLIENT.delete_collection(collection_name=f"file-{file.id}")
                 Files.delete_file_by_id(file.id)
 
         # Audio
@@ -116,12 +123,23 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
         all_knowledge = Knowledges.get_knowledge_bases()
         for knowledge in all_knowledge:
             if knowledge.user_id not in user_ids:
-                VECTOR_DB_CLIENT.delete_collection(collection_name=knowledge.id)
+                if VECTOR_DB == "chroma":
+                    # Manually delete the collection directory
+                    collection_dir = f"{CACHE_DIR}/vector_db/chroma/{knowledge.id}"
+                    if os.path.exists(collection_dir):
+                        shutil.rmtree(collection_dir)
+                else:
+                    VECTOR_DB_CLIENT.delete_collection(collection_name=knowledge.id)
                 Knowledges.delete_knowledge_by_id(knowledge.id)
 
         # Vacuum the database to reclaim space
         with get_db() as db:
-            db.execute("VACUUM")
+            if db.get_bind().dialect.name == "sqlite":
+                db.execute(text("VACUUM"))
+            elif db.get_bind().dialect.name == "postgresql":
+                # For PostgreSQL, VACUUM FULL is required to reclaim space to the OS
+                # This is a locking operation, so it should be used with caution
+                db.execute(text("VACUUM FULL"))
 
         return True
     except Exception as e:
