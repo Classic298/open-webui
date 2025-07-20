@@ -72,9 +72,15 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
             if kb.data and "file_ids" in kb.data:
                 active_kb_file_ids.update(kb.data["file_ids"])
 
+        # DIAGNOSTIC LINE 1: Print the set of all known active file IDs
+        log.warning(f"DIAGNOSTIC: Active KB File IDs: {active_kb_file_ids}")
+
         for file in all_files:
             is_orphaned_by_user = file.user_id not in user_ids
             is_orphaned_by_kb = file.id not in active_kb_file_ids
+
+            # DIAGNOSTIC LINE 2: Print the evaluation for each file
+            log.warning(f"DIAGNOSTIC: Checking file {file.id}. OrphanByUser: {is_orphaned_by_user}. OrphanByKB: {is_orphaned_by_kb}. Will delete: {is_orphaned_by_user or is_orphaned_by_kb}")
 
             if is_orphaned_by_user or is_orphaned_by_kb:
                 # This file is an orphan, proceed with deletion
