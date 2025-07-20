@@ -43,6 +43,60 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
     Prunes old and orphaned data from the database.
     """
     try:
+        # Prune orphaned vector collections that have no corresponding entry in the main DB
+        all_vector_collections = []
+        try:
+            # Check the string value of VECTOR_DB to ensure this logic only runs for Chroma.
+            if "chroma" in VECTOR_DB.lower():
+                import sqlite3
+
+                # The client does not expose a path. We construct it relative to the known CACHE_DIR.
+                chroma_path = os.path.join(os.path.dirname(CACHE_DIR), "vector_db")
+                db_file = os.path.join(chroma_path, "chroma.sqlite3")
+
+                log.debug(f"Attempting to read ChromaDB metadata from: {db_file}")
+
+                if os.path.exists(db_file):
+                    # Connect to the SQLite DB in read-only mode to ensure safety
+                    conn = sqlite3.connect(f"file:{db_file}?mode=ro", uri=True)
+                    cursor = conn.cursor()
+                    # Directly query the 'collections' table for their names
+                    cursor.execute("SELECT name FROM collections")
+                    # The query returns a list of tuples, so we extract the first element of each
+                    all_vector_collections = [item[0] for item in cursor.fetchall()]
+                    conn.close()
+                    log.info(f"Found {len(all_vector_collections)} collections in ChromaDB.")
+                else:
+                    log.warning(f"ChromaDB metadata file not found at {db_file}.")
+            else:
+                log.warning(
+                    f"Vector DB type '{VECTOR_DB}' does not support direct collection listing for pruning. Skipping orphan vector check."
+                )
+
+            # --- The comparison logic remains the same, but now runs only if collections were found ---
+            if all_vector_collections:
+                # Get all valid collection names from the main application database
+                valid_knowledge_base_ids = {kb.id for kb in Knowledges.get_knowledge_bases()}
+                valid_file_ids = {f"file-{file.id}" for file in Files.get_files()}
+                expected_collections = valid_knowledge_base_ids.union(valid_file_ids)
+
+                # Find collections that exist in vector DB but not in the main DB
+                orphaned_collections = [
+                    col_name
+                    for col_name in all_vector_collections
+                    if col_name not in expected_collections
+                ]
+
+                if orphaned_collections:
+                    log.info(f"Pruning {len(orphaned_collections)} orphaned vector collections.")
+                    for col_name in orphaned_collections:
+                        log.debug(f"Deleting orphaned vector collection: {col_name}")
+                        VECTOR_DB_CLIENT.delete_collection(collection_name=col_name)
+
+        except Exception as e:
+            log.error(f"Error during orphaned vector collection pruning: {e}")
+            # We don't re-raise the exception to allow the main prune process to complete
+        
         # Prune old chats
         chats_to_delete = Chats.get_chats()
 
@@ -119,60 +173,6 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
             if knowledge.user_id not in user_ids:
                 VECTOR_DB_CLIENT.delete_collection(collection_name=knowledge.id)
                 Knowledges.delete_knowledge_by_id(knowledge.id)
-
-        # Prune orphaned vector collections that have no corresponding entry in the main DB
-        all_vector_collections = []
-        try:
-            # Check the string value of VECTOR_DB to ensure this logic only runs for Chroma.
-            if "chroma" in VECTOR_DB.lower():
-                import sqlite3
-
-                # The client does not expose a path. We construct it relative to the known CACHE_DIR.
-                chroma_path = os.path.join(os.path.dirname(CACHE_DIR), "vector_db")
-                db_file = os.path.join(chroma_path, "chroma.sqlite3")
-
-                log.debug(f"Attempting to read ChromaDB metadata from: {db_file}")
-
-                if os.path.exists(db_file):
-                    # Connect to the SQLite DB in read-only mode to ensure safety
-                    conn = sqlite3.connect(f"file:{db_file}?mode=ro", uri=True)
-                    cursor = conn.cursor()
-                    # Directly query the 'collections' table for their names
-                    cursor.execute("SELECT name FROM collections")
-                    # The query returns a list of tuples, so we extract the first element of each
-                    all_vector_collections = [item[0] for item in cursor.fetchall()]
-                    conn.close()
-                    log.info(f"Found {len(all_vector_collections)} collections in ChromaDB.")
-                else:
-                    log.warning(f"ChromaDB metadata file not found at {db_file}.")
-            else:
-                log.warning(
-                    f"Vector DB type '{VECTOR_DB}' does not support direct collection listing for pruning. Skipping orphan vector check."
-                )
-
-            # --- The comparison logic remains the same, but now runs only if collections were found ---
-            if all_vector_collections:
-                # Get all valid collection names from the main application database
-                valid_knowledge_base_ids = {kb.id for kb in Knowledges.get_knowledge_bases()}
-                valid_file_ids = {f"file-{file.id}" for file in Files.get_files()}
-                expected_collections = valid_knowledge_base_ids.union(valid_file_ids)
-
-                # Find collections that exist in vector DB but not in the main DB
-                orphaned_collections = [
-                    col_name
-                    for col_name in all_vector_collections
-                    if col_name not in expected_collections
-                ]
-
-                if orphaned_collections:
-                    log.info(f"Pruning {len(orphaned_collections)} orphaned vector collections.")
-                    for col_name in orphaned_collections:
-                        log.debug(f"Deleting orphaned vector collection: {col_name}")
-                        VECTOR_DB_CLIENT.delete_collection(collection_name=col_name)
-
-        except Exception as e:
-            log.error(f"Error during orphaned vector collection pruning: {e}")
-            # We don't re-raise the exception to allow the main prune process to complete
 
         # Vacuum the database to reclaim space
         with get_db() as db:
