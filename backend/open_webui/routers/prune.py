@@ -44,7 +44,7 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
     Prunes old and orphaned data from the database.
     """
     try:
-        # Prune old chats first to determine which files/kbs might become orphaned
+        # Prune old chats based on age and archive status
         chats_to_delete = Chats.get_chats()
         if form_data.days is not None:
             cutoff_time = int(time.time()) - (form_data.days * 86400)
@@ -56,11 +56,8 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
         for chat in chats_to_delete:
             Chats.delete_chat_by_id(chat.id)
 
-        # Build a definitive set of all user IDs that should exist
+        # Build a definitive set of all existing user IDs
         user_ids = {user.id for user in Users.get_users()["users"]}
-
-        # Stage 1: Prune orphaned database records and their associated data
-        # This handles standard orphan cleanup where DB records still exist.
 
         # Prune orphaned Files
         all_files = Files.get_files()
@@ -69,46 +66,29 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
             fid for kb in all_kbs if kb.data and "file_ids" in kb.data for fid in kb.data["file_ids"]
         }
         for file in all_files:
-            if file.id not in active_kb_file_ids or file.user_id not in user_ids:
+            # A file is an orphan if its user is gone OR it's not in any active KB.
+            if file.user_id not in user_ids or file.id not in active_kb_file_ids:
                 try:
+                    # Delete the physical file, the vector collection, and the DB record.
                     Storage.delete_file(file.path)
                     VECTOR_DB_CLIENT.delete_collection(collection_name=f"file-{file.id}")
+                    Files.delete_file_by_id(file.id)
                 except ValueError:
-                    pass  # Collection already gone, ignore
-                Files.delete_file_by_id(file.id)
+                    # This handles cases where the vector collection is already gone.
+                    # We can safely ignore this and still delete the file record.
+                    if Files.get_file_by_id(file.id):
+                        Files.delete_file_by_id(file.id)
 
-        # Prune orphaned Knowledge Bases
+        # Prune orphaned Knowledge Bases (belonging to deleted users)
         for kb in all_kbs:
             if kb.user_id not in user_ids:
                 try:
                     VECTOR_DB_CLIENT.delete_collection(collection_name=kb.id)
                 except ValueError:
-                    pass  # Collection already gone, ignore
+                    pass  # Collection already gone, ignore.
                 Knowledges.delete_knowledge_by_id(kb.id)
-
-        # Stage 2: Prune stranded physical files/directories that have no DB record.
-        # This handles cleanup after incomplete deletions.
-
-        # Clean stranded upload files
-        all_file_ids_in_db = {file.id for file in Files.get_files()}
-        upload_dir = os.path.join(os.path.dirname(CACHE_DIR), "uploads")
-        if os.path.isdir(upload_dir):
-            for filename in os.listdir(upload_dir):
-                file_id_match = re.match(r"^([a-fA-F0-9\-]+)_", filename)
-                if file_id_match and file_id_match.group(1) not in all_file_ids_in_db:
-                    os.remove(os.path.join(upload_dir, filename))
-
-        # Clean stranded vector directories (the core issue)
-        if "chroma" in VECTOR_DB.lower():
-            vector_dir = os.path.join(os.path.dirname(CACHE_DIR), "vector_db")
-            if os.path.isdir(vector_dir):
-                expected_collections = {f"file-{id}" for id in all_file_ids_in_db} | {kb.id for kb in all_kbs}
-                for dirname in os.listdir(vector_dir):
-                    dirpath = os.path.join(vector_dir, dirname)
-                    if os.path.isdir(dirpath) and dirname not in expected_collections:
-                        shutil.rmtree(dirpath)
-
-        # Prune other orphaned items (Notes, Prompts, etc.)
+        
+        # Prune other orphaned items (Notes, Prompts, Models, Folders)
         for note in Notes.get_notes():
             if note.user_id not in user_ids:
                 Notes.delete_note_by_id(note.id)
@@ -122,7 +102,7 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
             if folder.user_id not in user_ids:
                 Folders.delete_folder_by_id_and_user_id(folder.id, folder.user_id, delete_chats=False)
 
-        # Clean cache directories
+        # Clean transient cache directories
         for cache_path in [
             f"{CACHE_DIR}/audio/transcriptions",
             f"{CACHE_DIR}/functions",
