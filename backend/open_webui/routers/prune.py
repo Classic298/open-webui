@@ -74,10 +74,8 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
                                 collection_path = os.path.join(chroma_path, dir_name)
                                 log.debug(f"Physically removing stranded directory: {collection_path}")
                                 shutil.rmtree(collection_path)
-
-                                # For good measure, also attempt a logical delete in case metadata is out of sync.
-                                VECTOR_DB_CLIENT.delete_collection(collection_name=dir_name)
                             except Exception as e:
+                                # This will now only catch errors from shutil.rmtree (e.g., permissions)
                                 log.error(f"Error while removing stranded directory {dir_name}: {e}")
                     else:
                         log.info("No stranded physical vector directories found.")
