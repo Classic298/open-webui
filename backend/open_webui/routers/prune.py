@@ -123,12 +123,14 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
         # Prune orphaned vector collections that have no corresponding entry in the main DB
         all_vector_collections = []
         try:
-            # This logic is specific to ChromaDB's file-based storage.
-            # We must check if the current vector DB is an instance of Chroma.
-            if "chroma" in VECTOR_DB.__class__.__name__.lower():
+            # CORRECTED: Check the string value of VECTOR_DB, not its class name.
+            if "chroma" in VECTOR_DB.lower():
+                import sqlite3
+
                 # Access the internal path where ChromaDB stores its files.
-                # This is a more reliable way than guessing API methods.
-                chroma_path = VECTOR_DB._path
+                # This must be dynamically retrieved from the vector DB client factory.
+                from open_webui.retrieval.vector.factory import get_vector_db_client
+                chroma_path = get_vector_db_client()._path
                 db_file = os.path.join(chroma_path, "chroma.sqlite3")
 
                 log.debug(f"Attempting to read ChromaDB metadata from: {db_file}")
@@ -146,9 +148,8 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
                 else:
                     log.warning(f"ChromaDB metadata file not found at {db_file}.")
             else:
-                # If not using ChromaDB, we cannot perform this check.
                 log.warning(
-                    f"Vector DB type '{type(VECTOR_DB).__name__}' does not support direct collection listing for pruning. Skipping orphan vector check."
+                    f"Vector DB type '{VECTOR_DB}' does not support direct collection listing for pruning. Skipping orphan vector check."
                 )
 
             # --- The comparison logic remains the same, but now runs only if collections were found ---
