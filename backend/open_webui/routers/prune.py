@@ -22,7 +22,8 @@ from open_webui.storage.provider import Storage
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import SRC_LOG_LEVELS
-from open_webui.config import CACHE_DIR
+from open_webui.config import CACHE_DIR, DATA_DIR
+from open_webui.internal.db import get_db
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
@@ -58,7 +59,6 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
 
         # Prune orphaned data
         user_ids = {user.id for user in Users.get_users()["users"]}
-        chat_ids = {chat.id for chat in Chats.get_chats()}
 
         # Files
         all_files = Files.get_files()
@@ -76,7 +76,7 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
         for file in all_files:
             if file.user_id not in user_ids or file.id not in referenced_file_ids:
                 Storage.delete_file(file.path)
-                VECTOR_DB_CLIENT.delete(collection_name=f"file-{file.id}")
+                VECTOR_DB_CLIENT.delete_collection(collection_name=f"file-{file.id}")
                 Files.delete_file_by_id(file.id)
 
         # Audio
@@ -116,7 +116,12 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
         all_knowledge = Knowledges.get_knowledge_bases()
         for knowledge in all_knowledge:
             if knowledge.user_id not in user_ids:
+                VECTOR_DB_CLIENT.delete_collection(collection_name=knowledge.id)
                 Knowledges.delete_knowledge_by_id(knowledge.id)
+
+        # Vacuum the database to reclaim space
+        with get_db() as db:
+            db.execute("VACUUM")
 
         return True
     except Exception as e:
