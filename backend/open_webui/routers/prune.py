@@ -120,9 +120,17 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
 
         for file in all_files:
             if file.user_id not in user_ids or file.id not in referenced_file_ids:
-                Storage.delete_file(file.path)
-                VECTOR_DB_CLIENT.delete_collection(collection_name=f"file-{file.id}")
-                Files.delete_file_by_id(file.id)
+                try:
+                    Storage.delete_file(file.path)
+                    VECTOR_DB_CLIENT.delete_collection(collection_name=f"file-{file.id}")
+                    Files.delete_file_by_id(file.id)
+                except ValueError as e:
+                    # This can happen if the collection was already deleted but the file record remains.
+                    # We can safely ignore this and proceed with deleting the file record.
+                    log.warning(f"Could not delete vector collection for file {file.id} (may already be gone): {e}")
+                    # Ensure the file record is deleted even if the vector part fails
+                    if Files.get_file_by_id(file.id):
+                        Files.delete_file_by_id(file.id)
 
         # Audio
         audio_cache_dir = f"{CACHE_DIR}/audio/transcriptions"
@@ -161,8 +169,13 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
         all_knowledge = Knowledges.get_knowledge_bases()
         for knowledge in all_knowledge:
             if knowledge.user_id not in user_ids:
-                VECTOR_DB_CLIENT.delete_collection(collection_name=knowledge.id)
-                Knowledges.delete_knowledge_by_id(knowledge.id)
+                try:
+                    VECTOR_DB_CLIENT.delete_collection(collection_name=knowledge.id)
+                    Knowledges.delete_knowledge_by_id(knowledge.id)
+                except ValueError as e:
+                    log.warning(f"Could not delete vector collection for knowledge base {knowledge.id} (may already be gone): {e}")
+                    if Knowledges.get_knowledge_by_id(knowledge.id):
+                        Knowledges.delete_knowledge_by_id(knowledge.id)
 
         # Vacuum the database to reclaim space
         with get_db() as db:
