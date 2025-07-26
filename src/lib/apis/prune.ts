@@ -2,7 +2,7 @@ import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 export const pruneData = async (
   token: string,
-  days: number,
+  days: number | null,
   exempt_archived_chats: boolean
 ) => {
   let error = null;
