@@ -156,7 +156,7 @@
                       {$i18n.t('Exempt chats in folders')}
                     </div>
                     <div class="text-xs text-gray-500 dark:text-gray-400">
-                      {$i18n.t('Keep chats that are organized in folders')}
+                      {$i18n.t('Keep chats that are organized in folders or pinned')}
                     </div>
                   </div>
                 </div>
