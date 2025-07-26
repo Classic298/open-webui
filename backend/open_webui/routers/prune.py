@@ -2,6 +2,8 @@ import logging
 import time
 import os
 import shutil
+import json
+import re
 from typing import Optional, Set
 from pathlib import Path
 
@@ -36,16 +38,18 @@ class PruneDataForm(BaseModel):
     days: Optional[int] = None
     exempt_archived_chats: bool = False
     exempt_chats_in_folders: bool = False
+    exempt_pinned_chats: bool = False
 
 
 def get_active_file_ids() -> Set[str]:
     """
-    Get all file IDs that are actively referenced by knowledge bases.
+    Get all file IDs that are actively referenced by knowledge bases, chats, folders, and messages.
     This is the ground truth for what files should be preserved.
     """
     active_file_ids = set()
     
     try:
+        # 1. Get files referenced by knowledge bases (original logic)
         knowledge_bases = Knowledges.get_knowledge_bases()
         log.debug(f"Found {len(knowledge_bases)} knowledge bases")
         
@@ -75,6 +79,104 @@ def get_active_file_ids() -> Set[str]:
                 if isinstance(file_id, str) and file_id.strip():
                     active_file_ids.add(file_id.strip())
                     log.debug(f"KB {kb.id} references file {file_id}")
+
+        # 2. Get files referenced in chats (NEW: scan chat JSON for file references)
+        chats = Chats.get_chats()
+        log.debug(f"Found {len(chats)} chats to scan for file references")
+        
+        for chat in chats:
+            if not chat.chat or not isinstance(chat.chat, dict):
+                continue
+                
+            try:
+                # Convert entire chat JSON to string and extract all file IDs
+                chat_json_str = json.dumps(chat.chat)
+                
+                # Find all file ID patterns in the JSON
+                # Pattern 1: "id": "uuid" where uuid looks like a file ID
+                file_id_pattern = re.compile(r'"id":\s*"([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})"')
+                potential_file_ids = file_id_pattern.findall(chat_json_str)
+                
+                # Pattern 2: URLs containing /api/v1/files/uuid
+                url_pattern = re.compile(r'/api/v1/files/([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})')
+                url_file_ids = url_pattern.findall(chat_json_str)
+                
+                # Combine and validate against actual file records
+                all_potential_ids = set(potential_file_ids + url_file_ids)
+                for file_id in all_potential_ids:
+                    # Verify this ID exists in the file table to avoid false positives
+                    if Files.get_file_by_id(file_id):
+                        active_file_ids.add(file_id)
+                        log.debug(f"Chat {chat.id}: Found active file {file_id}")
+                        
+            except Exception as e:
+                log.debug(f"Error processing chat {chat.id} for file references: {e}")
+
+        # 3. Get files referenced in folders (scan folder.items, folder.data, folder.meta)
+        try:
+            folders = Folders.get_all_folders()
+            log.debug(f"Found {len(folders)} folders to scan for file references")
+            
+            for folder in folders:
+                # Check folder.items JSON
+                if folder.items:
+                    try:
+                        items_str = json.dumps(folder.items)
+                        # Look for file ID patterns in the JSON
+                        file_id_pattern = re.compile(r'"id":\s*"([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})"')
+                        url_pattern = re.compile(r'/api/v1/files/([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})')
+                        
+                        potential_ids = file_id_pattern.findall(items_str) + url_pattern.findall(items_str)
+                        for file_id in potential_ids:
+                            if Files.get_file_by_id(file_id):
+                                active_file_ids.add(file_id)
+                                log.debug(f"Folder {folder.id}: Found file {file_id} in items")
+                    except Exception as e:
+                        log.debug(f"Error processing folder {folder.id} items: {e}")
+                
+                # Check folder.data JSON
+                if hasattr(folder, 'data') and folder.data:
+                    try:
+                        data_str = json.dumps(folder.data)
+                        file_id_pattern = re.compile(r'"id":\s*"([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})"')
+                        url_pattern = re.compile(r'/api/v1/files/([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})')
+                        
+                        potential_ids = file_id_pattern.findall(data_str) + url_pattern.findall(data_str)
+                        for file_id in potential_ids:
+                            if Files.get_file_by_id(file_id):
+                                active_file_ids.add(file_id)
+                                log.debug(f"Folder {folder.id}: Found file {file_id} in data")
+                    except Exception as e:
+                        log.debug(f"Error processing folder {folder.id} data: {e}")
+                        
+        except Exception as e:
+            log.debug(f"Error scanning folders for file references: {e}")
+
+        # 4. Get files referenced in standalone messages (message table)
+        try:
+            # Query message table directly since we may not have a Messages model
+            with get_db() as db:
+                message_results = db.execute(text("SELECT id, data FROM message WHERE data IS NOT NULL")).fetchall()
+                log.debug(f"Found {len(message_results)} messages with data to scan")
+                
+                for message_id, message_data_json in message_results:
+                    if message_data_json:
+                        try:
+                            # Convert JSON to string and scan for file patterns
+                            data_str = json.dumps(message_data_json) if isinstance(message_data_json, dict) else str(message_data_json)
+                            
+                            file_id_pattern = re.compile(r'"id":\s*"([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})"')
+                            url_pattern = re.compile(r'/api/v1/files/([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})')
+                            
+                            potential_ids = file_id_pattern.findall(data_str) + url_pattern.findall(data_str)
+                            for file_id in potential_ids:
+                                if Files.get_file_by_id(file_id):
+                                    active_file_ids.add(file_id)
+                                    log.debug(f"Message {message_id}: Found file {file_id}")
+                        except Exception as e:
+                            log.debug(f"Error processing message {message_id} data: {e}")
+        except Exception as e:
+            log.debug(f"Error scanning messages for file references: {e}")
     
     except Exception as e:
         log.error(f"Error determining active file IDs: {e}")
@@ -329,6 +431,8 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
       - If True: Exempt archived chats from deletion (only applies when days is not None)
     - exempt_chats_in_folders: bool = False
       - If True: Exempt chats that are in folders from deletion (only applies when days is not None)
+    - exempt_pinned_chats: bool = False
+      - If True: Exempt pinned chats from deletion (only applies when days is not None)
     """
     try:
         log.info("Starting data pruning process")
@@ -347,7 +451,10 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
                     if form_data.exempt_chats_in_folders and getattr(chat, 'folder_id', None) is not None:
                         log.debug(f"Exempting chat in folder: {chat.id} (folder_id: {getattr(chat, 'folder_id', None)})")
                         continue
-                    log.debug(f"Chat {chat.id} will be deleted - archived: {getattr(chat, 'archived', False)}, folder_id: {getattr(chat, 'folder_id', None)}")
+                    if form_data.exempt_pinned_chats and getattr(chat, 'pinned', False):
+                        log.debug(f"Exempting pinned chat: {chat.id}")
+                        continue
+                    log.debug(f"Chat {chat.id} will be deleted - archived: {getattr(chat, 'archived', False)}, folder_id: {getattr(chat, 'folder_id', None)}, pinned: {getattr(chat, 'pinned', False)}")
                     chats_to_delete.append(chat)
             
             if chats_to_delete:
@@ -376,7 +483,7 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
         
         log.info(f"Found {len(active_kb_ids)} active knowledge bases")
         
-        # Get all files that should be preserved
+        # Get all files that should be preserved (NOW COMPREHENSIVE!)
         active_file_ids = get_active_file_ids()
         
         # Stage 3: Delete orphaned database records
@@ -467,18 +574,6 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
         
         # Stage 5: Database optimization
         log.info("Optimizing database")
-        
-        # Clean transient cache directories - COMMENTED OUT as these are actually storage folders
-        # cache_paths = [
-        #     Path(CACHE_DIR) / "audio" / "transcriptions",
-        #     Path(CACHE_DIR) / "functions",
-        #     Path(CACHE_DIR) / "tools"
-        # ]
-        # 
-        # for cache_path in cache_paths:
-        #     if cache_path.exists():
-        #         shutil.rmtree(cache_path)
-        #         log.debug(f"Cleaned cache directory: {cache_path}")
         
         # Vacuum main database
         try:
