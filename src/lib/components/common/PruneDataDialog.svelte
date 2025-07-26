@@ -11,6 +11,7 @@
   let days = 60;
   let exempt_archived_chats = true;
   let exempt_chats_in_folders = false;
+  let showDetailsExpanded = false;
 
   const dispatch = createEventDispatcher();
 
@@ -56,19 +57,41 @@
           <div class="flex">
             <div class="flex-shrink-0">
               <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clip-rule="evenodd" />
               </svg>
             </div>
-            <div class="ml-3">
+            <div class="ml-3 flex-1">
               <h3 class="text-sm font-medium text-red-800 dark:text-red-200 mb-2">
                 {$i18n.t('Destructive Operation - Backup Recommended')}
               </h3>
               <div class="text-sm text-red-700 dark:text-red-300 space-y-1">
-                <p>{$i18n.t('This action will permanently delete all orphaned data from your database, including files, notes, prompts, models, folders, and knowledge bases from deleted users.')}</p>
-                <p>{$i18n.t('It also removes items that have lost their ownership or references due to database inconsistencies.')}</p>
-                <p>{$i18n.t('Uploaded files without database references and vector collections without corresponding data will be permanently removed from disk.')}</p>
-                <p><strong>{$i18n.t('This operation cannot be undone.')}</strong> {$i18n.t('If you are unsure about the impact, create a full backup of your data and database before proceeding.')}</p>
-                <p>{$i18n.t('Only run this if you understand the consequences and are prepared for potential data loss.')}</p>
+                <p>{$i18n.t('This action will permanently delete orphaned data from your database.')}</p>
+                <p><strong>{$i18n.t('This operation cannot be undone.')}</strong> {$i18n.t('Create a full backup before proceeding if you are unsure about the impact.')}</p>
+                
+                <!-- Expandable Details Section -->
+                <div class="mt-3">
+                  <button
+                    class="flex items-center text-xs text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200 focus:outline-none"
+                    on:click={() => showDetailsExpanded = !showDetailsExpanded}
+                  >
+                    <svg 
+                      class="w-3 h-3 mr-1 transition-transform duration-200 {showDetailsExpanded ? 'rotate-90' : ''}" 
+                      fill="currentColor" 
+                      viewBox="0 0 20 20"
+                    >
+                      <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+                    </svg>
+                    {showDetailsExpanded ? $i18n.t('Hide details') : $i18n.t('Show details')}
+                  </button>
+                  
+                  {#if showDetailsExpanded}
+                    <div class="mt-2 pl-4 border-l-2 border-red-300 dark:border-red-700 text-xs text-red-600 dark:text-red-400 space-y-1">
+                      <!-- Placeholder for additional details that will be provided later -->
+                      <p>{$i18n.t('Additional detailed information will be shown here.')}</p>
+                      <p>{$i18n.t('More technical details about the operation.')}</p>
+                    </div>
+                  {/if}
+                </div>
               </div>
             </div>
           </div>
@@ -79,7 +102,7 @@
           <div class="flex">
             <div class="flex-shrink-0">
               <svg class="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
-                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clip-rule="evenodd" />
+                <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
               </svg>
             </div>
             <div class="ml-3">
