@@ -82,7 +82,7 @@
             </div>
             <div class="ml-3">
               <p class="text-sm text-yellow-800 dark:text-yellow-200">
-                <strong>{$i18n.t('Performance Warning:')}</strong> {$i18n.t('This operation may take a **very** long time to complete, especially if you have never cleaned your database before or if your instance stores large amounts of data. The process could take anywhere from minutes to several hours depending on your data size.')}
+                <strong>{$i18n.t('Performance Warning:')}</strong> {$i18n.t('This operation may take a')} <strong><u>**very**</u></strong> {$i18n.t('long time to complete, especially if you have never cleaned your database before or if your instance stores large amounts of data. The process could take anywhere from minutes to several hours depending on your data size.')}
               </p>
             </div>
           </div>
@@ -91,7 +91,7 @@
         <!-- Chat Deletion Section -->
         <div class="space-y-4">
           <div class="flex items-start py-2">
-            <div class="flex items-center space-x-4">
+            <div class="flex items-center space-x-6">
               <Switch bind:state={deleteChatsByAge} />
               <div>
                 <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
@@ -127,7 +127,7 @@
               </div>
               
               <div class="flex items-start py-2">
-                <div class="flex items-center space-x-4">
+                <div class="flex items-center space-x-6">
                   <Switch bind:state={exempt_archived_chats} />
                   <div>
                     <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
