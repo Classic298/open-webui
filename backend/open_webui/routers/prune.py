@@ -35,6 +35,7 @@ router = APIRouter()
 class PruneDataForm(BaseModel):
     days: Optional[int] = None
     exempt_archived_chats: bool = False
+    exempt_chats_in_folders: bool = False
 
 
 def get_active_file_ids() -> Set[str]:
@@ -318,25 +319,45 @@ def cleanup_orphaned_vector_collections(active_file_ids: Set[str], active_kb_ids
 async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
     """
     Prunes old and orphaned data using a safe, multi-stage process.
+    
+    Parameters:
+    - days: Optional[int] = None
+      - If None: Skip chat deletion entirely
+      - If 0: Delete all chats (older than 0 days = all chats)
+      - If >= 1: Delete chats older than specified number of days
+    - exempt_archived_chats: bool = False
+      - If True: Exempt archived chats from deletion (only applies when days is not None)
+    - exempt_chats_in_folders: bool = False
+      - If True: Exempt chats that are in folders from deletion (only applies when days is not None)
     """
     try:
         log.info("Starting data pruning process")
         
-        # Stage 1: Delete old chats based on user criteria
+        # Stage 1: Delete old chats based on user criteria (optional)
         if form_data.days is not None:
             cutoff_time = int(time.time()) - (form_data.days * 86400)
             chats_to_delete = []
             
             for chat in Chats.get_chats():
                 if chat.updated_at < cutoff_time:
+                    # Check exemption conditions
                     if form_data.exempt_archived_chats and chat.archived:
+                        log.debug(f"Exempting archived chat: {chat.id}")
                         continue
+                    if form_data.exempt_chats_in_folders and getattr(chat, 'folder_id', None) is not None:
+                        log.debug(f"Exempting chat in folder: {chat.id} (folder_id: {getattr(chat, 'folder_id', None)})")
+                        continue
+                    log.debug(f"Chat {chat.id} will be deleted - archived: {getattr(chat, 'archived', False)}, folder_id: {getattr(chat, 'folder_id', None)}")
                     chats_to_delete.append(chat)
             
             if chats_to_delete:
-                log.info(f"Deleting {len(chats_to_delete)} old chats")
+                log.info(f"Deleting {len(chats_to_delete)} old chats (older than {form_data.days} days)")
                 for chat in chats_to_delete:
                     Chats.delete_chat_by_id(chat.id)
+            else:
+                log.info(f"No chats found older than {form_data.days} days")
+        else:
+            log.info("Skipping chat deletion (days parameter is None)")
         
         # Stage 2: Build ground truth of what should be preserved
         log.info("Building preservation set")
