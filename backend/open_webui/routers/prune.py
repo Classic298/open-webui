@@ -38,7 +38,6 @@ class PruneDataForm(BaseModel):
     days: Optional[int] = None
     exempt_archived_chats: bool = False
     exempt_chats_in_folders: bool = False
-    exempt_pinned_chats: bool = False
 
 
 def get_active_file_ids() -> Set[str]:
@@ -430,9 +429,8 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
     - exempt_archived_chats: bool = False
       - If True: Exempt archived chats from deletion (only applies when days is not None)
     - exempt_chats_in_folders: bool = False
-      - If True: Exempt chats that are in folders from deletion (only applies when days is not None)
-    - exempt_pinned_chats: bool = False
-      - If True: Exempt pinned chats from deletion (only applies when days is not None)
+      - If True: Exempt chats that are in folders OR pinned chats from deletion (only applies when days is not None)
+        Note: Pinned chats behave the same as chats in folders
     """
     try:
         log.info("Starting data pruning process")
@@ -448,11 +446,10 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
                     if form_data.exempt_archived_chats and chat.archived:
                         log.debug(f"Exempting archived chat: {chat.id}")
                         continue
-                    if form_data.exempt_chats_in_folders and getattr(chat, 'folder_id', None) is not None:
-                        log.debug(f"Exempting chat in folder: {chat.id} (folder_id: {getattr(chat, 'folder_id', None)})")
-                        continue
-                    if form_data.exempt_pinned_chats and getattr(chat, 'pinned', False):
-                        log.debug(f"Exempting pinned chat: {chat.id}")
+                    if form_data.exempt_chats_in_folders and (getattr(chat, 'folder_id', None) is not None or getattr(chat, 'pinned', False)):
+                        folder_status = f"folder_id: {getattr(chat, 'folder_id', None)}" if getattr(chat, 'folder_id', None) else "not in folder"
+                        pinned_status = f"pinned: {getattr(chat, 'pinned', False)}"
+                        log.debug(f"Exempting chat in folder or pinned: {chat.id} ({folder_status}, {pinned_status})")
                         continue
                     log.debug(f"Chat {chat.id} will be deleted - archived: {getattr(chat, 'archived', False)}, folder_id: {getattr(chat, 'folder_id', None)}, pinned: {getattr(chat, 'pinned', False)}")
                     chats_to_delete.append(chat)
