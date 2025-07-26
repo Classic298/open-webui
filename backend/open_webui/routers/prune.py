@@ -447,7 +447,19 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
                 db.execute(text("VACUUM"))
                 log.debug("Vacuumed main database")
         except Exception as e:
-            log.error(f"Failed to vacuum database: {e}")
+            log.error(f"Failed to vacuum main database: {e}")
+        
+        # Vacuum ChromaDB database if it exists
+        if "chroma" in VECTOR_DB.lower():
+            chroma_db_path = Path(CACHE_DIR).parent / "vector_db" / "chroma.sqlite3"
+            if chroma_db_path.exists():
+                try:
+                    import sqlite3
+                    with sqlite3.connect(str(chroma_db_path)) as conn:
+                        conn.execute("VACUUM")
+                        log.debug("Vacuumed ChromaDB database")
+                except Exception as e:
+                    log.error(f"Failed to vacuum ChromaDB database: {e}")
         
         log.info("Data pruning completed successfully")
         return True
