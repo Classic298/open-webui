@@ -3,7 +3,8 @@ import { WEBUI_API_BASE_URL } from '$lib/constants';
 export const pruneData = async (
   token: string,
   days: number | null,
-  exempt_archived_chats: boolean
+  exempt_archived_chats: boolean,
+  exempt_chats_in_folders: boolean
 ) => {
   let error = null;
 
@@ -15,7 +16,8 @@ export const pruneData = async (
     },
     body: JSON.stringify({
       days,
-      exempt_archived_chats
+      exempt_archived_chats,
+      exempt_chats_in_folders
     })
   })
     .then(async (res) => {
