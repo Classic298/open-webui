@@ -10,13 +10,15 @@
   let deleteChatsByAge = false;
   let days = 60;
   let exempt_archived_chats = true;
+  let exempt_chats_in_folders = false;
 
   const dispatch = createEventDispatcher();
 
   const confirm = () => {
     dispatch('confirm', { 
       days: deleteChatsByAge ? days : null, 
-      exempt_archived_chats 
+      exempt_archived_chats,
+      exempt_chats_in_folders
     });
     show = false;
   };
@@ -139,6 +141,22 @@
                     </div>
                     <div class="text-xs text-gray-500 dark:text-gray-400">
                       {$i18n.t('Keep archived chats even if they are old')}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex items-start py-2">
+                <div class="flex items-center">
+                  <div class="mr-3">
+                    <Switch bind:state={exempt_chats_in_folders} />
+                  </div>
+                  <div>
+                    <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                      {$i18n.t('Exempt chats in folders')}
+                    </div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400">
+                      {$i18n.t('Keep chats that are organized in folders')}
                     </div>
                   </div>
                 </div>
