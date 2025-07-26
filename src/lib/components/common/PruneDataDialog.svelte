@@ -1,4 +1,15 @@
-<!-- Additional Info -->
+<button
+                          class="px-2 py-1 text-xs font-medium rounded-t transition-colors {activeDetailsTab === 'audio' ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' : 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200'}"
+                          on:click={() => activeDetailsTab = 'audio'}
+                        >
+                          {$i18n.t('Audio')}
+                        </button>
+                        <button
+                          class="px-2 py-1 text-xs font-medium rounded-t transition-colors {activeDetailsTab === 'images' ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' : 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200'}"
+                          on:click={() => activeDetailsTab = 'images'}
+                        >
+                          {$i18n.t('Images')}
+                        </button>        <!-- Additional Info -->
         <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
           <div class="flex">
             <div class="flex-shrink-0">
@@ -152,12 +163,12 @@
                         {:else if activeDetailsTab === 'workspace'}
                           <div class="space-y-1">
                             <p><strong>{$i18n.t('User Workspace Cleanup:')}</strong></p>
-                            <p>• {$i18n.t('Custom prompts and prompt templates from deleted users')}</p>
                             <p>• {$i18n.t('Custom models and model configurations from deleted users')}</p>
-                            <p>• {$i18n.t('Personal notes and documentation from deleted users')}</p>
-                            <p>• {$i18n.t('User-created tools and custom functions from deleted users')}</p>
-                            <p>• {$i18n.t('Personal folders and organizational structures from deleted users')}</p>
-                            <p>• {$i18n.t('Knowledge bases and their content from deleted users')}</p>
+                            <p>• {$i18n.t('Knowledge bases from deleted users')}</p>
+                            <p>• {$i18n.t('Custom prompts and prompt templates from deleted users')}</p>
+                            <p>• {$i18n.t('User-created tools from deleted users')}</p>
+                            <p>• {$i18n.t('Notes from deleted users')}</p>
+                            <p>• {$i18n.t('Custom functions from deleted users')}</p>
                           </div>
                         {:else if activeDetailsTab === 'datafiles'}
                           <div class="space-y-1">
@@ -174,7 +185,7 @@
                             <p><strong>{$i18n.t('Vector Storage & Embeddings:')}</strong></p>
                             <p>• {$i18n.t('Vector embeddings for deleted files and documents')}</p>
                             <p>• {$i18n.t('Vector collections for removed knowledge bases')}</p>
-                            <p>• {$i18n.t('Orphaned search indexes without source data')}</p>
+                            <p>• {$i18n.t('Orphaned vector collections without source data')}</p>
                             <p>• {$i18n.t('Vector storage directories without database records')}</p>
                             <p>• {$i18n.t('Embedding data for content that no longer exists')}</p>
                           </div>
@@ -183,10 +194,23 @@
                             <p><strong>{$i18n.t('Database & System Cleanup:')}</strong></p>
                             <p>• {$i18n.t('Removal of broken database references and stale entries')}</p>
                             <p>• {$i18n.t('Disk space reclamation by database cleanup')}</p>
-                            <p>• {$i18n.t('Cleanup of temporary files and cached data')}</p>
                             <p>• {$i18n.t('Synchronization of database records with actual file storage')}</p>
                             <p>• {$i18n.t('Fix inconsistencies between storage systems')}</p>
                             <p>• {$i18n.t('Database performance optimization')}</p>
+                          </div>
+                        {:else if activeDetailsTab === 'audio'}
+                          <div class="space-y-1">
+                            <p><strong>{$i18n.t('Audio Content Cleanup:')}</strong></p>
+                            <p>• {$i18n.t('TBD - Audio cleanup functionality')}</p>
+                            <p>• {$i18n.t('TBD - Orphaned audio files and recordings')}</p>
+                            <p>• {$i18n.t('TBD - Audio processing cache cleanup')}</p>
+                          </div>
+                        {:else if activeDetailsTab === 'images'}
+                          <div class="space-y-1">
+                            <p><strong>{$i18n.t('Image Content Cleanup:')}</strong></p>
+                            <p>• {$i18n.t('TBD - Image cleanup functionality')}</p>
+                            <p>• {$i18n.t('TBD - Orphaned images and generated content')}</p>
+                            <p>• {$i18n.t('TBD - Image processing cache cleanup')}</p>
                           </div>
                         {/if}
                       </div>
