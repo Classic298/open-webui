@@ -91,8 +91,10 @@
         <!-- Chat Deletion Section -->
         <div class="space-y-4">
           <div class="flex items-start py-2">
-            <div class="flex items-center space-x-8">
-              <Switch bind:state={deleteChatsByAge} />
+            <div class="flex items-center">
+              <div class="mr-6">
+                <Switch bind:state={deleteChatsByAge} />
+              </div>
               <div>
                 <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
                   {$i18n.t('Delete chats by age')}
@@ -127,8 +129,10 @@
               </div>
               
               <div class="flex items-start py-2">
-                <div class="flex items-center space-x-8">
-                  <Switch bind:state={exempt_archived_chats} />
+                <div class="flex items-center">
+                  <div class="mr-6">
+                    <Switch bind:state={exempt_archived_chats} />
+                  </div>
                   <div>
                     <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
                       {$i18n.t('Exempt archived chats')}
