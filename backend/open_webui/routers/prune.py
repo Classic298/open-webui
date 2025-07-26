@@ -390,6 +390,24 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
         # Delete other user-owned resources from deleted users
         deleted_others = 0
         
+        # Delete orphaned chats of deleted users
+        for chat in Chats.get_chats():
+            if chat.user_id not in active_user_ids:
+                Chats.delete_chat_by_id(chat.id)
+                deleted_others += 1
+        
+        # Delete orphaned tools of deleted users
+        for tool in Tools.get_tools():
+            if tool.user_id not in active_user_ids:
+                Tools.delete_tool_by_id(tool.id)
+                deleted_others += 1
+        
+        # Delete orphaned functions of deleted users
+        for function in Functions.get_functions():
+            if function.user_id not in active_user_ids:
+                Functions.delete_function_by_id(function.id)
+                deleted_others += 1
+        
         for note in Notes.get_notes():
             if note.user_id not in active_user_ids:
                 Notes.delete_note_by_id(note.id)
@@ -429,17 +447,17 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
         # Stage 5: Database optimization
         log.info("Optimizing database")
         
-        # Clean transient cache directories
-        cache_paths = [
-            Path(CACHE_DIR) / "audio" / "transcriptions",
-            Path(CACHE_DIR) / "functions",
-            Path(CACHE_DIR) / "tools"
-        ]
-        
-        for cache_path in cache_paths:
-            if cache_path.exists():
-                shutil.rmtree(cache_path)
-                log.debug(f"Cleaned cache directory: {cache_path}")
+        # Clean transient cache directories - COMMENTED OUT as these are actually storage folders
+        # cache_paths = [
+        #     Path(CACHE_DIR) / "audio" / "transcriptions",
+        #     Path(CACHE_DIR) / "functions",
+        #     Path(CACHE_DIR) / "tools"
+        # ]
+        # 
+        # for cache_path in cache_paths:
+        #     if cache_path.exists():
+        #         shutil.rmtree(cache_path)
+        #         log.debug(f"Cleaned cache directory: {cache_path}")
         
         # Vacuum main database
         try:
