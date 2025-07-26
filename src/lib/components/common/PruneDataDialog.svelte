@@ -92,7 +92,7 @@
         <div class="space-y-4">
           <div class="flex items-start py-2">
             <div class="flex items-center">
-              <div class="mr-6">
+              <div class="mr-3">
                 <Switch bind:state={deleteChatsByAge} />
               </div>
               <div>
@@ -130,7 +130,7 @@
               
               <div class="flex items-start py-2">
                 <div class="flex items-center">
-                  <div class="mr-6">
+                  <div class="mr-3">
                     <Switch bind:state={exempt_archived_chats} />
                   </div>
                   <div>
