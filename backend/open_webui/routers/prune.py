@@ -318,11 +318,19 @@ def cleanup_orphaned_vector_collections(active_file_ids: Set[str], active_kb_ids
 async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
     """
     Prunes old and orphaned data using a safe, multi-stage process.
+    
+    Parameters:
+    - days: Optional[int] = None
+      - If None: Skip chat deletion entirely
+      - If 0: Delete all chats (older than 0 days = all chats)
+      - If >= 1: Delete chats older than specified number of days
+    - exempt_archived_chats: bool = False
+      - If True: Exempt archived chats from deletion (only applies when days is not None)
     """
     try:
         log.info("Starting data pruning process")
         
-        # Stage 1: Delete old chats based on user criteria
+        # Stage 1: Delete old chats based on user criteria (optional)
         if form_data.days is not None:
             cutoff_time = int(time.time()) - (form_data.days * 86400)
             chats_to_delete = []
@@ -334,9 +342,13 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
                     chats_to_delete.append(chat)
             
             if chats_to_delete:
-                log.info(f"Deleting {len(chats_to_delete)} old chats")
+                log.info(f"Deleting {len(chats_to_delete)} old chats (older than {form_data.days} days)")
                 for chat in chats_to_delete:
                     Chats.delete_chat_by_id(chat.id)
+            else:
+                log.info(f"No chats found older than {form_data.days} days")
+        else:
+            log.info("Skipping chat deletion (days parameter is None)")
         
         # Stage 2: Build ground truth of what should be preserved
         log.info("Building preservation set")
