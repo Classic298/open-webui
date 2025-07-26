@@ -22,7 +22,7 @@
   };
 </script>
 
-<Modal bind:show size="sm">
+<Modal bind:show size="md">
   <div>
     <div class="flex justify-between dark:text-gray-300 px-5 pt-4 pb-2">
       <div class="text-lg font-medium self-center">
@@ -49,17 +49,40 @@
 
     <div class="flex flex-col w-full px-5 pb-5 dark:text-gray-200">
       <div class="space-y-4">
-        <!-- Warning Message -->
-        <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+        <!-- Critical Warning Message -->
+        <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
           <div class="flex">
             <div class="flex-shrink-0">
-              <svg class="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+              <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
                 <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
               </svg>
             </div>
             <div class="ml-3">
+              <h3 class="text-sm font-medium text-red-800 dark:text-red-200 mb-2">
+                {$i18n.t('Destructive Operation - Backup Recommended')}
+              </h3>
+              <div class="text-sm text-red-700 dark:text-red-300 space-y-1">
+                <p>{$i18n.t('This action will permanently delete all orphaned data from your database, including files, notes, prompts, models, folders, and knowledge bases from deleted users.')}</p>
+                <p>{$i18n.t('It also removes items that have lost their ownership or references due to database inconsistencies.')}</p>
+                <p>{$i18n.t('Uploaded files without database references and vector collections without corresponding data will be permanently removed from disk.')}</p>
+                <p><strong>{$i18n.t('This operation cannot be undone.')}</strong> {$i18n.t('If you are unsure about the impact, create a full backup of your data and database before proceeding.')}</p>
+                <p>{$i18n.t('Only run this if you understand the consequences and are prepared for potential data loss.')}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Performance Warning -->
+        <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+          <div class="flex">
+            <div class="flex-shrink-0">
+              <svg class="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clip-rule="evenodd" />
+              </svg>
+            </div>
+            <div class="ml-3">
               <p class="text-sm text-yellow-800 dark:text-yellow-200">
-                {$i18n.t('This action will permanently delete all orphaned data (files, notes, prompts, etc.) from the database. This cannot be undone.')}
+                <strong>{$i18n.t('Performance Warning:')}</strong> {$i18n.t('This operation may take a **very** long time to complete, especially if you have never cleaned your database before or if your instance stores large amounts of data. The process could take anywhere from minutes to several hours depending on your data size.')}
               </p>
             </div>
           </div>
@@ -67,8 +90,8 @@
 
         <!-- Chat Deletion Section -->
         <div class="space-y-4">
-          <div class="flex items-center justify-between py-2">
-            <div class="flex items-center space-x-3">
+          <div class="flex items-start py-2">
+            <div class="flex items-center space-x-4">
               <Switch bind:state={deleteChatsByAge} />
               <div>
                 <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
@@ -103,8 +126,8 @@
                 </p>
               </div>
               
-              <div class="flex items-center justify-between py-2">
-                <div class="flex items-center space-x-3">
+              <div class="flex items-start py-2">
+                <div class="flex items-center space-x-4">
                   <Switch bind:state={exempt_archived_chats} />
                   <div>
                     <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
@@ -129,9 +152,11 @@
               </svg>
             </div>
             <div class="ml-3">
-              <p class="text-sm text-blue-800 dark:text-blue-200">
-                {$i18n.t('This operation will also optimize your database and clean up orphaned vector collections and uploaded files.')}
-              </p>
+              <div class="text-sm text-blue-800 dark:text-blue-200 space-y-1">
+                <p>{$i18n.t('This comprehensive cleanup operation will also perform database optimization through VACUUM operations on both your main database and ChromaDB.')}</p>
+                <p>{$i18n.t('Vector collections and uploaded files that no longer have corresponding database entries will be identified and removed from disk storage.')}</p>
+                <p>{$i18n.t('The process uses sophisticated mapping techniques to ensure accuracy and includes multiple safety checks to prevent accidental deletion of active data.')}</p>
+              </div>
             </div>
           </div>
         </div>
