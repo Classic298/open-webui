@@ -12,7 +12,7 @@
   let exempt_archived_chats = true;
   let exempt_chats_in_folders = false;
   let showDetailsExpanded = false;
-  let activeDetailsTab = 'data';
+  let activeDetailsTab = 'chats';
 
   const dispatch = createEventDispatcher();
 
@@ -90,62 +90,87 @@
                       <p class="mb-3"><strong>{$i18n.t('Note:')}</strong> {$i18n.t('This list provides an overview of what will be deleted during the pruning process.')}</p>
                       
                       <!-- Tab Navigation -->
-                      <div class="flex space-x-1 mb-3 border-b border-red-300 dark:border-red-700">
+                      <div class="flex flex-wrap gap-1 mb-3 border-b border-red-300 dark:border-red-700">
                         <button
-                          class="px-3 py-1 text-xs font-medium rounded-t transition-colors {activeDetailsTab === 'data' ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' : 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200'}"
-                          on:click={() => activeDetailsTab = 'data'}
+                          class="px-2 py-1 text-xs font-medium rounded-t transition-colors {activeDetailsTab === 'chats' ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' : 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200'}"
+                          on:click={() => activeDetailsTab = 'chats'}
+                        >
+                          {$i18n.t('Chats')}
+                        </button>
+                        <button
+                          class="px-2 py-1 text-xs font-medium rounded-t transition-colors {activeDetailsTab === 'workspace' ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' : 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200'}"
+                          on:click={() => activeDetailsTab = 'workspace'}
+                        >
+                          {$i18n.t('Workspace')}
+                        </button>
+                        <button
+                          class="px-2 py-1 text-xs font-medium rounded-t transition-colors {activeDetailsTab === 'datafiles' ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' : 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200'}"
+                          on:click={() => activeDetailsTab = 'datafiles'}
                         >
                           {$i18n.t('Data & Files')}
                         </button>
                         <button
-                          class="px-3 py-1 text-xs font-medium rounded-t transition-colors {activeDetailsTab === 'system' ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' : 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200'}"
+                          class="px-2 py-1 text-xs font-medium rounded-t transition-colors {activeDetailsTab === 'vector' ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' : 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200'}"
+                          on:click={() => activeDetailsTab = 'vector'}
+                        >
+                          {$i18n.t('Vector & Collections')}
+                        </button>
+                        <button
+                          class="px-2 py-1 text-xs font-medium rounded-t transition-colors {activeDetailsTab === 'system' ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' : 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200'}"
                           on:click={() => activeDetailsTab = 'system'}
                         >
-                          {$i18n.t('System & Storage')}
+                          {$i18n.t('System & Database')}
                         </button>
                       </div>
 
                       <!-- Tab Content -->
                       <div class="space-y-2">
-                        {#if activeDetailsTab === 'data'}
+                        {#if activeDetailsTab === 'chats'}
                           <div class="space-y-1">
-                            <p><strong>{$i18n.t('Chat Deletion (if age-based deletion enabled):')}</strong></p>
-                            <p>• {$i18n.t('Old chats based on last activity date (not creation date)')}</p>
-                            <p>• {$i18n.t('Archived chats and chats in folders can be exempted from deletion')}</p>
+                            <p><strong>{$i18n.t('Age-Based Chat Deletion:')}</strong></p>
+                            <p>• {$i18n.t('Removes conversations older than specified days based on last activity date')}</p>
+                            <p>• {$i18n.t('Supports exemptions for archived chats and chats organized in folders')}</p>
                           </div>
-
+                        {:else if activeDetailsTab === 'workspace'}
                           <div class="space-y-1">
-                            <p><strong>{$i18n.t('Orphaned Data from Deleted Users:')}</strong></p>
-                            <p>• {$i18n.t('All user content including chats, files, notes, prompts, models, folders, knowledge bases, tools, and functions')}</p>
-                            <p>• {$i18n.t('Associated vector storage and embeddings for removed user content')}</p>
+                            <p><strong>{$i18n.t('User Workspace Cleanup:')}</strong></p>
+                            <p>• {$i18n.t('Custom prompts and prompt templates from deleted users')}</p>
+                            <p>• {$i18n.t('Custom models and model configurations from deleted users')}</p>
+                            <p>• {$i18n.t('Personal notes and documentation from deleted users')}</p>
+                            <p>• {$i18n.t('User-created tools and custom functions from deleted users')}</p>
+                            <p>• {$i18n.t('Personal folders and organizational structures from deleted users')}</p>
+                            <p>• {$i18n.t('Knowledge bases and their content from deleted users')}</p>
                           </div>
-
+                        {:else if activeDetailsTab === 'datafiles'}
                           <div class="space-y-1">
                             <p><strong>{$i18n.t('Orphaned Files & Attachments:')}</strong></p>
-                            <p>• {$i18n.t('Files no longer referenced by any chats, knowledge bases, or folders')}</p>
-                            <p>• {$i18n.t('Uploaded files that lost their database references due to system inconsistencies')}</p>
-                            <p>• {$i18n.t('File attachments embedded in deleted conversations and messages')}</p>
+                            <p>• {$i18n.t('Files from deleted chats and conversations')}</p>
+                            <p>• {$i18n.t('Attachments from deleted knowledge bases and collections')}</p>
+                            <p>• {$i18n.t('Files from deleted folders and organizational structures')}</p>
+                            <p>• {$i18n.t('Uploaded files that lost their database references')}</p>
+                            <p>• {$i18n.t('File attachments embedded in deleted messages and conversations')}</p>
+                            <p>• {$i18n.t('Documents and media files no longer referenced by any active content')}</p>
+                            <p>• {$i18n.t('Temporary upload files that never got properly processed')}</p>
+                          </div>
+                        {:else if activeDetailsTab === 'vector'}
+                          <div class="space-y-1">
+                            <p><strong>{$i18n.t('Vector Storage & Embeddings:')}</strong></p>
+                            <p>• {$i18n.t('Vector embeddings for deleted files and documents')}</p>
+                            <p>• {$i18n.t('Embedding collections for removed knowledge bases')}</p>
+                            <p>• {$i18n.t('Orphaned vector collections without corresponding source data')}</p>
+                            <p>• {$i18n.t('Vector storage directories that no longer have database metadata')}</p>
+                            <p>• {$i18n.t('Embedding indexes for content that has been deleted')}</p>
+                            <p>• {$i18n.t('Vector database entries that lost their references')}</p>
                           </div>
                         {:else if activeDetailsTab === 'system'}
                           <div class="space-y-1">
-                            <p><strong>{$i18n.t('Vector Storage & Embeddings:')}</strong></p>
-                            <p>• {$i18n.t('Vector embeddings for deleted files and knowledge bases')}</p>
-                            <p>• {$i18n.t('Orphaned vector collections without corresponding data')}</p>
-                            <p>• {$i18n.t('Unused vector storage directories and metadata')}</p>
-                          </div>
-
-                          <div class="space-y-1">
-                            <p><strong>{$i18n.t('Database Cleanup & Optimization:')}</strong></p>
+                            <p><strong>{$i18n.t('Database & System Optimization:')}</strong></p>
                             <p>• {$i18n.t('Removal of stale database entries and broken references')}</p>
-                            <p>• {$i18n.t('Database space reclamation and performance optimization')}</p>
-                            <p>• {$i18n.t('Cleanup of temporary and cached data')}</p>
-                          </div>
-
-                          <div class="space-y-1">
-                            <p><strong>{$i18n.t('System Synchronization:')}</strong></p>
-                            <p>• {$i18n.t('Ensures database records match actual file storage')}</p>
-                            <p>• {$i18n.t('Resolves inconsistencies between different storage systems')}</p>
-                            <p>• {$i18n.t('Comprehensive scan across all data storage locations')}</p>
+                            <p>• {$i18n.t('Database space reclamation through optimization operations')}</p>
+                            <p>• {$i18n.t('Cleanup of temporary files and cached data')}</p>
+                            <p>• {$i18n.t('Synchronization between database records and actual file storage')}</p>
+                            <p>• {$i18n.t('Resolution of inconsistencies between different storage systems')}</p>
+                            <p>• {$i18n.t('Performance optimization through database maintenance operations')}</p>
                           </div>
                         {/if}
                       </div>
