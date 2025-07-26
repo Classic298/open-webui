@@ -1,30 +1,4 @@
-<button
-                          class="px-2 py-1 text-xs font-medium rounded-t transition-colors {activeDetailsTab === 'audio' ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' : 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200'}"
-                          on:click={() => activeDetailsTab = 'audio'}
-                        >
-                          {$i18n.t('Audio')}
-                        </button>
-                        <button
-                          class="px-2 py-1 text-xs font-medium rounded-t transition-colors {activeDetailsTab === 'images' ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' : 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200'}"
-                          on:click={() => activeDetailsTab = 'images'}
-                        >
-                          {$i18n.t('Images')}
-                        </button>        <!-- Additional Info -->
-        <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-          <div class="flex">
-            <div class="flex-shrink-0">
-              <svg class="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
-                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
-              </svg>
-            </div>
-            <div class="ml-3">
-              <div class="text-sm text-blue-800 dark:text-blue-200 space-y-1">
-                <p>{$i18n.t('This comprehensive cleanup operation will also perform database optimization through VACUUM operations on both your main database and vector database.')}</p>
-                <p>{$i18n.t('Vector collections and uploaded files that no longer have corresponding database entries will be identified and removed from disk storage.')}</p>
-              </div>
-            </div>
-          </div>
-        </div><script lang="ts">
+<script lang="ts">
   import { createEventDispatcher, getContext } from 'svelte';
   import Modal from '$lib/components/common/Modal.svelte';
   import Switch from '$lib/components/common/Switch.svelte';
@@ -146,6 +120,18 @@
                           on:click={() => activeDetailsTab = 'system'}
                         >
                           {$i18n.t('System & Database')}
+                        </button>
+                        <button
+                          class="px-2 py-1 text-xs font-medium rounded-t transition-colors {activeDetailsTab === 'audio' ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' : 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200'}"
+                          on:click={() => activeDetailsTab = 'audio'}
+                        >
+                          {$i18n.t('Audio')}
+                        </button>
+                        <button
+                          class="px-2 py-1 text-xs font-medium rounded-t transition-colors {activeDetailsTab === 'images' ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' : 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200'}"
+                          on:click={() => activeDetailsTab = 'images'}
+                        >
+                          {$i18n.t('Images')}
                         </button>
                       </div>
 
