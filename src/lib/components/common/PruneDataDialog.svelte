@@ -1,4 +1,19 @@
-<script lang="ts">
+<!-- Additional Info -->
+        <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+          <div class="flex">
+            <div class="flex-shrink-0">
+              <svg class="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
+              </svg>
+            </div>
+            <div class="ml-3">
+              <div class="text-sm text-blue-800 dark:text-blue-200 space-y-1">
+                <p>{$i18n.t('This comprehensive cleanup operation will also perform database optimization through VACUUM operations on both your main database and vector database.')}</p>
+                <p>{$i18n.t('Vector collections and uploaded files that no longer have corresponding database entries will be identified and removed from disk storage.')}</p>
+              </div>
+            </div>
+          </div>
+        </div><script lang="ts">
   import { createEventDispatcher, getContext } from 'svelte';
   import Modal from '$lib/components/common/Modal.svelte';
   import Switch from '$lib/components/common/Switch.svelte';
@@ -143,34 +158,32 @@
                           </div>
                         {:else if activeDetailsTab === 'datafiles'}
                           <div class="space-y-1">
-                            <p><strong>{$i18n.t('Orphaned Files & Attachments:')}</strong></p>
-                            <p>• {$i18n.t('Files from deleted chats and conversations')}</p>
-                            <p>• {$i18n.t('Attachments from deleted knowledge bases and collections')}</p>
-                            <p>• {$i18n.t('Files from deleted folders and organizational structures')}</p>
+                            <p><strong>{$i18n.t('Orphaned Content & Files:')}</strong></p>
+                            <p>• {$i18n.t('Orphaned chats, messages, and folders from deleted users')}</p>
+                            <p>• {$i18n.t('Files and attachments from the above deleted content')}</p>
+                            <p>• {$i18n.t('Files from deleted knowledge bases and collections')}</p>
                             <p>• {$i18n.t('Uploaded files that lost their database references')}</p>
-                            <p>• {$i18n.t('File attachments embedded in deleted messages and conversations')}</p>
-                            <p>• {$i18n.t('Documents and media files no longer referenced by any active content')}</p>
-                            <p>• {$i18n.t('Temporary upload files that never got properly processed')}</p>
+                            <p>• {$i18n.t('Files no longer referenced by any active content')}</p>
+                            <p>• {$i18n.t('Temporary uploads that were never properly processed')}</p>
                           </div>
                         {:else if activeDetailsTab === 'vector'}
                           <div class="space-y-1">
-                            <p><strong>{$i18n.t('Vector Storage & Embeddings:')}</strong></p>
-                            <p>• {$i18n.t('Vector embeddings for deleted files and documents')}</p>
-                            <p>• {$i18n.t('Embedding collections for removed knowledge bases')}</p>
-                            <p>• {$i18n.t('Orphaned vector collections without corresponding source data')}</p>
-                            <p>• {$i18n.t('Vector storage directories that no longer have database metadata')}</p>
-                            <p>• {$i18n.t('Embedding indexes for content that has been deleted')}</p>
-                            <p>• {$i18n.t('Vector database entries that lost their references')}</p>
+                            <p><strong>{$i18n.t('Vector Storage & Search Data:')}</strong></p>
+                            <p>• {$i18n.t('Search embeddings for deleted files and documents')}</p>
+                            <p>• {$i18n.t('Vector collections for removed knowledge bases')}</p>
+                            <p>• {$i18n.t('Orphaned search indexes without source data')}</p>
+                            <p>• {$i18n.t('Vector storage directories without database records')}</p>
+                            <p>• {$i18n.t('Embedding data for content that no longer exists')}</p>
                           </div>
                         {:else if activeDetailsTab === 'system'}
                           <div class="space-y-1">
-                            <p><strong>{$i18n.t('Database & System Optimization:')}</strong></p>
-                            <p>• {$i18n.t('Removal of stale database entries and broken references')}</p>
-                            <p>• {$i18n.t('Database space reclamation through optimization operations')}</p>
+                            <p><strong>{$i18n.t('Database & System Cleanup:')}</strong></p>
+                            <p>• {$i18n.t('Removal of broken database references and stale entries')}</p>
+                            <p>• {$i18n.t('Disk space reclamation by database cleanup')}</p>
                             <p>• {$i18n.t('Cleanup of temporary files and cached data')}</p>
-                            <p>• {$i18n.t('Synchronization between database records and actual file storage')}</p>
-                            <p>• {$i18n.t('Resolution of inconsistencies between different storage systems')}</p>
-                            <p>• {$i18n.t('Performance optimization through database maintenance operations')}</p>
+                            <p>• {$i18n.t('Sync database records with actual file storage')}</p>
+                            <p>• {$i18n.t('Fix inconsistencies between storage systems')}</p>
+                            <p>• {$i18n.t('Database performance optimization')}</p>
                           </div>
                         {/if}
                       </div>
