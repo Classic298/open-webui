@@ -7,13 +7,17 @@
 
   export let show = false;
 
+  let deleteChatsByAge = false;
   let days = 60;
   let exempt_archived_chats = true;
 
   const dispatch = createEventDispatcher();
 
   const confirm = () => {
-    dispatch('confirm', { days, exempt_archived_chats });
+    dispatch('confirm', { 
+      days: deleteChatsByAge ? days : null, 
+      exempt_archived_chats 
+    });
     show = false;
   };
 </script>
@@ -22,25 +26,42 @@
   <div class="flex flex-col space-y-4 text-sm text-gray-500">
     <p>
       {$i18n.t(
-        'This action will permanently delete old chats and all orphaned data (files, notes, prompts, etc.) from the database. This cannot be undone.'
+        'This action will permanently delete all orphaned data (files, notes, prompts, etc.) from the database. This cannot be undone.'
       )}
     </p>
-    <div class="flex items-center space-x-2">
-      <label for="days" class="dark:text-gray-200">{$i18n.t('Delete chats older than')}</label>
-      <input
-        id="days"
-        type="number"
-        min="0"
-        bind:value={days}
-        class="w-20 bg-gray-100 dark:bg-gray-800 rounded-md p-2"
-      />
-      <label for="days" class="dark:text-gray-200">{$i18n.t('days')}</label>
-    </div>
-    <div class="flex items-center space-x-2">
-      <Switch bind:state={exempt_archived_chats} />
-      <label class="dark:text-gray-200">{$i18n.t('Exempt archived chats')}</label>
+    
+    <div class="border-t pt-4">
+      <div class="flex items-center space-x-2 mb-3">
+        <Switch bind:state={deleteChatsByAge} />
+        <label class="dark:text-gray-200 font-medium">{$i18n.t('Delete chats by age')}</label>
+      </div>
+      
+      <div class="ml-6 space-y-3" class:opacity-50={!deleteChatsByAge}>
+        <div class="flex items-center space-x-2">
+          <label for="days" class="dark:text-gray-200">{$i18n.t('Delete chats older than')}</label>
+          <input
+            id="days"
+            type="number"
+            min="0"
+            bind:value={days}
+            disabled={!deleteChatsByAge}
+            class="w-20 bg-gray-100 dark:bg-gray-800 rounded-md p-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          />
+          <label for="days" class="dark:text-gray-200">{$i18n.t('days')}</label>
+        </div>
+        
+        <div class="flex items-center space-x-2">
+          <Switch bind:state={exempt_archived_chats} disabled={!deleteChatsByAge} />
+          <label class="dark:text-gray-200">{$i18n.t('Exempt archived chats')}</label>
+        </div>
+        
+        <div class="text-xs text-gray-400 mt-2">
+          {$i18n.t('Set to 0 to delete all chats, or specify number of days. Chats are deleted based on their last update time.')}
+        </div>
+      </div>
     </div>
   </div>
+  
   <div class="mt-6 flex justify-between gap-1.5">
     <button
       class="bg-gray-100 hover:bg-gray-200 text-gray-800 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white font-medium w-full py-2.5 rounded-lg transition"
