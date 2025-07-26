@@ -25,8 +25,8 @@
 	};
 
 	const handlePruneDataConfirm = async (event) => {
-		const { days, exempt_archived_chats } = event.detail;
-		const res = await pruneData(localStorage.token, days, exempt_archived_chats).catch(
+		const { days, exempt_archived_chats, exempt_chats_in_folders } = event.detail;
+		const res = await pruneData(localStorage.token, days, exempt_archived_chats, exempt_chats_in_folders).catch(
 			(error) => {
 				toast.error(`${error}`);
 				return null;
@@ -192,53 +192,53 @@
 							<path
 								fill-rule="evenodd"
 								d="M13 6H3v6a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V6ZM8.75 7.75a.75.75 0 0 0-1.5 0v2.69L6.03 9.22a.75.75 0 0 0-1.06 1.06l2.5 2.5a.75.75 0 0 0 1.06 0l2.5-2.5a.75.75 0 1 0-1.06-1.06l-1.22 1.22V7.75Z"
+									clip-rule="evenodd"
+								/>
+							</svg>
+						</div>
+						<div class=" self-center text-sm font-medium">
+							{$i18n.t('Export All Chats (All Users)')}
+						</div>
+					</button>
+				{/if}
+
+				<hr class="border-gray-100 dark:border-gray-850 my-1" />
+
+				<button
+					type="button"
+					class=" flex rounded-md py-2 px-3 w-full bg-yellow-500 hover:bg-yellow-600 text-white transition"
+					on:click={() => {
+						showPruneDataDialog = true;
+					}}
+				>
+					<div class=" self-center mr-3">
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 16 16"
+							fill="currentColor"
+							class="w-4 h-4"
+						>
+							<path
+								fill-rule="evenodd"
+								d="M4.5 2a.5.5 0 0 0-.5.5v1a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5v-1a.5.5 0 0 0-.5-.5h-7ZM3 6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1H3Zm1 4a.5.5 0 0 1 .5-.5h6a.5.5 0 0 1 0 1H4.5a.5.5 0 0 1-.5-.5Z"
 								clip-rule="evenodd"
 							/>
 						</svg>
 					</div>
 					<div class=" self-center text-sm font-medium">
-						{$i18n.t('Export All Chats (All Users)')}
+						{$i18n.t('Prune Orphaned Data')}
 					</div>
 				</button>
-			{/if}
-
-			<hr class="border-gray-100 dark:border-gray-850 my-1" />
-
-			<button
-				type="button"
-				class=" flex rounded-md py-2 px-3 w-full bg-yellow-500 hover:bg-yellow-600 text-white transition"
-				on:click={() => {
-					showPruneDataDialog = true;
-				}}
-			>
-				<div class=" self-center mr-3">
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						viewBox="0 0 16 16"
-						fill="currentColor"
-						class="w-4 h-4"
-					>
-						<path
-							fill-rule="evenodd"
-							d="M4.5 2a.5.5 0 0 0-.5.5v1a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5v-1a.5.5 0 0 0-.5-.5h-7ZM3 6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1H3Zm1 4a.5.5 0 0 1 .5-.5h6a.5.5 0 0 1 0 1H4.5a.5.5 0 0 1-.5-.5Z"
-							clip-rule="evenodd"
-						/>
-					</svg>
-				</div>
-				<div class=" self-center text-sm font-medium">
-					{$i18n.t('Prune Orphaned Data')}
-				</div>
-			</button>
+			</div>
 		</div>
-	</div>
 
-	<!-- <div class="flex justify-end pt-3 text-sm font-medium">
-		<button
-			class=" px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-gray-100 transition rounded-lg"
-			type="submit"
-		>
-			{$i18n.t('Save')}
-		</button>
+		<!-- <div class="flex justify-end pt-3 text-sm font-medium">
+			<button
+				class=" px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-gray-100 transition rounded-lg"
+				type="submit"
+			>
+				{$i18n.t('Save')}
+			</button>
 
-	</div> -->
-</form>
+		</div> -->
+	</form>
