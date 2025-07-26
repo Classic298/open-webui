@@ -86,47 +86,46 @@
                   
                   {#if showDetailsExpanded}
                     <div class="mt-2 pl-4 border-l-2 border-red-300 dark:border-red-700 text-xs text-red-600 dark:text-red-400 space-y-2">
-                      <p><strong>{$i18n.t('Note:')}</strong> {$i18n.t('This list may not be complete and provides an overview of what will be deleted during the pruning process.')}</p>
+                      <p><strong>{$i18n.t('Note:')}</strong> {$i18n.t('This list provides an overview of what will be deleted during the pruning process.')}</p>
                       
                       <div class="space-y-1">
                         <p><strong>{$i18n.t('Chat Deletion (if age-based deletion enabled):')}</strong></p>
-                        <p>• {$i18n.t('Chats older than specified days (based on last update time, not creation date)')}</p>
-                        <p>• {$i18n.t('Respects exemption settings for archived and folder-organized chats')}</p>
+                        <p>• {$i18n.t('Old chats based on last activity date (not creation date)')}</p>
+                        <p>• {$i18n.t('Archived chats and chats in folders can be exempted from deletion')}</p>
                       </div>
 
                       <div class="space-y-1">
                         <p><strong>{$i18n.t('Orphaned Data from Deleted Users:')}</strong></p>
-                        <p>• {$i18n.t('All chats, files, notes, prompts, models, folders, knowledge bases, tools, and functions belonging to deleted users')}</p>
+                        <p>• {$i18n.t('All user content including chats, files, notes, prompts, models, folders, knowledge bases, tools, and functions')}</p>
+                        <p>• {$i18n.t('Associated vector storage and embeddings for removed user content')}</p>
                       </div>
 
                       <div class="space-y-1">
-                        <p><strong>{$i18n.t('Orphaned Files & References:')}</strong></p>
-                        <p>• {$i18n.t('Files no longer referenced by any chats, knowledge bases, folders, or messages')}</p>
-                        <p>• {$i18n.t('Scans for UUID patterns in JSON data and file URLs throughout the system')}</p>
-                        <p>• {$i18n.t('Physical files in uploads directory without corresponding database entries')}</p>
-                        <p>• {$i18n.t('Separate message table scanning for standalone message file references')}</p>
+                        <p><strong>{$i18n.t('Orphaned Files & Attachments:')}</strong></p>
+                        <p>• {$i18n.t('Files no longer referenced by any chats, knowledge bases, or folders')}</p>
+                        <p>• {$i18n.t('Uploaded files that lost their database references due to system inconsistencies')}</p>
+                        <p>• {$i18n.t('File attachments embedded in deleted conversations and messages')}</p>
                       </div>
 
                       <div class="space-y-1">
-                        <p><strong>{$i18n.t('Vector Collections & Storage (ChromaDB only):')}</strong></p>
-                        <p>• {$i18n.t('Vector collections for deleted files and knowledge bases')}</p>
-                        <p>• {$i18n.t('Orphaned vector directories without corresponding database metadata')}</p>
-                        <p>• {$i18n.t('ChromaDB metadata cross-referencing via chroma.sqlite3 database')}</p>
-                        <p>• {$i18n.t('Vector database optimization through VACUUM operations')}</p>
+                        <p><strong>{$i18n.t('Vector Storage & Embeddings:')}</strong></p>
+                        <p>• {$i18n.t('Vector embeddings for deleted files and knowledge bases')}</p>
+                        <p>• {$i18n.t('Orphaned vector collections without corresponding data')}</p>
+                        <p>• {$i18n.t('Unused vector storage directories and metadata')}</p>
                       </div>
 
                       <div class="space-y-1">
-                        <p><strong>{$i18n.t('Database Optimization:')}</strong></p>
-                        <p>• {$i18n.t('Main database VACUUM to remove stale entries and reclaim space')}</p>
-                        <p>• {$i18n.t('ChromaDB vector database VACUUM for cleanup and optimization')}</p>
+                        <p><strong>{$i18n.t('Database Cleanup & Optimization:')}</strong></p>
+                        <p>• {$i18n.t('Removal of stale database entries and broken references')}</p>
+                        <p>• {$i18n.t('Database space reclamation and performance optimization')}</p>
+                        <p>• {$i18n.t('Cleanup of temporary and cached data')}</p>
                       </div>
 
                       <div class="space-y-1">
-                        <p><strong>{$i18n.t('Advanced Cleanup Features:')}</strong></p>
-                        <p>• {$i18n.t('Scans all chat JSON content for embedded file references')}</p>
-                        <p>• {$i18n.t('Analyzes folder items and metadata for orphaned file links')}</p>
-                        <p>• {$i18n.t('Cross-references vector database metadata with actual collections')}</p>
-                        <p>• {$i18n.t('State synchronization between database and physical file cleanup phases')}</p>
+                        <p><strong>{$i18n.t('System Synchronization:')}</strong></p>
+                        <p>• {$i18n.t('Ensures database records match actual file storage')}</p>
+                        <p>• {$i18n.t('Resolves inconsistencies between different storage systems')}</p>
+                        <p>• {$i18n.t('Comprehensive scan across all data storage locations')}</p>
                       </div>
                     </div>
                   {/if}
