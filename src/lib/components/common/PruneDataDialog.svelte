@@ -91,7 +91,7 @@
         <!-- Chat Deletion Section -->
         <div class="space-y-4">
           <div class="flex items-start py-2">
-            <div class="flex items-center space-x-6">
+            <div class="flex items-center space-x-8">
               <Switch bind:state={deleteChatsByAge} />
               <div>
                 <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
@@ -127,7 +127,7 @@
               </div>
               
               <div class="flex items-start py-2">
-                <div class="flex items-center space-x-6">
+                <div class="flex items-center space-x-8">
                   <Switch bind:state={exempt_archived_chats} />
                   <div>
                     <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
@@ -153,9 +153,8 @@
             </div>
             <div class="ml-3">
               <div class="text-sm text-blue-800 dark:text-blue-200 space-y-1">
-                <p>{$i18n.t('This comprehensive cleanup operation will also perform database optimization through VACUUM operations on both your main database and ChromaDB.')}</p>
+                <p>{$i18n.t('This comprehensive cleanup operation will also perform database optimization through VACUUM operations on both your main database and vector database.')}</p>
                 <p>{$i18n.t('Vector collections and uploaded files that no longer have corresponding database entries will be identified and removed from disk storage.')}</p>
-                <p>{$i18n.t('The process uses sophisticated mapping techniques to ensure accuracy and includes multiple safety checks to prevent accidental deletion of active data.')}</p>
               </div>
             </div>
           </div>
