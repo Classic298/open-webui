@@ -102,7 +102,7 @@
                   
                   {#if showDetailsExpanded}
                     <div class="mt-2 pl-4 border-l-2 border-red-300 dark:border-red-700 text-xs text-red-600 dark:text-red-400">
-                      <p class="mb-3"><strong>{$i18n.t('Note:')}</strong> {$i18n.t('This list provides an overview of what will be deleted during the pruning process.')}</p>
+                      <p class="mb-3"><strong>{$i18n.t('Note:')}</strong> {$i18n.t('This list provides an overview of what will be deleted during the pruning process and may not be complete or fully up-to-date.')}</p>
                       
                       <!-- Tab Navigation -->
                       <div class="flex flex-wrap gap-1 mb-3 border-b border-red-300 dark:border-red-700">
@@ -143,8 +143,11 @@
                         {#if activeDetailsTab === 'chats'}
                           <div class="space-y-1">
                             <p><strong>{$i18n.t('Age-Based Chat Deletion:')}</strong></p>
-                            <p>• {$i18n.t('Removes conversations older than specified days based on last activity date')}</p>
-                            <p>• {$i18n.t('Supports exemptions for archived chats and chats organized in folders')}</p>
+                            <p>• {$i18n.t('Removes conversations older than specified days based on when they were last modified or updated (not when they were created)')}</p>
+                            <p>• {$i18n.t('Supports exemptions for:')}</p>
+                            <p class="ml-4">◦ {$i18n.t('Archived chats')}</p>
+                            <p class="ml-4">◦ {$i18n.t('Chats organized in folders')}</p>
+                            <p class="ml-4">◦ {$i18n.t('Pinned chats')}</p>
                           </div>
                         {:else if activeDetailsTab === 'workspace'}
                           <div class="space-y-1">
@@ -160,16 +163,16 @@
                           <div class="space-y-1">
                             <p><strong>{$i18n.t('Orphaned Content & Files:')}</strong></p>
                             <p>• {$i18n.t('Orphaned chats, messages, and folders from deleted users')}</p>
+                            <p>• {$i18n.t('Orphaned content from any deleted chats, folders, or knowledge bases (regardless of user status)')}</p>
                             <p>• {$i18n.t('Files and attachments from the above deleted content')}</p>
-                            <p>• {$i18n.t('Files from deleted knowledge bases and collections')}</p>
                             <p>• {$i18n.t('Uploaded files that lost their database references')}</p>
                             <p>• {$i18n.t('Files no longer referenced by any active content')}</p>
                             <p>• {$i18n.t('Temporary uploads that were never properly processed')}</p>
                           </div>
                         {:else if activeDetailsTab === 'vector'}
                           <div class="space-y-1">
-                            <p><strong>{$i18n.t('Vector Storage & Search Data:')}</strong></p>
-                            <p>• {$i18n.t('Search embeddings for deleted files and documents')}</p>
+                            <p><strong>{$i18n.t('Vector Storage & Embeddings:')}</strong></p>
+                            <p>• {$i18n.t('Vector embeddings for deleted files and documents')}</p>
                             <p>• {$i18n.t('Vector collections for removed knowledge bases')}</p>
                             <p>• {$i18n.t('Orphaned search indexes without source data')}</p>
                             <p>• {$i18n.t('Vector storage directories without database records')}</p>
@@ -181,7 +184,7 @@
                             <p>• {$i18n.t('Removal of broken database references and stale entries')}</p>
                             <p>• {$i18n.t('Disk space reclamation by database cleanup')}</p>
                             <p>• {$i18n.t('Cleanup of temporary files and cached data')}</p>
-                            <p>• {$i18n.t('Sync database records with actual file storage')}</p>
+                            <p>• {$i18n.t('Synchronization of database records with actual file storage')}</p>
                             <p>• {$i18n.t('Fix inconsistencies between storage systems')}</p>
                             <p>• {$i18n.t('Database performance optimization')}</p>
                           </div>
@@ -205,7 +208,7 @@
             </div>
             <div class="ml-3">
               <p class="text-sm text-yellow-800 dark:text-yellow-200">
-                <strong>{$i18n.t('Performance Warning:')}</strong> {$i18n.t('This operation may take a')} <strong><u>**very**</u></strong> {$i18n.t('long time to complete, especially if you have never cleaned your database before or if your instance stores large amounts of data. The process could take anywhere from minutes to several hours depending on your data size.')}
+                <strong>{$i18n.t('Performance Warning:')}</strong> {$i18n.t('This operation may take a')} <strong><u>**very**</u></strong> {$i18n.t('long time to complete, especially if you have never cleaned your database before or if your instance stores large amounts of data. The process could take anywhere from seconds, to minutes, to half an hour and beyond depending on your data size.')}
               </p>
             </div>
           </div>
@@ -284,23 +287,6 @@
               </div>
             </div>
           {/if}
-        </div>
-
-        <!-- Additional Info -->
-        <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-          <div class="flex">
-            <div class="flex-shrink-0">
-              <svg class="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
-                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
-              </svg>
-            </div>
-            <div class="ml-3">
-              <div class="text-sm text-blue-800 dark:text-blue-200 space-y-1">
-                <p>{$i18n.t('This comprehensive cleanup operation will also perform database optimization through VACUUM operations on both your main database and vector database.')}</p>
-                <p>{$i18n.t('Vector collections and uploaded files that no longer have corresponding database entries will be identified and removed from disk storage.')}</p>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
 
