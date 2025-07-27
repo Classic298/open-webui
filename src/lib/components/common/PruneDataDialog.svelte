@@ -115,8 +115,8 @@ Authorization: Bearer <your-api-key>
                 {$i18n.t('Destructive Operation - Backup Recommended')}
               </h3>
               <div class="text-sm text-red-700 dark:text-red-300 space-y-1">
-                <p>{$i18n.t('This action will permanently delete data from your database.')} <strong>{$i18n.t('Only orphaned or old data, based on your configuration settings, will be deleted. All active, referenced data remains completely safe.')}</strong></p>
-                <p><strong>{$i18n.t('This operation cannot be undone.')}</strong> {$i18n.t('Create a complete backup of your database and files before proceeding. This operation is performed entirely at your own risk - having a backup ensures you can restore any data if something unexpected occurs.')}</p>
+                <p>{$i18n.t('This action will permanently delete data from your database. Only orphaned or old data, based on your configuration settings, will be deleted. All active, referenced data remains completely safe.')}</p>
+                <p>{$i18n.t('This operation cannot be undone. Create a complete backup of your database and files before proceeding. This operation is performed entirely at your own risk - having a backup ensures you can restore any data if something unexpected occurs.')}</p>
                 
                 <!-- Expandable Details Section -->
                 <div class="mt-3">
@@ -241,7 +241,7 @@ Authorization: Bearer <your-api-key>
             </div>
             <div class="ml-3">
               <p class="text-sm text-yellow-800 dark:text-yellow-200">
-                <strong>{$i18n.t('Performance Warning:')}</strong> {$i18n.t('This operation may take a')} <strong><u>very</u></strong> {$i18n.t('long time to complete, especially if you have never cleaned your database before or if your instance stores large amounts of data. The process could take anywhere from seconds, to minutes, to half an hour and beyond depending on your data size.')}
+                {$i18n.t('Performance Warning: This operation may take a very long time to complete, especially if you have never cleaned your database before or if your instance stores large amounts of data. The process could take anywhere from seconds, to minutes, to half an hour and beyond depending on your data size.')}
               </p>
             </div>
           </div>
