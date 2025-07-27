@@ -1,4 +1,4 @@
-let showApiPreview = false;<script lang="ts">
+<script lang="ts">
   import { createEventDispatcher, getContext } from 'svelte';
   import Modal from '$lib/components/common/Modal.svelte';
   import Switch from '$lib/components/common/Switch.svelte';
@@ -13,6 +13,7 @@ let showApiPreview = false;<script lang="ts">
   let exempt_chats_in_folders = false;
   let showDetailsExpanded = false;
   let activeDetailsTab = 'chats';
+  let showApiPreview = false;
 
   const dispatch = createEventDispatcher();
 
