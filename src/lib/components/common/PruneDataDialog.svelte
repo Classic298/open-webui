@@ -398,6 +398,22 @@ Authorization: Bearer <your-api-key>
                       </div>
                     </div>
                   </div>
+
+                  <div class="flex items-start py-2">
+                    <div class="flex items-center">
+                      <div class="mr-3">
+                        <Switch bind:state={delete_orphaned_folders} />
+                      </div>
+                      <div>
+                        <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                          {$i18n.t('Folders')}
+                        </div>
+                        <div class="text-xs text-gray-500 dark:text-gray-400">
+                          {$i18n.t('Delete folders from deleted users')}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -503,31 +519,6 @@ Authorization: Bearer <your-api-key>
                       </div>
                     </div>
                   </div>
-                </div>
-              </div>
-
-            {:else if activeSettingsTab === 'datafiles'}
-              <div class="space-y-3">
-                <!-- Folders -->
-                <div class="flex items-start py-2">
-                  <div class="flex items-center">
-                    <div class="mr-3">
-                      <Switch bind:state={delete_orphaned_folders} />
-                    </div>
-                    <div>
-                      <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {$i18n.t('Folders')}
-                      </div>
-                      <div class="text-xs text-gray-500 dark:text-gray-400">
-                        {$i18n.t('Delete folders from deleted users')}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
-                  <p class="font-medium mb-1">{$i18n.t('Automatic File Cleanup:')}</p>
-                  <p class="text-xs">{$i18n.t('Files, uploads, and vector collections are automatically cleaned when their references are removed. No additional configuration needed.')}</p>
                 </div>
               </div>
             {/if}
