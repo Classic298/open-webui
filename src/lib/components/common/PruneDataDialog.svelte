@@ -1,4 +1,4 @@
-<script lang="ts">
+let showApiPreview = false;<script lang="ts">
   import { createEventDispatcher, getContext } from 'svelte';
   import Modal from '$lib/components/common/Modal.svelte';
   import Switch from '$lib/components/common/Switch.svelte';
@@ -11,20 +11,8 @@
   let days = 60;
   let exempt_archived_chats = true;
   let exempt_chats_in_folders = false;
-  
-  // Orphaned resource deletion toggles
-  let delete_orphaned_chats = true;
-  let delete_orphaned_tools = true;
-  let delete_orphaned_functions = true;
-  let delete_orphaned_prompts = true;
-  let delete_orphaned_knowledge_bases = true;
-  let delete_orphaned_models = true;
-  let delete_orphaned_notes = true;
-  let delete_orphaned_folders = true;
-  
   let showDetailsExpanded = false;
   let activeDetailsTab = 'chats';
-  let activeSettingsTab = 'chats';
 
   const dispatch = createEventDispatcher();
 
@@ -32,17 +20,29 @@
     dispatch('confirm', { 
       days: deleteChatsByAge ? days : null, 
       exempt_archived_chats,
-      exempt_chats_in_folders,
-      delete_orphaned_chats,
-      delete_orphaned_tools,
-      delete_orphaned_functions,
-      delete_orphaned_prompts,
-      delete_orphaned_knowledge_bases,
-      delete_orphaned_models,
-      delete_orphaned_notes,
-      delete_orphaned_folders
+      exempt_chats_in_folders
     });
     show = false;
+  };
+
+  // Generate API call preview
+  $: apiCallPreview = `POST /api/v1/admin/prune
+Content-Type: application/json
+Authorization: Bearer <your-api-key>
+
+{
+  "days": ${deleteChatsByAge ? days : null},
+  "exempt_archived_chats": ${exempt_archived_chats},
+  "exempt_chats_in_folders": ${exempt_chats_in_folders}
+}`;
+
+  const copyApiCall = () => {
+    navigator.clipboard.writeText(apiCallPreview).then(() => {
+      // Could add a toast notification here
+      console.log('API call copied to clipboard');
+    }).catch(err => {
+      console.error('Failed to copy API call: ', err);
+    });
   };
 </script>
 
@@ -169,17 +169,17 @@
                         {:else if activeDetailsTab === 'workspace'}
                           <div class="space-y-1">
                             <p><strong>{$i18n.t('User Workspace Cleanup:')}</strong></p>
-                            <p>• {$i18n.t('Custom models and model configurations from deleted users')}</p>
-                            <p>• {$i18n.t('Knowledge bases from deleted users')}</p>
-                            <p>• {$i18n.t('Custom prompts and prompt templates from deleted users')}</p>
-                            <p>• {$i18n.t('User-created tools from deleted users')}</p>
-                            <p>• {$i18n.t('Notes from deleted users')}</p>
-                            <p>• {$i18n.t('Custom functions from deleted users')}</p>
+                            <p>• {$i18n.t('Delete orphaned custom models and model configurations from deleted users')}</p>
+                            <p>• {$i18n.t('Delete orphaned knowledge bases from deleted users')}</p>
+                            <p>• {$i18n.t('Delete orphaned custom prompts and prompt templates from deleted users')}</p>
+                            <p>• {$i18n.t('Delete orphaned user-created tools from deleted users')}</p>
+                            <p>• {$i18n.t('Delete orphaned notes from deleted users')}</p>
+                            <p>• {$i18n.t('Delete orphaned custom functions (Filters, Pipes, Actions, etc.) from deleted users')}</p>
                           </div>
                         {:else if activeDetailsTab === 'datafiles'}
                           <div class="space-y-1">
                             <p><strong>{$i18n.t('Orphaned Content & Files:')}</strong></p>
-                            <p>• {$i18n.t('Orphaned chats, messages, and folders from deleted users')}</p>
+                            <p>• {$i18n.t('Delete orphaned chats, messages, and folders from deleted users')}</p>
                             <p>• {$i18n.t('Orphaned content from any deleted chats, folders, or knowledge bases (regardless of user status)')}</p>
                             <p>• {$i18n.t('Files and attachments from the above deleted content')}</p>
                             <p>• {$i18n.t('Uploaded files that lost their database references')}</p>
@@ -244,264 +244,137 @@
           </div>
         </div>
 
-        <!-- Settings Section with Tabs -->
-        <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-          <h4 class="text-sm font-medium text-blue-800 dark:text-blue-200 mb-3">
-            {$i18n.t('Pruning Configuration')}
-          </h4>
-          <p class="text-xs text-blue-700 dark:text-blue-300 mb-4">
-            {$i18n.t('Configure what data should be cleaned up during the pruning process.')}
-          </p>
-
-          <!-- Settings Tab Navigation -->
-          <div class="flex flex-wrap gap-1 mb-4 border-b border-blue-300 dark:border-blue-700">
-            <button
-              class="px-3 py-2 text-sm font-medium rounded-t transition-colors {activeSettingsTab === 'chats' ? 'bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-200' : 'text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200'}"
-              on:click={() => activeSettingsTab = 'chats'}
-            >
-              {$i18n.t('Chats')}
-            </button>
-            <button
-              class="px-3 py-2 text-sm font-medium rounded-t transition-colors {activeSettingsTab === 'workspace' ? 'bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-200' : 'text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200'}"
-              on:click={() => activeSettingsTab = 'workspace'}
-            >
-              {$i18n.t('Workspace')}
-            </button>
-            <button
-              class="px-3 py-2 text-sm font-medium rounded-t transition-colors {activeSettingsTab === 'datafiles' ? 'bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-200' : 'text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200'}"
-              on:click={() => activeSettingsTab = 'datafiles'}
-            >
-              {$i18n.t('Data & Files')}
-            </button>
+        <!-- Chat Deletion Section -->
+        <div class="space-y-4">
+          <div class="flex items-start py-2">
+            <div class="flex items-center">
+              <div class="mr-3">
+                <Switch bind:state={deleteChatsByAge} />
+              </div>
+              <div>
+                <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                  {$i18n.t('Delete chats by age')}
+                </div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">
+                  {$i18n.t('Optionally remove old chats based on last update time')}
+                </div>
+              </div>
+            </div>
           </div>
 
-          <!-- Settings Tab Content -->
-          <div class="space-y-4">
-            {#if activeSettingsTab === 'chats'}
-              <!-- Age-Based Chat Deletion -->
-              <div class="space-y-4">
-                <div class="flex items-start py-2">
-                  <div class="flex items-center">
-                    <div class="mr-3">
-                      <Switch bind:state={deleteChatsByAge} />
-                    </div>
-                    <div>
-                      <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {$i18n.t('Delete chats by age')}
-                      </div>
-                      <div class="text-xs text-gray-500 dark:text-gray-400">
-                        {$i18n.t('Optionally remove old chats based on last update time')}
-                      </div>
-                    </div>
-                  </div>
+          <!-- Chat Options (when enabled) -->
+          {#if deleteChatsByAge}
+            <div class="ml-8 space-y-4 border-l-2 border-gray-200 dark:border-gray-700 pl-4">
+              <div class="space-y-2">
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {$i18n.t('Delete chats older than')}
+                </label>
+                <div class="flex items-center space-x-2">
+                  <input
+                    id="days"
+                    type="number"
+                    min="0"
+                    bind:value={days}
+                    class="w-20 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                  <span class="text-sm text-gray-700 dark:text-gray-300">{$i18n.t('days')}</span>
                 </div>
-
-                <!-- Chat Options (when enabled) -->
-                {#if deleteChatsByAge}
-                  <div class="ml-8 space-y-4 border-l-2 border-gray-200 dark:border-gray-700 pl-4">
-                    <div class="space-y-2">
-                      <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                        {$i18n.t('Delete chats older than')}
-                      </label>
-                      <div class="flex items-center space-x-2">
-                        <input
-                          id="days"
-                          type="number"
-                          min="0"
-                          bind:value={days}
-                          class="w-20 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        />
-                        <span class="text-sm text-gray-700 dark:text-gray-300">{$i18n.t('days')}</span>
-                      </div>
-                      <p class="text-xs text-gray-500 dark:text-gray-400">
-                        {$i18n.t('Set to 0 to delete all chats, or specify number of days')}
-                      </p>
-                    </div>
-                    
-                    <div class="flex items-start py-2">
-                      <div class="flex items-center">
-                        <div class="mr-3">
-                          <Switch bind:state={exempt_archived_chats} />
-                        </div>
-                        <div>
-                          <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            {$i18n.t('Exempt archived chats')}
-                          </div>
-                          <div class="text-xs text-gray-500 dark:text-gray-400">
-                            {$i18n.t('Keep archived chats even if they are old')}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div class="flex items-start py-2">
-                      <div class="flex items-center">
-                        <div class="mr-3">
-                          <Switch bind:state={exempt_chats_in_folders} />
-                        </div>
-                        <div>
-                          <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            {$i18n.t('Exempt chats in folders')}
-                          </div>
-                          <div class="text-xs text-gray-500 dark:text-gray-400">
-                            {$i18n.t('Keep chats that are organized in folders or pinned')}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+                  {$i18n.t('Set to 0 to delete all chats, or specify number of days')}
+                </p>
+              </div>
+              
+              <div class="flex items-start py-2">
+                <div class="flex items-center">
+                  <div class="mr-3">
+                    <Switch bind:state={exempt_archived_chats} />
                   </div>
-                {/if}
-
-                <!-- Orphaned Chat Deletion -->
-                <div class="border-t border-gray-200 dark:border-gray-700 pt-4">
-                  <div class="flex items-start py-2">
-                    <div class="flex items-center">
-                      <div class="mr-3">
-                        <Switch bind:state={delete_orphaned_chats} />
-                      </div>
-                      <div>
-                        <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                          {$i18n.t('Delete orphaned chats')}
-                        </div>
-                        <div class="text-xs text-gray-500 dark:text-gray-400">
-                          {$i18n.t('Delete chats from deleted users')}
-                        </div>
-                      </div>
+                  <div>
+                    <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                      {$i18n.t('Exempt archived chats')}
+                    </div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400">
+                      {$i18n.t('Keep archived chats even if they are old')}
                     </div>
                   </div>
                 </div>
               </div>
 
-            {:else if activeSettingsTab === 'workspace'}
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <!-- Knowledge Bases -->
-                <div class="flex items-start py-2">
-                  <div class="flex items-center">
-                    <div class="mr-3">
-                      <Switch bind:state={delete_orphaned_knowledge_bases} />
-                    </div>
-                    <div>
-                      <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {$i18n.t('Knowledge Bases')}
-                      </div>
-                      <div class="text-xs text-gray-500 dark:text-gray-400">
-                        {$i18n.t('Delete knowledge bases from deleted users')}
-                      </div>
-                    </div>
+              <div class="flex items-start py-2">
+                <div class="flex items-center">
+                  <div class="mr-3">
+                    <Switch bind:state={exempt_chats_in_folders} />
                   </div>
-                </div>
-
-                <!-- Tools -->
-                <div class="flex items-start py-2">
-                  <div class="flex items-center">
-                    <div class="mr-3">
-                      <Switch bind:state={delete_orphaned_tools} />
+                  <div>
+                    <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                      {$i18n.t('Exempt chats in folders')}
                     </div>
-                    <div>
-                      <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {$i18n.t('Tools')}
-                      </div>
-                      <div class="text-xs text-gray-500 dark:text-gray-400">
-                        {$i18n.t('Delete custom tools from deleted users')}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Functions -->
-                <div class="flex items-start py-2">
-                  <div class="flex items-center">
-                    <div class="mr-3">
-                      <Switch bind:state={delete_orphaned_functions} />
-                    </div>
-                    <div>
-                      <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {$i18n.t('Functions')}
-                      </div>
-                      <div class="text-xs text-gray-500 dark:text-gray-400">
-                        {$i18n.t('Delete custom functions from deleted users')}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Prompts -->
-                <div class="flex items-start py-2">
-                  <div class="flex items-center">
-                    <div class="mr-3">
-                      <Switch bind:state={delete_orphaned_prompts} />
-                    </div>
-                    <div>
-                      <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {$i18n.t('Prompts')}
-                      </div>
-                      <div class="text-xs text-gray-500 dark:text-gray-400">
-                        {$i18n.t('Delete custom prompts from deleted users')}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Models -->
-                <div class="flex items-start py-2">
-                  <div class="flex items-center">
-                    <div class="mr-3">
-                      <Switch bind:state={delete_orphaned_models} />
-                    </div>
-                    <div>
-                      <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {$i18n.t('Models')}
-                      </div>
-                      <div class="text-xs text-gray-500 dark:text-gray-400">
-                        {$i18n.t('Delete custom models from deleted users')}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Notes -->
-                <div class="flex items-start py-2">
-                  <div class="flex items-center">
-                    <div class="mr-3">
-                      <Switch bind:state={delete_orphaned_notes} />
-                    </div>
-                    <div>
-                      <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {$i18n.t('Notes')}
-                      </div>
-                      <div class="text-xs text-gray-500 dark:text-gray-400">
-                        {$i18n.t('Delete notes from deleted users')}
-                      </div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400">
+                      {$i18n.t('Keep chats that are organized in folders or pinned')}
                     </div>
                   </div>
                 </div>
               </div>
+            </div>
+          {/if}
+        </div>
 
-            {:else if activeSettingsTab === 'datafiles'}
-              <div class="space-y-3">
-                <!-- Folders -->
-                <div class="flex items-start py-2">
-                  <div class="flex items-center">
-                    <div class="mr-3">
-                      <Switch bind:state={delete_orphaned_folders} />
-                    </div>
-                    <div>
-                      <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {$i18n.t('Folders')}
-                      </div>
-                      <div class="text-xs text-gray-500 dark:text-gray-400">
-                        {$i18n.t('Delete folders from deleted users')}
-                      </div>
-                    </div>
+        <!-- API Call Preview Section -->
+        <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+          <div class="flex">
+            <div class="flex-shrink-0">
+              <svg class="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
+              </svg>
+            </div>
+            <div class="ml-3 flex-1">
+              <h3 class="text-sm font-medium text-blue-800 dark:text-blue-200 mb-2">
+                {$i18n.t('API Automation Helper')}
+              </h3>
+              <p class="text-sm text-blue-700 dark:text-blue-300 mb-3">
+                {$i18n.t('Use this API call configuration to automate pruning operations in your own maintenance scripts.')}
+              </p>
+              
+              <button
+                class="flex items-center text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 focus:outline-none mb-3"
+                on:click={() => showApiPreview = !showApiPreview}
+              >
+                <svg 
+                  class="w-3 h-3 mr-1 transition-transform duration-200 {showApiPreview ? 'rotate-90' : ''}" 
+                  fill="currentColor" 
+                  viewBox="0 0 20 20"
+                >
+                  <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+                </svg>
+                {showApiPreview ? $i18n.t('Hide API call') : $i18n.t('Show API call')}
+              </button>
+
+              {#if showApiPreview}
+                <div class="space-y-2">
+                  <div class="relative">
+                    <textarea
+                      readonly
+                      value={apiCallPreview}
+                      class="w-full h-32 px-3 py-2 text-xs font-mono bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-gray-100 resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      on:focus={(e) => e.target.select()}
+                    ></textarea>
+                    <button
+                      class="absolute top-2 right-2 px-2 py-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      on:click={copyApiCall}
+                      title={$i18n.t('Copy to clipboard')}
+                    >
+                      <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z"></path>
+                        <path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z"></path>
+                      </svg>
+                    </button>
                   </div>
+                  <p class="text-xs text-blue-600 dark:text-blue-400">
+                    {$i18n.t('Click the textarea to select all content, or use the copy button. Replace <your-api-key> with your actual API key.')}
+                  </p>
                 </div>
-
-                <div class="text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
-                  <p class="font-medium mb-1">{$i18n.t('Automatic File Cleanup:')}</p>
-                  <p class="text-xs">{$i18n.t('Files, uploads, and vector collections are automatically cleaned when their references are removed. No additional configuration needed.')}</p>
-                </div>
-              </div>
-            {/if}
+              {/if}
+            </div>
           </div>
         </div>
       </div>
