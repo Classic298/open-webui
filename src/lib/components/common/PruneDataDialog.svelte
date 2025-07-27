@@ -287,7 +287,7 @@ Authorization: Bearer <your-api-key>
             {$i18n.t('Configure what data should be cleaned up during the pruning process.')}
           </p>
 
-          <!-- Settings Tab Navigation -->
+          <!-- Settings Tab Navigation - ONLY CHATS AND WORKSPACE -->
           <div class="flex flex-wrap gap-1 mb-4 border-b border-blue-300 dark:border-blue-700">
             <button
               class="px-3 py-2 text-sm font-medium rounded-t transition-colors {activeSettingsTab === 'chats' ? 'bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-200' : 'text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200'}"
@@ -301,15 +301,9 @@ Authorization: Bearer <your-api-key>
             >
               {$i18n.t('Workspace')}
             </button>
-            <button
-              class="px-3 py-2 text-sm font-medium rounded-t transition-colors {activeSettingsTab === 'datafiles' ? 'bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-200' : 'text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-red-200'}"
-              on:click={() => activeSettingsTab = 'datafiles'}
-            >
-              {$i18n.t('Data & Files')}
-            </button>
           </div>
 
-          <!-- Settings Tab Content -->
+          <!-- Settings Tab Content - ONLY CHATS AND WORKSPACE -->
           <div class="space-y-4">
             {#if activeSettingsTab === 'chats'}
               <!-- Age-Based Chat Deletion -->
