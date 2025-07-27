@@ -269,4 +269,5 @@ class ModelsTable:
         except Exception:
             return False
 
+
 Models = ModelsTable()
