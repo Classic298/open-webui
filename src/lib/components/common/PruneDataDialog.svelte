@@ -153,16 +153,10 @@ Authorization: Bearer <your-api-key>
                           {$i18n.t('Workspace')}
                         </button>
                         <button
-                          class="px-2 py-1 text-xs font-medium rounded-t transition-colors {activeDetailsTab === 'datafiles' ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' : 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200'}"
-                          on:click={() => activeDetailsTab = 'datafiles'}
+                          class="px-2 py-1 text-xs font-medium rounded-t transition-colors {activeDetailsTab === 'datavector' ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' : 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200'}"
+                          on:click={() => activeDetailsTab = 'datavector'}
                         >
-                          {$i18n.t('Data & Files')}
-                        </button>
-                        <button
-                          class="px-2 py-1 text-xs font-medium rounded-t transition-colors {activeDetailsTab === 'vector' ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' : 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200'}"
-                          on:click={() => activeDetailsTab = 'vector'}
-                        >
-                          {$i18n.t('Vector & Collections')}
+                          {$i18n.t('Data & Vector')}
                         </button>
                         <button
                           class="px-2 py-1 text-xs font-medium rounded-t transition-colors {activeDetailsTab === 'system' ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' : 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200'}"
@@ -190,39 +184,29 @@ Authorization: Bearer <your-api-key>
                           <div class="space-y-1">
                             <p><strong>{$i18n.t('Age-Based Chat Deletion:')}</strong></p>
                             <p>• {$i18n.t('Removes conversations older than specified days based on when they were last modified or updated (not when they were created)')}</p>
-                            <p>• {$i18n.t('Supports exemptions for:')}</p>
-                            <p class="ml-4">◦ {$i18n.t('Archived chats')}</p>
-                            <p class="ml-4">◦ {$i18n.t('Chats organized in folders')}</p>
-                            <p class="ml-4">◦ {$i18n.t('Pinned chats')}</p>
+                            <p>• {$i18n.t('Supports exemptions for archived chats and chats organized in folders')}</p>
+                            
+                            <p class="pt-2"><strong>{$i18n.t('Orphaned Content Cleanup:')}</strong></p>
+                            <p>• {$i18n.t('Delete orphaned chats from deleted users')}</p>
+                            <p>• {$i18n.t('Delete orphaned folders from deleted users')}</p>
                           </div>
                         {:else if activeDetailsTab === 'workspace'}
                           <div class="space-y-1">
-                            <p><strong>{$i18n.t('User Workspace Cleanup:')}</strong></p>
-                            <p>• {$i18n.t('Delete orphaned custom models and model configurations from deleted users')}</p>
-                            <p>• {$i18n.t('Delete orphaned knowledge bases from deleted users')}</p>
-                            <p>• {$i18n.t('Delete orphaned custom prompts and prompt templates from deleted users')}</p>
-                            <p>• {$i18n.t('Delete orphaned user-created tools from deleted users')}</p>
-                            <p>• {$i18n.t('Delete orphaned notes from deleted users')}</p>
-                            <p>• {$i18n.t('Delete orphaned custom functions (Filters, Pipes, Actions, etc.) from deleted users')}</p>
+                            <p><strong>{$i18n.t('Orphaned Workspace Items from Deleted Users:')}</strong></p>
+                            <p>• {$i18n.t('Delete orphaned knowledge bases')}</p>
+                            <p>• {$i18n.t('Delete orphaned custom tools')}</p>
+                            <p>• {$i18n.t('Delete orphaned custom functions (Actions, Pipes, Filters)')}</p>
+                            <p>• {$i18n.t('Delete orphaned custom prompts and templates')}</p>
+                            <p>• {$i18n.t('Delete orphaned custom models and configurations')}</p>
+                            <p>• {$i18n.t('Delete orphaned notes and documentation')}</p>
                           </div>
-                        {:else if activeDetailsTab === 'datafiles'}
+                        {:else if activeDetailsTab === 'datavector'}
                           <div class="space-y-1">
-                            <p><strong>{$i18n.t('Orphaned Content & Files:')}</strong></p>
-                            <p>• {$i18n.t('Delete orphaned chats, messages, and folders from deleted users')}</p>
-                            <p>• {$i18n.t('Orphaned content from any deleted chats, folders, or knowledge bases (regardless of user status)')}</p>
-                            <p>• {$i18n.t('Files and attachments from the above deleted content')}</p>
+                            <p><strong>{$i18n.t('Files & Vector Storage:')}</strong></p>
+                            <p>• {$i18n.t('Orphaned files and attachments from deleted content')}</p>
+                            <p>• {$i18n.t('Vector embeddings and collections for removed data')}</p>
                             <p>• {$i18n.t('Uploaded files that lost their database references')}</p>
-                            <p>• {$i18n.t('Files no longer referenced by any active content')}</p>
-                            <p>• {$i18n.t('Temporary uploads that were never properly processed')}</p>
-                          </div>
-                        {:else if activeDetailsTab === 'vector'}
-                          <div class="space-y-1">
-                            <p><strong>{$i18n.t('Vector Storage & Embeddings:')}</strong></p>
-                            <p>• {$i18n.t('Vector embeddings for deleted files and documents')}</p>
-                            <p>• {$i18n.t('Vector collections for removed knowledge bases')}</p>
-                            <p>• {$i18n.t('Orphaned vector collections without source data')}</p>
-                            <p>• {$i18n.t('Vector storage directories without database records')}</p>
-                            <p>• {$i18n.t('Embedding data for content that no longer exists')}</p>
+                            <p>• {$i18n.t('Vector storage directories without corresponding data')}</p>
                           </div>
                         {:else if activeDetailsTab === 'system'}
                           <div class="space-y-1">
