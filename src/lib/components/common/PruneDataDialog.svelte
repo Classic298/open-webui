@@ -14,8 +14,8 @@
   
   // Orphaned resource deletion toggles
   let delete_orphaned_chats = true;
-  let delete_orphaned_tools = true;
-  let delete_orphaned_functions = true;
+  let delete_orphaned_tools = false;
+  let delete_orphaned_functions = false;
   let delete_orphaned_prompts = true;
   let delete_orphaned_knowledge_bases = true;
   let delete_orphaned_models = true;
