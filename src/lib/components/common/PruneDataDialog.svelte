@@ -241,7 +241,7 @@ Authorization: Bearer <your-api-key>
             </div>
             <div class="ml-3">
               <p class="text-sm text-yellow-800 dark:text-yellow-200">
-                <strong>{$i18n.t('Performance Warning:')}</strong> {$i18n.t('This operation may take a')} <strong><u>**very**</u></strong> {$i18n.t('long time to complete, especially if you have never cleaned your database before or if your instance stores large amounts of data. The process could take anywhere from seconds, to minutes, to half an hour and beyond depending on your data size.')}
+                <strong>{$i18n.t('Performance Warning:')}</strong> {$i18n.t('This operation may take a')} <strong><u>very</u></strong> {$i18n.t('long time to complete, especially if you have never cleaned your database before or if your instance stores large amounts of data. The process could take anywhere from seconds, to minutes, to half an hour and beyond depending on your data size.')}
               </p>
             </div>
           </div>
@@ -524,9 +524,6 @@ Authorization: Bearer <your-api-key>
               <h3 class="text-sm font-medium text-gray-800 dark:text-gray-200 mb-2">
                 {$i18n.t('API Automation Helper')}
               </h3>
-              <p class="text-sm text-gray-700 dark:text-gray-300 mb-3">
-                {$i18n.t('Use this API call configuration to automate pruning operations in your own maintenance scripts.')}
-              </p>
               
               <button
                 class="flex items-center text-xs text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 focus:outline-none mb-3"
@@ -544,6 +541,9 @@ Authorization: Bearer <your-api-key>
 
               {#if showApiPreview}
                 <div class="space-y-2">
+                  <p class="text-sm text-gray-700 dark:text-gray-300 mb-3">
+                    {$i18n.t('Use this API call configuration to automate pruning operations in your own maintenance scripts.')}
+                  </p>
                   <div class="relative">
                     <textarea
                       readonly
@@ -562,9 +562,6 @@ Authorization: Bearer <your-api-key>
                       </svg>
                     </button>
                   </div>
-                  <p class="text-xs text-gray-600 dark:text-gray-400">
-                    {$i18n.t('Click the textarea to select all content, or use the copy button. Replace <your-api-key> with your actual API key.')}
-                  </p>
                 </div>
               {/if}
             </div>
