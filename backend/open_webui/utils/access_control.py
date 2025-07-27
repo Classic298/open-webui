@@ -1,4 +1,5 @@
 from typing import Optional, Union, List, Dict, Any
+from open_webui.models.users import Users, UserModel
 from open_webui.models.groups import Groups
 
 
@@ -128,9 +129,7 @@ def has_access(
 # Get all users with access to a resource
 def get_users_with_access(
     type: str = "write", access_control: Optional[dict] = None
-) -> List:
-    from open_webui.models.users import Users
-
+) -> List[UserModel]:
     if access_control is None:
         return Users.get_users()
 
