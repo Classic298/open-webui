@@ -38,6 +38,15 @@ class PruneDataForm(BaseModel):
     days: Optional[int] = None
     exempt_archived_chats: bool = False
     exempt_chats_in_folders: bool = False
+    # Orphaned resource deletion toggles (for deleted users)
+    delete_orphaned_chats: bool = True
+    delete_orphaned_tools: bool = True
+    delete_orphaned_functions: bool = True
+    delete_orphaned_prompts: bool = True
+    delete_orphaned_knowledge_bases: bool = True
+    delete_orphaned_models: bool = True
+    delete_orphaned_notes: bool = True
+    delete_orphaned_folders: bool = True
 
 
 def get_active_file_ids() -> Set[str]:
@@ -431,6 +440,22 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
     - exempt_chats_in_folders: bool = False
       - If True: Exempt chats that are in folders OR pinned chats from deletion (only applies when days is not None)
         Note: Pinned chats behave the same as chats in folders
+    - delete_orphaned_chats: bool = True
+      - If True: Delete chats from deleted users
+    - delete_orphaned_tools: bool = True
+      - If True: Delete tools from deleted users
+    - delete_orphaned_functions: bool = True
+      - If True: Delete functions from deleted users
+    - delete_orphaned_prompts: bool = True
+      - If True: Delete prompts from deleted users
+    - delete_orphaned_knowledge_bases: bool = True
+      - If True: Delete knowledge bases from deleted users
+    - delete_orphaned_models: bool = True
+      - If True: Delete models from deleted users
+    - delete_orphaned_notes: bool = True
+      - If True: Delete notes from deleted users
+    - delete_orphaned_folders: bool = True
+      - If True: Delete folders from deleted users
     """
     try:
         log.info("Starting data pruning process")
@@ -501,60 +526,116 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
         if deleted_files > 0:
             log.info(f"Deleted {deleted_files} orphaned files")
         
-        # Delete knowledge bases from deleted users
+        # Delete knowledge bases from deleted users (if enabled)
         deleted_kbs = 0
-        for kb in knowledge_bases:
-            if kb.user_id not in active_user_ids:
-                if safe_delete_vector_collection(kb.id):
-                    Knowledges.delete_knowledge_by_id(kb.id)
-                    deleted_kbs += 1
+        if form_data.delete_orphaned_knowledge_bases:
+            for kb in knowledge_bases:
+                if kb.user_id not in active_user_ids:
+                    if safe_delete_vector_collection(kb.id):
+                        Knowledges.delete_knowledge_by_id(kb.id)
+                        deleted_kbs += 1
+            
+            if deleted_kbs > 0:
+                log.info(f"Deleted {deleted_kbs} orphaned knowledge bases")
+        else:
+            log.info("Skipping knowledge base deletion (disabled)")
         
-        if deleted_kbs > 0:
-            log.info(f"Deleted {deleted_kbs} orphaned knowledge bases")
-        
-        # Delete other user-owned resources from deleted users
+        # Delete other user-owned resources from deleted users (conditional)
         deleted_others = 0
         
-        # Delete orphaned chats of deleted users
-        for chat in Chats.get_chats():
-            if chat.user_id not in active_user_ids:
-                Chats.delete_chat_by_id(chat.id)
-                deleted_others += 1
+        # Delete orphaned chats of deleted users (conditional)
+        if form_data.delete_orphaned_chats:
+            chats_deleted = 0
+            for chat in Chats.get_chats():
+                if chat.user_id not in active_user_ids:
+                    Chats.delete_chat_by_id(chat.id)
+                    chats_deleted += 1
+                    deleted_others += 1
+            if chats_deleted > 0:
+                log.info(f"Deleted {chats_deleted} orphaned chats")
+        else:
+            log.info("Skipping orphaned chat deletion (disabled)")
         
-        # Delete orphaned tools of deleted users
-        for tool in Tools.get_tools():
-            if tool.user_id not in active_user_ids:
-                Tools.delete_tool_by_id(tool.id)
-                deleted_others += 1
+        # Delete orphaned tools of deleted users (conditional)
+        if form_data.delete_orphaned_tools:
+            tools_deleted = 0
+            for tool in Tools.get_tools():
+                if tool.user_id not in active_user_ids:
+                    Tools.delete_tool_by_id(tool.id)
+                    tools_deleted += 1
+                    deleted_others += 1
+            if tools_deleted > 0:
+                log.info(f"Deleted {tools_deleted} orphaned tools")
+        else:
+            log.info("Skipping tool deletion (disabled)")
         
-        # Delete orphaned functions of deleted users
-        for function in Functions.get_functions():
-            if function.user_id not in active_user_ids:
-                Functions.delete_function_by_id(function.id)
-                deleted_others += 1
+        # Delete orphaned functions of deleted users (conditional)
+        if form_data.delete_orphaned_functions:
+            functions_deleted = 0
+            for function in Functions.get_functions():
+                if function.user_id not in active_user_ids:
+                    Functions.delete_function_by_id(function.id)
+                    functions_deleted += 1
+                    deleted_others += 1
+            if functions_deleted > 0:
+                log.info(f"Deleted {functions_deleted} orphaned functions")
+        else:
+            log.info("Skipping function deletion (disabled)")
         
-        for note in Notes.get_notes():
-            if note.user_id not in active_user_ids:
-                Notes.delete_note_by_id(note.id)
-                deleted_others += 1
+        # Delete orphaned notes of deleted users (conditional)
+        if form_data.delete_orphaned_notes:
+            notes_deleted = 0
+            for note in Notes.get_notes():
+                if note.user_id not in active_user_ids:
+                    Notes.delete_note_by_id(note.id)
+                    notes_deleted += 1
+                    deleted_others += 1
+            if notes_deleted > 0:
+                log.info(f"Deleted {notes_deleted} orphaned notes")
+        else:
+            log.info("Skipping note deletion (disabled)")
         
-        for prompt in Prompts.get_prompts():
-            if prompt.user_id not in active_user_ids:
-                Prompts.delete_prompt_by_command(prompt.command)
-                deleted_others += 1
+        # Delete orphaned prompts of deleted users (conditional)
+        if form_data.delete_orphaned_prompts:
+            prompts_deleted = 0
+            for prompt in Prompts.get_prompts():
+                if prompt.user_id not in active_user_ids:
+                    Prompts.delete_prompt_by_command(prompt.command)
+                    prompts_deleted += 1
+                    deleted_others += 1
+            if prompts_deleted > 0:
+                log.info(f"Deleted {prompts_deleted} orphaned prompts")
+        else:
+            log.info("Skipping prompt deletion (disabled)")
         
-        for model in Models.get_all_models():
-            if model.user_id not in active_user_ids:
-                Models.delete_model_by_id(model.id)
-                deleted_others += 1
+        # Delete orphaned models of deleted users (conditional)
+        if form_data.delete_orphaned_models:
+            models_deleted = 0
+            for model in Models.get_all_models():
+                if model.user_id not in active_user_ids:
+                    Models.delete_model_by_id(model.id)
+                    models_deleted += 1
+                    deleted_others += 1
+            if models_deleted > 0:
+                log.info(f"Deleted {models_deleted} orphaned models")
+        else:
+            log.info("Skipping model deletion (disabled)")
         
-        for folder in Folders.get_all_folders():
-            if folder.user_id not in active_user_ids:
-                Folders.delete_folder_by_id_and_user_id(folder.id, folder.user_id, delete_chats=False)
-                deleted_others += 1
+        # Delete orphaned folders of deleted users (conditional)
+        if form_data.delete_orphaned_folders:
+            folders_deleted = 0
+            for folder in Folders.get_all_folders():
+                if folder.user_id not in active_user_ids:
+                    Folders.delete_folder_by_id_and_user_id(folder.id, folder.user_id, delete_chats=False)
+                    folders_deleted += 1
+                    deleted_others += 1
+            if folders_deleted > 0:
+                log.info(f"Deleted {folders_deleted} orphaned folders")
+        else:
+            log.info("Skipping folder deletion (disabled)")
         
         if deleted_others > 0:
-            log.info(f"Deleted {deleted_others} other orphaned records")
+            log.info(f"Total other orphaned records deleted: {deleted_others}")
         
         # Stage 4: Clean up orphaned physical files
         log.info("Cleaning up orphaned physical files")
