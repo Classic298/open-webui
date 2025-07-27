@@ -155,4 +155,5 @@ class PromptsTable:
         except Exception:
             return False
 
+
 Prompts = PromptsTable()
