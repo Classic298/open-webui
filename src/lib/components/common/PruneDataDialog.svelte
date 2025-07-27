@@ -159,22 +159,16 @@ Authorization: Bearer <your-api-key>
                           {$i18n.t('Data & Vector')}
                         </button>
                         <button
+                          class="px-2 py-1 text-xs font-medium rounded-t transition-colors {activeDetailsTab === 'imagesaudio' ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' : 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200'}"
+                          on:click={() => activeDetailsTab = 'imagesaudio'}
+                        >
+                          {$i18n.t('Images & Audio')}
+                        </button>
+                        <button
                           class="px-2 py-1 text-xs font-medium rounded-t transition-colors {activeDetailsTab === 'system' ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' : 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200'}"
                           on:click={() => activeDetailsTab = 'system'}
                         >
                           {$i18n.t('System & Database')}
-                        </button>
-                        <button
-                          class="px-2 py-1 text-xs font-medium rounded-t transition-colors {activeDetailsTab === 'audio' ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' : 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200'}"
-                          on:click={() => activeDetailsTab = 'audio'}
-                        >
-                          {$i18n.t('Audio')}
-                        </button>
-                        <button
-                          class="px-2 py-1 text-xs font-medium rounded-t transition-colors {activeDetailsTab === 'images' ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' : 'text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200'}"
-                          on:click={() => activeDetailsTab = 'images'}
-                        >
-                          {$i18n.t('Images')}
                         </button>
                       </div>
 
@@ -184,7 +178,9 @@ Authorization: Bearer <your-api-key>
                           <div class="space-y-1">
                             <p><strong>{$i18n.t('Age-Based Chat Deletion:')}</strong></p>
                             <p>• {$i18n.t('Removes conversations older than specified days based on when they were last modified or updated (not when they were created)')}</p>
-                            <p>• {$i18n.t('Supports exemptions for archived chats and chats organized in folders')}</p>
+                            <p>• {$i18n.t('Supports exemptions for:')}</p>
+                            <p class="ml-4">◦ {$i18n.t('Archived chats')}</p>
+                            <p class="ml-4">◦ {$i18n.t('Chats organized in folders and pinned chats')}</p>
                             
                             <p class="pt-2"><strong>{$i18n.t('Orphaned Content Cleanup:')}</strong></p>
                             <p>• {$i18n.t('Delete orphaned chats from deleted users')}</p>
@@ -198,7 +194,7 @@ Authorization: Bearer <your-api-key>
                             <p>• {$i18n.t('Delete orphaned custom functions (Actions, Pipes, Filters)')}</p>
                             <p>• {$i18n.t('Delete orphaned custom prompts and templates')}</p>
                             <p>• {$i18n.t('Delete orphaned custom models and configurations')}</p>
-                            <p>• {$i18n.t('Delete orphaned notes and documentation')}</p>
+                            <p>• {$i18n.t('Delete orphaned notes')}</p>
                           </div>
                         {:else if activeDetailsTab === 'datavector'}
                           <div class="space-y-1">
@@ -208,6 +204,14 @@ Authorization: Bearer <your-api-key>
                             <p>• {$i18n.t('Uploaded files that lost their database references')}</p>
                             <p>• {$i18n.t('Vector storage directories without corresponding data')}</p>
                           </div>
+                        {:else if activeDetailsTab === 'imagesaudio'}
+                          <div class="space-y-1">
+                            <p><strong>{$i18n.t('Images & Audio Content Cleanup:')}</strong></p>
+                            <p>• {$i18n.t('TBD - Image cleanup functionality')}</p>
+                            <p>• {$i18n.t('TBD - Audio cleanup functionality')}</p>
+                            <p>• {$i18n.t('TBD - Orphaned images and audio files')}</p>
+                            <p>• {$i18n.t('TBD - Media processing cache cleanup')}</p>
+                          </div>
                         {:else if activeDetailsTab === 'system'}
                           <div class="space-y-1">
                             <p><strong>{$i18n.t('Database & System Cleanup:')}</strong></p>
@@ -216,20 +220,6 @@ Authorization: Bearer <your-api-key>
                             <p>• {$i18n.t('Synchronization of database records with actual file storage')}</p>
                             <p>• {$i18n.t('Fix inconsistencies between storage systems')}</p>
                             <p>• {$i18n.t('Database performance optimization')}</p>
-                          </div>
-                        {:else if activeDetailsTab === 'audio'}
-                          <div class="space-y-1">
-                            <p><strong>{$i18n.t('Audio Content Cleanup:')}</strong></p>
-                            <p>• {$i18n.t('TBD - Audio cleanup functionality')}</p>
-                            <p>• {$i18n.t('TBD - Orphaned audio files and recordings')}</p>
-                            <p>• {$i18n.t('TBD - Audio processing cache cleanup')}</p>
-                          </div>
-                        {:else if activeDetailsTab === 'images'}
-                          <div class="space-y-1">
-                            <p><strong>{$i18n.t('Image Content Cleanup:')}</strong></p>
-                            <p>• {$i18n.t('TBD - Image cleanup functionality')}</p>
-                            <p>• {$i18n.t('TBD - Orphaned images and generated content')}</p>
-                            <p>• {$i18n.t('TBD - Image processing cache cleanup')}</p>
                           </div>
                         {/if}
                       </div>
