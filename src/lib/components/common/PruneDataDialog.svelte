@@ -459,8 +459,22 @@ Authorization: Bearer <your-api-key>
                       <Switch bind:state={delete_orphaned_functions} />
                     </div>
                     <div>
-                      <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {$i18n.t('Delete orphaned functions')}
+                      <div class="flex items-center text-sm font-medium text-gray-900 dark:text-gray-100">
+                        <span>{$i18n.t('Delete orphaned functions')}</span>
+                        <div class="relative group ml-2">
+                          <svg class="h-3 w-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-help" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM8.94 6.94a.75.75 0 11-1.06-1.06 3 3 0 112.12 0 .75.75 0 01-1.06 1.06zm-2.56 2.56a.75.75 0 000 1.06l1.06 1.06a.75.75 0 001.06-1.06l-1.06-1.06a.75.75 0 00-1.06 0z" clip-rule="evenodd" />
+                          </svg>
+                          <div class="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 w-48 px-3 py-2 text-xs text-white bg-gray-900 dark:bg-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
+                            <div class="font-medium mb-1">{$i18n.t('Admin panel functions - all functions, including:')}</div>
+                            <div class="space-y-0.5">
+                              <div>• {$i18n.t('Actions')}</div>
+                              <div>• {$i18n.t('Pipes')}</div>
+                              <div>• {$i18n.t('Filters')}</div>
+                            </div>
+                            <div class="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"></div>
+                          </div>
+                        </div>
                       </div>
                       <div class="text-xs text-gray-500 dark:text-gray-400">
                         {$i18n.t('Delete orphaned custom functions from deleted users')}
