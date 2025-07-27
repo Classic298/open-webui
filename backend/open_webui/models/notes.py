@@ -148,4 +148,5 @@ class NoteTable:
             db.commit()
             return True
 
+
 Notes = NoteTable()
