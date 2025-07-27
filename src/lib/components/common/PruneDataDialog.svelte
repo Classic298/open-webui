@@ -275,9 +275,14 @@ Authorization: Bearer <your-api-key>
 
         <!-- Settings Section with Tabs -->
         <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-          <h4 class="text-sm font-medium text-blue-800 dark:text-blue-200 mb-3">
-            {$i18n.t('Pruning Configuration')}
-          </h4>
+          <div class="flex items-center mb-3">
+            <svg class="h-4 w-4 text-blue-600 dark:text-blue-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
+            </svg>
+            <h4 class="text-sm font-medium text-blue-800 dark:text-blue-200">
+              {$i18n.t('Pruning Configuration')}
+            </h4>
+          </div>
           <p class="text-xs text-blue-700 dark:text-blue-300 mb-4">
             {$i18n.t('Configure what data should be cleaned up during the pruning process.')}
           </p>
@@ -393,7 +398,7 @@ Authorization: Bearer <your-api-key>
                           {$i18n.t('Delete orphaned chats')}
                         </div>
                         <div class="text-xs text-gray-500 dark:text-gray-400">
-                          {$i18n.t('Delete chats from deleted users')}
+                          {$i18n.t('Delete orphaned chats from deleted users')}
                         </div>
                       </div>
                     </div>
@@ -406,10 +411,10 @@ Authorization: Bearer <your-api-key>
                       </div>
                       <div>
                         <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                          {$i18n.t('Folders')}
+                          {$i18n.t('Delete orphaned folders')}
                         </div>
                         <div class="text-xs text-gray-500 dark:text-gray-400">
-                          {$i18n.t('Delete folders from deleted users')}
+                          {$i18n.t('Delete orphaned folders from deleted users')}
                         </div>
                       </div>
                     </div>
@@ -427,10 +432,10 @@ Authorization: Bearer <your-api-key>
                     </div>
                     <div>
                       <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {$i18n.t('Knowledge Bases')}
+                        {$i18n.t('Delete orphaned knowledge bases')}
                       </div>
                       <div class="text-xs text-gray-500 dark:text-gray-400">
-                        {$i18n.t('Delete knowledge bases from deleted users')}
+                        {$i18n.t('Delete orphaned knowledge bases from deleted users')}
                       </div>
                     </div>
                   </div>
@@ -444,10 +449,10 @@ Authorization: Bearer <your-api-key>
                     </div>
                     <div>
                       <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {$i18n.t('Tools')}
+                        {$i18n.t('Delete orphaned tools')}
                       </div>
                       <div class="text-xs text-gray-500 dark:text-gray-400">
-                        {$i18n.t('Delete custom tools from deleted users')}
+                        {$i18n.t('Delete orphaned custom tools from deleted users')}
                       </div>
                     </div>
                   </div>
@@ -461,10 +466,10 @@ Authorization: Bearer <your-api-key>
                     </div>
                     <div>
                       <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {$i18n.t('Functions')}
+                        {$i18n.t('Delete orphaned functions')}
                       </div>
                       <div class="text-xs text-gray-500 dark:text-gray-400">
-                        {$i18n.t('Delete custom functions from deleted users')}
+                        {$i18n.t('Delete orphaned custom functions from deleted users')}
                       </div>
                     </div>
                   </div>
@@ -478,10 +483,10 @@ Authorization: Bearer <your-api-key>
                     </div>
                     <div>
                       <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {$i18n.t('Prompts')}
+                        {$i18n.t('Delete orphaned prompts')}
                       </div>
                       <div class="text-xs text-gray-500 dark:text-gray-400">
-                        {$i18n.t('Delete custom prompts from deleted users')}
+                        {$i18n.t('Delete orphaned custom prompts from deleted users')}
                       </div>
                     </div>
                   </div>
@@ -495,10 +500,10 @@ Authorization: Bearer <your-api-key>
                     </div>
                     <div>
                       <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {$i18n.t('Models')}
+                        {$i18n.t('Delete orphaned models')}
                       </div>
                       <div class="text-xs text-gray-500 dark:text-gray-400">
-                        {$i18n.t('Delete custom models from deleted users')}
+                        {$i18n.t('Delete orphaned custom models from deleted users')}
                       </div>
                     </div>
                   </div>
@@ -512,10 +517,10 @@ Authorization: Bearer <your-api-key>
                     </div>
                     <div>
                       <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {$i18n.t('Notes')}
+                        {$i18n.t('Delete orphaned notes')}
                       </div>
                       <div class="text-xs text-gray-500 dark:text-gray-400">
-                        {$i18n.t('Delete notes from deleted users')}
+                        {$i18n.t('Delete orphaned notes from deleted users')}
                       </div>
                     </div>
                   </div>
@@ -526,23 +531,23 @@ Authorization: Bearer <your-api-key>
         </div>
 
         <!-- API Call Preview Section -->
-        <div class="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
+        <div class="bg-gray-50 dark:bg-gray-900/20 border border-gray-200 dark:border-gray-800 rounded-lg p-4">
           <div class="flex">
             <div class="flex-shrink-0">
-              <svg class="h-5 w-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
+              <svg class="h-5 w-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
                 <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
               </svg>
             </div>
             <div class="ml-3 flex-1">
-              <h3 class="text-sm font-medium text-green-800 dark:text-green-200 mb-2">
+              <h3 class="text-sm font-medium text-gray-800 dark:text-gray-200 mb-2">
                 {$i18n.t('API Automation Helper')}
               </h3>
-              <p class="text-sm text-green-700 dark:text-green-300 mb-3">
+              <p class="text-sm text-gray-700 dark:text-gray-300 mb-3">
                 {$i18n.t('Use this API call configuration to automate pruning operations in your own maintenance scripts.')}
               </p>
               
               <button
-                class="flex items-center text-xs text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-200 focus:outline-none mb-3"
+                class="flex items-center text-xs text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 focus:outline-none mb-3"
                 on:click={() => showApiPreview = !showApiPreview}
               >
                 <svg 
@@ -561,11 +566,11 @@ Authorization: Bearer <your-api-key>
                     <textarea
                       readonly
                       value={apiCallPreview}
-                      class="w-full h-40 px-3 py-2 text-xs font-mono bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-gray-100 resize-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                      class="w-full h-40 px-3 py-2 text-xs font-mono bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-gray-100 resize-none focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                       on:focus={(e) => e.target.select()}
                     ></textarea>
                     <button
-                      class="absolute top-2 right-2 px-2 py-1 text-xs font-medium text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-green-500"
+                      class="absolute top-2 right-2 px-2 py-1 text-xs font-medium text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-gray-500"
                       on:click={copyApiCall}
                       title={$i18n.t('Copy to clipboard')}
                     >
@@ -575,7 +580,7 @@ Authorization: Bearer <your-api-key>
                       </svg>
                     </button>
                   </div>
-                  <p class="text-xs text-green-600 dark:text-green-400">
+                  <p class="text-xs text-gray-600 dark:text-gray-400">
                     {$i18n.t('Click the textarea to select all content, or use the copy button. Replace <your-api-key> with your actual API key.')}
                   </p>
                 </div>
