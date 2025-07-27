@@ -115,8 +115,9 @@ Authorization: Bearer <your-api-key>
                 {$i18n.t('Destructive Operation - Backup Recommended')}
               </h3>
               <div class="text-sm text-red-700 dark:text-red-300 space-y-1">
-                <p>{$i18n.t('This action will permanently delete orphaned data from your database.')}</p>
-                <p><strong>{$i18n.t('This operation cannot be undone.')}</strong> {$i18n.t('Create a full backup before proceeding if you are unsure about the impact.')}</p>
+                <p>{$i18n.t('This action will permanently delete data from your database.')}</p>
+                <p><strong>{$i18n.t('Only orphaned or old data, based on your configuration settings, will be deleted. All active, referenced data remains completely safe.')}</strong></p>
+                <p><strong>{$i18n.t('This operation cannot be undone.')}</strong> {$i18n.t('Create a complete backup of your database and files before proceeding. This operation is performed entirely at your own risk - having a backup ensures you can restore any data if something unexpected occurs.')}</p>
                 
                 <!-- Expandable Details Section -->
                 <div class="mt-3">
