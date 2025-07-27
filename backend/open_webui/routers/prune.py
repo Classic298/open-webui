@@ -40,8 +40,8 @@ class PruneDataForm(BaseModel):
     exempt_chats_in_folders: bool = False
     # Orphaned resource deletion toggles (for deleted users)
     delete_orphaned_chats: bool = True
-    delete_orphaned_tools: bool = True
-    delete_orphaned_functions: bool = True
+    delete_orphaned_tools: bool = False
+    delete_orphaned_functions: bool = False
     delete_orphaned_prompts: bool = True
     delete_orphaned_knowledge_bases: bool = True
     delete_orphaned_models: bool = True
