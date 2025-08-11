@@ -195,16 +195,16 @@ class ModelsTable:
                 for model in db.query(Model).filter(Model.base_model_id == None).all()
             ]
 
-    def get_models_by_user_id(
-        self, user_id: str, permission: str = "write"
-    ) -> list[ModelUserResponse]:
+    def get_models_by_user_id(self, user_id: str, permission: str = "write"):
         models = self.get_models()
-        return [
-            model
-            for model in models
-            if model.user_id == user_id
-            or has_access(user_id, permission, model.access_control)
-        ]
+        result = []
+        for model in models:
+            is_owner = model.user_id == user_id
+            has_perms = has_access(user_id, permission, model.access_control)
+            print(f"Model {model.id}: owner={is_owner}, access={has_perms}, control={model.access_control}")
+            if is_owner or has_perms:
+                result.append(model)
+        return result
 
     def get_model_by_id(self, id: str) -> Optional[ModelModel]:
         try:
