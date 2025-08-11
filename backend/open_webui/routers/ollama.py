@@ -55,6 +55,7 @@ from open_webui.utils.access_control import has_access
 
 from open_webui.config import (
     UPLOAD_DIR,
+    ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS,
 )
 from open_webui.env import (
     ENV,
@@ -502,7 +503,7 @@ async def get_ollama_tags(
                 detail=detail if detail else "Open WebUI: Server Connection Error",
             )
 
-    if user.role == "user" and not BYPASS_MODEL_ACCESS_CONTROL:
+    if (user.role == "user" or (user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS)) and not BYPASS_MODEL_ACCESS_CONTROL:
         models["models"] = await get_filtered_models(models, user)
 
     return models
