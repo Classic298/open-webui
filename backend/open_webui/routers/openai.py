@@ -22,7 +22,6 @@ from starlette.background import BackgroundTask
 from open_webui.models.models import Models
 from open_webui.config import (
     CACHE_DIR,
-    ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS,
 )
 from open_webui.env import (
     MODELS_CACHE_TTL,
@@ -549,7 +548,7 @@ async def get_models(
                 error_detail = f"Unexpected error: {str(e)}"
                 raise HTTPException(status_code=500, detail=error_detail)
 
-    if (user.role == "user" or (user.role == "admin" and not ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS)) and not BYPASS_MODEL_ACCESS_CONTROL:
+    if user.role == "user" and not BYPASS_MODEL_ACCESS_CONTROL:
         models["data"] = await get_filtered_models(models, user)
 
     return models
