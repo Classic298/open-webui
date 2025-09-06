@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.27] - 2025-09-07
+
+### Added
+
+- 🎨 Azure OpenAI image generation is now supported, with configurations for IMAGES_OPENAI_API_VERSION via environment variable and admin UI. [#17147](https://github.com/open-webui/open-webui/pull/17147), [#16274](https://github.com/open-webui/open-webui/discussions/16274), [Docs:#679](https://github.com/open-webui/docs/pull/679)
+- 📁 Emoji folder icons were added, allowing users to personalize workspace organization with visual cues, including improved chevron display. [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/1588f42fe777ad5d807e3f2fc8dbbc47a8db87c0), [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/b70c0f36c0f5bbfc2a767429984d6fba1a7bb26c), [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/11dea8795bfce42aa5d8d58ef316ded05173bd87), [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/c0a47169fa059154d5f5a9ea6b94f9a66d82f255)
+- 📁 The 'Search Collection' input field now dynamically displays the total number of files within the knowledge base. [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/fbbe1117ae4c9c8fec6499d790eee275818eccc5)
+- ☁️ A provider toggle in connection settings now allows users to manually specify Azure OpenAI deployments. [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/5bdd334b74fbd154085f2d590f4afdba32469c8a)
+- ⚡ Optimized Model List Caching Performance: Fixed cache key generation for model list endpoints to use user.id instead of Request objects, enabling proper caching functionality and dramatically reducing redundant API calls to external model providers. [#17158](https://github.com/open-webui/open-webui/pull/17158)
+- ⚡ Comprehensive N+1 query performance is optimized by reducing database queries from 1+N to 1+1 patterns across major listing endpoints. [#17165](https://github.com/open-webui/open-webui/pull/17165), [#17160](https://github.com/open-webui/open-webui/pull/17160), [#17161](https://github.com/open-webui/open-webui/pull/17161), [#17162](https://github.com/open-webui/open-webui/pull/17162), [#17159](https://github.com/open-webui/open-webui/pull/17159), [#17166](https://github.com/open-webui/open-webui/pull/17166)
+- ⚡ The PDF.js library is now dynamically loaded, significantly reducing initial page load size and improving responsiveness. [#17222](https://github.com/open-webui/open-webui/pull/17222)
+- ⚡ The heic2any library is now dynamically loaded across various message input components, including channels, for faster page loads. [#17225](https://github.open-webui/open-webui/pull/17225), [#17229](https://github.com/open-webui/open-webui/pull/17229)
+- 📚 The knowledge API now supports a "delete_file" query parameter, allowing configurable file deletion behavior. [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/22c4ef4fb096498066b73befe993ae3a82f7a8e7)
+- 📊 Llama.cpp timing statistics are now integrated into the usage field for comprehensive model performance metrics. [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/e830b4959ecd4b2795e29e53026984a58a7696a9)
+- 🗄️ The PGVECTOR_CREATE_EXTENSION environment variable now allows control over automatic pgvector extension creation. [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/c2b4976c82d335ed524bd80dc914b5e2f5bfbd9e), [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/b45219c8b15b48d5ee3d42983e1107bbcefbab01), [Docs:#672](https://github.com/open-webui/docs/pull/672)
+- 🔧 External tool server authentication is enhanced with a "request_headers" type that forwards complete request headers. [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/77b65ccbfbf3971ca71d3c7a70d77168e8f007dd)
+- 🔒 Conditional Permission Hardening for OpenShift Deployments: Added a build argument to enable optional permission hardening for OpenShift and container environments. [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/0ebe4f8f8490451ac8e85a4846f010854d9b54e5)
+- 👥 Regex pattern support is added for OAuth blocked groups, allowing more flexible group filtering rules. [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/df66e21472646648d008ebb22b0e8d5424d491df)
+- 🔄 Various improvements were implemented across the frontend and backend to enhance performance, stability, and security.
+- 🌐 Translations for Portuguese (Brazil), Simplified Chinese, Catalan, and Spanish were enhanced and expanded.
+
+### Fixed
+
+- 🔍 Hybrid search functionality now correctly handles lexical-semantic weight labels and avoids errors when BM25 weight is zero. [#17049](https://github.com/open-webui/open-webui/pull/17049), [#17046](https://github.com/open-webui/open-webui/issues/17046)
+- 🛑 Task stopping errors are prevented by gracefully handling multiple stop requests for the same task. [#17195](https://github.com/open-webui/open-webui/pull/17195)
+- 🐍 Code execution package detection precision is improved in Pyodide to prevent unnecessary package inclusions. [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/bbe116795860a81a647d9567e0d9cb1950650095)
+- 🛠️ Tool message format API compliance is fixed by ensuring content fields in tool call responses contain valid string values instead of null. [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/37bf0087e5b8a324009c9d06b304027df351ea6b)
+- 📱 Mobile app config API authentication now supports Authorization header token verification with cookie fallback for iOS and Android requests. [#17175](https://github.com/open-webui/open-webui/pull/17175)
+- 💾 Knowledge file save race conditions are prevented by serializing API calls and adding an "isSaving" guard. [#17137](https://github.com/open-webui/open-webui/pull/17137), [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/4ca936f0bf9813bee11ec8aea41d7e34fb6b16a9)
+- 🔐 The SSO login button visibility is restored for OIDC PKCE authentication without a client secret. [#17012](https://github.com/open-webui/open-webui/pull/17012)
+- 🔊 Text-to-Speech (TTS) API requests now use proper URL joining methods, ensuring reliable functionality regardless of trailing slashes in the base URL. [#17061](https://github.com/open-webui/open-webui/pull/17061)
+- 🛡️ Admin account creation on Hugging Face Spaces now correctly detects the configured port, resolving issues with custom port deployments. [#17064](https://github.com/open-webui/open-webui/pull/17064)
+- 📁 Unicode filename support is improved for external document loaders by properly URL-encoding filenames in HTTP headers. [#17013](https://github.com/open-webui/open-webui/pull/17013), [#17000](https://github.com/open-webui/open-webui/issues/17000)
+- 🔗 Web page and YouTube attachments are now correctly processed by setting their type as "text" and using collection names for accurate content retrieval. [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/487979859a6ffcfd60468f523822cdf838fbef5b)
+- ✍️ Message input composition event handling is fixed to properly manage text input for multilingual users using Input Method Editors (IME). [#17085](https://github.com/open-webui/open-webui/pull/17085)
+- 💬 Follow-up tooltip duplication is removed, streamlining the user interface and preventing visual clutter. [#17186](https://github.com/open-webui/open-webui/pull/17186)
+- 🎨 Chat button text display is corrected by preventing clipping of descending characters and removing unnecessary capitalization. [#17191](https://github.com/open-webui/open-webui/pull/17191)
+- 🧠 RAG Loop/Error with Gemma 3.1 2B Instruct is fixed by correctly unwrapping unexpected single-item list responses from models. [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/1bc9711afd2b72cd07c4e539a83783868733767c), [#17213](https://github.com/open-webui/open-webui/issues/17213)
+- 🖼️ HEIC conversion failures are resolved, improving robustness of image handling. [#17225](https://github.com/open-webui/open-webui/pull/17225)
+- 📦 The slim Docker image size regression has been fixed by refining the build process to correctly exclude components when USE_SLIM=true. [#16997](https://github.com/open-webui/open-webui/issues/16997), [Commit](https://github.com/open-webui/open-webui/commit/be373e9fd42ac73b0302bdb487e16dbeae178b4e), [Commit](https://github.com/open-webui/open-webui/commit/0ebe4f8f8490451ac8e85a4846f010854d9b54e5)
+- 📁 Knowledge base update validation errors are resolved, ensuring seamless management via UI or API. [#17244](https://github.com/open-webui/open-webui/issues/17244), [Commit](https://github.com/open-webui/open-webui/commit/9aac1489080a5c9441e89b1a56de0d3a672bc5fb)
+- 🔐 Resolved a security issue where a global web search setting overrode model-specific restrictions, ensuring model-level settings are now correctly prioritized. [#17151](https://github.com/open-webui/open-webui/issues/17151), [Commit](https://github.com/open-webui/open-webui/commit/9368d0ac751ec3072d5a96712b80a9b20a642ce6)
+- 🔐 OAuth redirect reliability is improved by robustly preserving the intended redirect path using session storage. [#17235](https://github.com/open-webui/open-webui/issues/17235), [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/4f2b821088367da18374027919594365c7a3f459), [#15575](https://github.com/open-webui/open-webui/pull/15575), [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/d9f97c832c556fae4b116759da0177bf4fe619de)
+- 🔐 Fixed a security vulnerability where knowledge base access within chat folders persisted after permissions were revoked. [#17182](https://github.com/open-webui/open-webui/issues/17182), [Commit](https://github.com/open-webui/open-webui/commit/40e40d1dddf9ca937e99af41c8ca038dbc93a7e6)
+- 🔒 OIDC access denied errors are now displayed as user-friendly toast notifications instead of raw JSON. [#17208](https://github.com/open-webui/open-webui/issues/17208), [Commit](https://github.com/open-webui/open-webui/commit/3d6d050ad82d360adc42d6e9f42e8faf8d13c9f4)
+- 💬 Chat exception handling is enhanced to prevent system instability during message generation and ensure graceful error recovery. [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/f56889c5c7f0cf1a501c05d35dfa614e4f8b6958)
+
+### Changed
+
+- 🛠️ Renamed "Tools" to "External Tools" across the UI for clearer distinction between built-in and external functionalities. [Commit](https://github.com/open-webui/open-webui/pull/17070/commits/0bca4e230ef276bec468889e3be036242ad11086f)
+
 ## [0.6.26] - 2025-08-28
 
 ### Added
