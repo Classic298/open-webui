@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.29] - 2025-09-15
+## [0.6.29] - 2025-09-16
 
 ### Added
 
@@ -16,11 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 🎨 The command suggestion UI for prompts ('/'), models ('@'), and knowledge ('#') was completely overhauled with a more responsive and keyboard-navigable interface. [Commit](https://github.com/open-webui/open-webui/commit/6b69c4da0fb9329ccf7024483960e070cf52ccab), [Commit](https://github.com/open-webui/open-webui/commit/06a6855f844456eceaa4d410c93379460e208202), [Commit](https://github.com/open-webui/open-webui/commit/c55f5578280b936cf581a743df3703e3db1afd54), [Commit](https://github.com/open-webui/open-webui/commit/f68d1ba394d4423d369f827894cde99d760b2402)
 - 🛠️ Tools can now be executed within isolated Python virtual environments, resolving dependency conflicts and enhancing compatibility. [#17400](https://github.com/open-webui/open-webui/issues/17400), [Commit](https://github.com/open-webui/open-webui/commit/3e1b14f57094637c41b27cc767c6ffd3c0c0ace4)
 - 🔒 OAuth token retrieval logic was refactored, improving the reliability and consistency of authentication handling across the backend. [Commit](https://github.com/open-webui/open-webui/commit/6c0a5fa91cdbf6ffb74667ee61ca96bebfdfbc50)
+- 💻 Code block output processing was improved to handle Python execution results more reliably, along with refined visual styling and button layouts. [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/0e5320c39e308ff97f2ca9e289618af12479eb6e)
 - 🏷️ Mention token rendering was enhanced with interactive tooltips for referenced models, supporting both simple and labeled syntax formats for improved chat readability. [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/098f34f40053441260929b495500afcc5c1c818b)
+- 🔔 Notification toast interaction was enhanced with drag detection to prevent accidental clicks and added keyboard support for accessibility. [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/621e7679c427b6f0efa85f95235319238bf171ad)
+- 🎨 Download icon consistency was improved across the entire interface by standardizing the icon component used in menus, functions, tools, and export features. [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/596be451ece7e11b5cd25465d49670c27a1cb33f)
 - 🗓️ Improved date and time formatting dynamically adapts to the selected language, ensuring consistent localization across the UI. [#17409](https://github.com/open-webui/open-webui/pull/17409), [Commit](https://github.com/open-webui/open-webui/commit/2227f24bd6d861b1fad8d2cabacf7d62ce137d0c)
 - 🔒 Feishu SSO integration was added, allowing users to authenticate via Feishu. [#17284](https://github.com/open-webui/open-webui/pull/17284), [Docs:#685](https://github.com/open-webui/docs/pull/685)
 - 🔠 Toggle filters in the chat input options menu are now sorted alphabetically for easier navigation. [Commit](https://github.com/open-webui/open-webui/commit/ca853ca4656180487afcd84230d214f91db52533)
 - 🎨 Long chat titles in the sidebar are now truncated to prevent text overflow and maintain a clean layout. [#17356](https://github.com/open-webui/open-webui/pull/17356)
+- 🎨 Temporary chat interface design was refined with improved layout and visual consistency. [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/67549dcadd670285d491bd41daf3d081a70fd094), [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/2ca34217e68f3b439899c75881dfb050f49c9eb2), [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/fb02ec52a5df3f58b53db4ab3a995c15f83503cd)
 - 🔄 Various improvements were implemented across the frontend and backend to enhance performance, stability, and security.
 - 🌐 Translations for Finnish, German, Kabyle, Portuguese (Brazil), Simplified Chinese, Spanish (Spain), and Traditional Chinese (Taiwan) were enhanced and expanded.
 
