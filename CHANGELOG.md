@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.29] - 2025-09-13
+## [0.6.29] - 2025-09-15
 
 ### Added
 
@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ⚙️ Models can now be configured with default features (Web Search, Image Generation) and filters that automatically activate when a user selects the model. [Commit](https://github.com/open-webui/open-webui/commit/9a555478273355a5177bfc7f7211c64778e4c8de), [Commit](https://github.com/open-webui/open-webui/commit/384a53b339820068e92f7eaea0d9f3e0536c19c2), [Commit](https://github.com/open-webui/open-webui/commit/d7f43bfc1a30c065def8c50d77c2579c1a3c5c67), [Commit](https://github.com/open-webui/open-webui/commit/6a67a2217cc5946ad771e479e3a37ac213210748)
 - 💬 The ability to reference other chats as context within a conversation was added via the attachment menu. [Commit](https://github.com/open-webui/open-webui/commit/e097bbdf11ae4975c622e086df00d054291cdeb3), [Commit](https://github.com/open-webui/open-webui/commit/f3cd2ffb18e7dedbe88430f9ae7caa6b3cfd79d0), [Commit](https://github.com/open-webui/open-webui/commit/74263c872c5d574a9bb0944d7984f748dc772dba), [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/aa8ab349ed2fcb46d1cf994b9c0de2ec2ea35d0d), [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/025eef754f0d46789981defd473d001e3b1d0ca2)
 - 🎨 The command suggestion UI for prompts ('/'), models ('@'), and knowledge ('#') was completely overhauled with a more responsive and keyboard-navigable interface. [Commit](https://github.com/open-webui/open-webui/commit/6b69c4da0fb9329ccf7024483960e070cf52ccab), [Commit](https://github.com/open-webui/open-webui/commit/06a6855f844456eceaa4d410c93379460e208202), [Commit](https://github.com/open-webui/open-webui/commit/c55f5578280b936cf581a743df3703e3db1afd54), [Commit](https://github.com/open-webui/open-webui/commit/f68d1ba394d4423d369f827894cde99d760b2402)
+- 🏷️ Mention token rendering was enhanced with interactive tooltips for referenced models, supporting both simple and labeled syntax formats for improved chat readability. [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/098f34f40053441260929b495500afcc5c1c818b)
 - 🔠 Toggle filters in the chat input options menu are now sorted alphabetically for easier navigation. [Commit](https://github.com/open-webui/open-webui/commit/ca853ca4656180487afcd84230d214f91db52533)
 - 🔒 OAuth token retrieval logic was refactored, improving the reliability and consistency of authentication handling across the backend. [Commit](https://github.com/open-webui/open-webui/commit/6c0a5fa91cdbf6ffb74667ee61ca96bebfdfbc50)
 - 🗓️ Improved date and time formatting dynamically adapts to the selected language, ensuring consistent localization across the UI. [#17409](https://github.com/open-webui/open-webui/pull/17409), [Commit](https://github.com/open-webui/open-webui/commit/2227f24bd6d861b1fad8d2cabacf7d62ce137d0c)
