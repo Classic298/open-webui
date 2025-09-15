@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.29] - 2025-09-15
+## [0.6.29] - 2025-09-16
 
 ### Added
 
@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 📂 Large file upload failures are resolved by correcting the processing logic for scenarios where document embedding is bypassed. [Commit](https://github.com/open-webui/open-webui/commit/051b6daa8299fd332503bd584563556e2ae6adab)
 - 🗓️ Date and time display issues where "dayjs" failed to localize according to the selected language are now resolved. [#17357](https://github.com/open-webui/open-webui/issues/17357), [#17409](https://github.com/open-webui/open-webui/pull/17409), [Commit](https://github.com/open-webui/open-webui/commit/2227f24bd6d861b1fad8d2cabacf7d62ce137d0c)
 - 📊 Llama.cpp server timing metrics are now correctly parsed and displayed by fixing a typo in the response handling. [#17350](https://github.com/open-webui/open-webui/issues/17350), [Commit](https://github.com/open-webui/open-webui/commit/cf72f5503f39834b9da44ebbb426a3674dad0caa)
+- 🛠️ Filter functions with file_handler configuration now properly handle messages without file attachments, preventing runtime errors. [#17423](https://github.com/open-webui/open-webui/pull/17423)
 
 ### Changed
 
