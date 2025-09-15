@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.29] - 2025-09-16
+## [0.6.29] - 2025-09-15
 
 ### Added
 
@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 📊 Llama.cpp server timing metrics are now correctly parsed and displayed by fixing a typo in the response handling. [#17350](https://github.com/open-webui/open-webui/issues/17350), [Commit](https://github.com/open-webui/open-webui/commit/cf72f5503f39834b9da44ebbb426a3674dad0caa)
 - 🛠️ Filter functions with file_handler configuration now properly handle messages without file attachments, preventing runtime errors. [#17423](https://github.com/open-webui/open-webui/pull/17423)
 - 📚 Knowledge base permission logic was corrected to ensure private collection owners can access their own content when embedding bypass is enabled. [#17432](https://github.com/open-webui/open-webui/issues/17432), [Commit](https://github.com/open-webui/open-webui/commit/a51f0c30ec1472d71487eab3e15d0351a2716b12)
+- ⚙️ Connection URL editing in Admin Settings now properly saves changes instead of reverting to original values, fixing issues with both Ollama and OpenAI-compatible endpoints. [#17435](https://github.com/open-webui/open-webui/issues/17435), [Commit](https://github.com/open-webui/open-webui/commit/e4c864de7eb0d577843a80688677ce3659d1f81f)
 
 ### Changed
 
