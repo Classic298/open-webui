@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.29] - 2025-09-16
+## [0.6.29] - 2025-09-17
 
 ### Added
 
@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ⚡ Message input processing was optimized to skip unnecessary text variable handling when input is empty, improving performance. [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/e1386fe80b77126a12dabc4ad058abe9b024b275)
 - 📄 Individual chat PDF export was added to the sidebar chat menu, allowing users to export single conversations as PDF documents with both stylized and plain text options. [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/d041d58bb619689cd04a391b4f8191b23941ca62)
 - 🛠️ Function validation was enhanced with improved valve validation and better error handling during function loading and synchronization. [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/e66e0526ed6a116323285f79f44237538b6c75e6)
-- 🏷️ Mention token rendering was enhanced with interactive tooltips for referenced models, supporting both simple and labeled syntax formats for improved chat readability. [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/098f34f40053441260929b495500afcc5c1c818b)
+- 🏷️ Mention token rendering was enhanced with interactive tooltips for referenced models, supporting both simple and labeled syntax formats for improved chat readability. [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/098f34f40053441260929b495500afcc5c1c818b), [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/d8ad384b0602f7e115aaef9230b8339352129504)
 - 🔔 Notification toast interaction was enhanced with drag detection to prevent accidental clicks and added keyboard support for accessibility. [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/621e7679c427b6f0efa85f95235319238bf171ad)
 - 🗓️ Improved date and time formatting dynamically adapts to the selected language, ensuring consistent localization across the UI. [#17409](https://github.com/open-webui/open-webui/pull/17409), [Commit](https://github.com/open-webui/open-webui/commit/2227f24bd6d861b1fad8d2cabacf7d62ce137d0c)
 - 🔒 Feishu SSO integration was added, allowing users to authenticate via Feishu. [#17284](https://github.com/open-webui/open-webui/pull/17284), [Docs:#685](https://github.com/open-webui/docs/pull/685)
@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 🎨 Long chat titles in the sidebar are now truncated to prevent text overflow and maintain a clean layout. [#17356](https://github.com/open-webui/open-webui/pull/17356)
 - 🎨 Temporary chat interface design was refined with improved layout and visual consistency. [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/67549dcadd670285d491bd41daf3d081a70fd094), [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/2ca34217e68f3b439899c75881dfb050f49c9eb2), [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/fb02ec52a5df3f58b53db4ab3a995c15f83503cd)
 - 🎨 Download icon consistency was improved across the entire interface by standardizing the icon component used in menus, functions, tools, and export features. [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/596be451ece7e11b5cd25465d49670c27a1cb33f)
+- 🎨 Settings interface was enhanced with improved iconography and reorganized the 'Chats' section into 'Data Controls' for better clarity. [Commit](https://github.com/open-webui/open-webui/pull/17420/commits/8bf0b40fdd978b5af6548a6e1fb3aabd90bcd5cd)
 - 🔄 Various improvements were implemented across the frontend and backend to enhance performance, stability, and security.
 - 🌐 Translations for Finnish, German, Kabyle, Portuguese (Brazil), Simplified Chinese, Spanish (Spain), and Traditional Chinese (Taiwan) were enhanced and expanded.
 
