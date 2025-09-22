@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.31] - 2025-09-24
+
+### Added
+
+- 🛠️ External tools now support rich UI element embedding, allowing tools to return HTML content and interactive iframes that display directly within chat conversations with configurable security settings. [Commit](https://github.com/open-webui/open-webui/commit/07c5b25bc8b63173f406feb3ba183d375fedee6a), [Commit](https://github.com/open-webui/open-webui/commit/a5d8882bba7933a2c2c31c0a1405aba507c370bb), [Commit](https://github.com/open-webui/open-webui/commit/7be5b7f50f498de97359003609fc5993a172f084), [Commit](https://github.com/open-webui/open-webui/commit/a89ffccd7e96705a4a40e845289f4fcf9c4ae596)
+- ☁️ OneDrive integration was improved to support separate client IDs for personal and business authentication, enabling both integrations to work simultaneously. [#17619](https://github.com/open-webui/open-webui/pull/17619), [Commit](https://github.com/open-webui/open-webui/commit/466d5bb69636e280e81b2ae55278ef49808b5fb5), [Docs](https://docs.openwebui.com/tutorials/integrations/onedrive-sharepoint), [Docs](https://docs.openwebui.com/getting-started/env-configuration/#onedrive)
+- 🎨 Interface design was modernized with updated visual styling, improved spacing, and refined component layouts across modals, sidebar, settings, and navigation elements. [Commit](https://github.com/open-webui/open-webui/commit/27a91cc80a24bda0a3a188bc3120a8ab57b00881), [Commit](https://github.com/open-webui/open-webui/commit/4ad743098615f9c58daa9df392f31109aeceeb16)
+- 🔍 Search functionality was enhanced with improved autocomplete filtering for search parameters including pinned, shared, and archived chat filters. [Commit](https://github.com/open-webui/open-webui/commit/b0279c50902d5ae0f4a77d354962ce79600b8b92)
+- ⚡ Page loading performance was optimized by deferring API requests until components are actually opened, including ChangelogModal, ModelSelector, RecursiveFolder, and ArchivedChatsModal. [#17542](https://github.com/open-webui/open-webui/pull/17542), [#17555](https://github.com/open-webui/open-webui/pull/17555), [#17557](https://github.com/open-webui/open-webui/pull/17557), [#17541](https://github.com/open-webui/open-webui/pull/17541)
+- ⚡ Editor collaboration functionality was refactored to reduce package size by 390KB and minimize compilation errors, improving build performance and reliability. [#17593](https://github.com/open-webui/open-webui/pull/17593)
+- 🔄 Various improvements were implemented across the frontend and backend to enhance performance, stability, and security.
+- 🌐 Translations for Portuguese (Brazil), Chinese, Korean, Irish, Spanish, and Finnish were enhanced and improved.
+
+### Fixed
+
+- 🔍 Hybrid search functionality was enhanced to handle inconsistent parameter types and prevent failures when collection results are None, empty, or in unexpected formats. [#17617](https://github.com/open-webui/open-webui/pull/17617), [Commit](https://github.com/open-webui/open-webui/commit/6e4a2f18e17f47c9d0f3b50822bfaae3a5638864)
+- 💾 Memory leaks in file handling and HTTP connections are prevented through proper resource cleanup, ensuring stable memory usage during large file downloads and processing operations. [#17608](https://github.com/open-webui/open-webui/pull/17608)
+- 🔐 OAuth access token refresh errors are resolved by properly implementing async/await patterns, preventing "coroutine object has no attribute get" failures during token expiry. [#17585](https://github.com/open-webui/open-webui/issues/17585), [Commit](https://github.com/open-webui/open-webui/commit/e4c4ba097925569d36b8c54d8f62f11a52ed098a)
+- 🎨 Toggle switch display issues in the Integrations interface are fixed, preventing background highlighting and obscuring on hover. [#17564](https://github.com/open-webui/open-webui/issues/17564), [Commit](https://github.com/open-webui/open-webui/commit/7528f24b618f8b3c6beec572a8855035d0902e51)
+
 ## [0.6.30] - 2025-09-17
 
 ### Added
