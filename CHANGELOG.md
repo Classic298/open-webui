@@ -24,8 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 🔍 Hybrid search functionality was enhanced to handle inconsistent parameter types and prevent failures when collection results are None, empty, or in unexpected formats. [#17617](https://github.com/open-webui/open-webui/pull/17617), [Commit](https://github.com/open-webui/open-webui/commit/6e4a2f18e17f47c9d0f3b50822bfaae3a5638864)
 - 💾 Memory leaks in file handling and HTTP connections are prevented through proper resource cleanup, ensuring stable memory usage during large file downloads and processing operations. [#17608](https://github.com/open-webui/open-webui/pull/17608)
-- 🔐 OAuth access token refresh errors are resolved by properly implementing async/await patterns, preventing "coroutine object has no attribute get" failures during token expiry. [#17585](https://github.com/open-webui/open-webui/issues/17585), [Commit](https://github.com/open-webui/open-webui/commit/e4c4ba097925569d36b8c54d8f62f11a52ed098a)
+- 🔐 OAuth access token refresh errors are resolved by properly implementing async/await patterns, preventing "coroutine object has no attribute get" failures during token expiry. [#17585](https://github.com/open-webui/open-webui/issues/17585), [#17678](https://github.com/open-webui/open-webui/issues/17678), [Commit](https://github.com/open-webui/open-webui/commit/e4c4ba097925569d36b8c54d8f62f11a52ed098a)
 - 🎨 Toggle switch display issues in the Integrations interface are fixed, preventing background highlighting and obscuring on hover. [#17564](https://github.com/open-webui/open-webui/issues/17564), [Commit](https://github.com/open-webui/open-webui/commit/7528f24b618f8b3c6beec572a8855035d0902e51)
+
+### Changed
+
+- ☁️ OneDrive environment variable configuration was updated to use separate ONEDRIVE_CLIENT_ID_PERSONAL and ONEDRIVE_CLIENT_ID_BUSINESS variables for better client ID separation, while maintaining backward compatibility with the legacy ONEDRIVE_CLIENT_ID variable. [Docs](https://docs.openwebui.com/tutorials/integrations/onedrive-sharepoint), [Docs](https://docs.openwebui.com/getting-started/env-configuration/#onedrive)
 
 ## [0.6.30] - 2025-09-17
 
