@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - 🔌 MCP (streamable HTTP - Model Context Protocol) server support was added alongside existing OpenAPI server integration, allowing users to connect both server types through an improved server configuration interface. [Commit](https://github.com/open-webui/open-webui/commit/fd7385c3921eb59af76a26f4c475aedb38ce2406), [Commit](https://github.com/open-webui/open-webui/commit/777e81f7a8aca957a359d51df8388e5af4721a68), [Commit](https://github.com/open-webui/open-webui/commit/de7f7b3d855641450f8e5aac34fbae0665e0b80e), [Commit](https://github.com/open-webui/open-webui/commit/f1bbf3a91e4713039364b790e886e59b401572d0), [Commit](https://github.com/open-webui/open-webui/commit/c55afc42559c32a6f0c8beb0f1bb18e9360ab8af), [Commit](https://github.com/open-webui/open-webui/commit/61f20acf61f4fe30c0e5b0180949f6e1a8cf6524)
+- 🔐 Redis session storage support was added for OAuth redirects, providing better state handling in multi-pod Kubernetes deployments and resolving CSRF mismatch errors. [#17223](https://github.com/open-webui/open-webui/pull/17223), [#15373](https://github.com/open-webui/open-webui/issues/15373)
 - 👥 Channel access control was enhanced to require write permissions for posting, editing, and deleting messages, while read-only users can view content but cannot contribute. [#17543](https://github.com/open-webui/open-webui/pull/17543)
 - 🌐 Attach Webpage button was added to the message input menu, providing a user-friendly modal interface for attaching web content and YouTube videos as an alternative to the existing URL syntax. [#17534](https://github.com/open-webui/open-webui/pull/17534)
 - 📝 Pending user overlay content now supports markdown formatting, enabling rich text display for custom messages similar to banner functionality. [#17681](https://github.com/open-webui/open-webui/pull/17681)
@@ -27,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- 🗒️ Hidden models are now properly excluded from the notes section dropdown and default model selection, preventing users from accessing models they shouldn't see. [#17722](https://github.com/open-webui/open-webui/pull/17722)
+- 💬 Chat jitter and delayed code block expansion in multi-model sessions were resolved by reverting dynamic CodeEditor loading, restoring stable rendering behavior. [#17715](https://github.com/open-webui/open-webui/pull/17715), [#17684](https://github.com/open-webui/open-webui/issues/17684)
 - 📎 File upload handling was improved to properly recognize uploaded files even when no accompanying text message is provided, resolving issues where attachments were ignored in custom prompts. [#17492](https://github.com/open-webui/open-webui/issues/17492)
 - 💬 Chat conversation referencing within projects was restored by including foldered chats in the reference menu, allowing users to properly quote conversations from within their project scope. [#17530](https://github.com/open-webui/open-webui/issues/17530)
 - ⚙️ Valve behavior was improved to properly handle default values and array types, ensuring only explicitly set values are persisted while maintaining consistent distinction between custom and default valve states. [#17664](https://github.com/open-webui/open-webui/pull/17664)
