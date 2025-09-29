@@ -902,6 +902,56 @@
 						/>
 					</div>
 
+					<div class="mb-2.5 w-full">
+						<div class=" self-center text-xs font-medium mb-1">
+							{$i18n.t('Timeout (s)')}
+						</div>
+
+						<input
+							class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+							placeholder={$i18n.t('Timeout (s)')}
+							bind:value={webConfig.WEB_LOADER_TIMEOUT}
+							required
+						/>
+					</div>
+
+					<div class="mb-2.5 w-full">
+						<div class=" self-center text-xs font-medium mb-1">
+							{$i18n.t('Retries')}
+						</div>
+
+						<input
+							class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+							placeholder={$i18n.t('Retries')}
+							bind:value={webConfig.WEB_LOADER_RETRIES}
+							required
+						/>
+					</div>
+					<div class="mb-2.5 w-full">
+						<div class=" self-center text-xs font-medium mb-1">
+							{$i18n.t('Retry Cooldown (s)')}
+						</div>
+
+						<input
+							class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+							placeholder={$i18n.t('Retry Cooldown (s)')}
+							bind:value={webConfig.WEB_LOADER_RETRY_COOLDOWN}
+							required
+						/>
+					</div>
+					<div class="mb-2.5 w-full">
+						<div class=" self-center text-xs font-medium mb-1">
+							{$i18n.t('Retry Backoff')}
+						</div>
+
+						<input
+							class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+							placeholder={$i18n.t('Retry Backoff')}
+							bind:value={webConfig.WEB_LOADER_RETRY_BACKOFF}
+							required
+						/>
+					</div>
+
 					<div class="  mb-2.5 flex w-full justify-between">
 						<div class=" self-center text-xs font-medium">
 							{$i18n.t('Youtube Language')}

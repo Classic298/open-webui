@@ -2766,6 +2766,30 @@ WEB_LOADER_CONCURRENT_REQUESTS = PersistentConfig(
     int(os.getenv("WEB_LOADER_CONCURRENT_REQUESTS", "10")),
 )
 
+WEB_LOADER_TIMEOUT = PersistentConfig(
+    "WEB_LOADER_TIMEOUT",
+    "rag.web.loader.timeout",
+    int(os.environ.get("WEB_LOADER_TIMEOUT", "8")),
+)
+
+WEB_LOADER_RETRIES = PersistentConfig(
+    "WEB_LOADER_RETRIES",
+    "rag.web.loader.retries",
+    int(os.environ.get("WEB_LOADER_RETRIES", "2")),
+)
+
+WEB_LOADER_RETRY_COOLDOWN = PersistentConfig(
+    "WEB_LOADER_RETRY_COOLDOWN",
+    "rag.web.loader.retry_cooldown",
+    int(os.environ.get("WEB_LOADER_RETRY_COOLDOWN", "1")),
+)
+
+WEB_LOADER_RETRY_BACKOFF = PersistentConfig(
+    "WEB_LOADER_RETRY_BACKOFF",
+    "rag.web.loader.retry_backoff",
+    float(os.environ.get("WEB_LOADER_RETRY_BACKOFF", "1.5")),
+)
+
 
 ENABLE_WEB_LOADER_SSL_VERIFICATION = PersistentConfig(
     "ENABLE_WEB_LOADER_SSL_VERIFICATION",

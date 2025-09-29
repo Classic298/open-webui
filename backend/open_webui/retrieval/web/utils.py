@@ -32,6 +32,10 @@ from open_webui.config import (
     PLAYWRIGHT_WS_URL,
     PLAYWRIGHT_TIMEOUT,
     WEB_LOADER_ENGINE,
+    WEB_LOADER_TIMEOUT,
+    WEB_LOADER_RETRIES,
+    WEB_LOADER_RETRY_COOLDOWN,
+    WEB_LOADER_RETRY_BACKOFF,
     FIRECRAWL_API_BASE_URL,
     FIRECRAWL_API_KEY,
     TAVILY_API_KEY,
@@ -173,6 +177,10 @@ class SafeFireCrawlLoader(BaseLoader, RateLimitMixin, URLProcessingMixin):
         mode: Literal["crawl", "scrape", "map"] = "scrape",
         proxy: Optional[Dict[str, str]] = None,
         params: Optional[Dict] = None,
+        timeout: int = 8,
+        retries: int = 2,
+        cooldown: int = 1,
+        backoff: float = 1.5,
     ):
         """Concurrent document loader for FireCrawl operations.
 
@@ -215,50 +223,82 @@ class SafeFireCrawlLoader(BaseLoader, RateLimitMixin, URLProcessingMixin):
         self.api_url = api_url
         self.mode = mode
         self.params = params
+        self.timeout = timeout
+        self.retries = retries
+        self.cooldown = cooldown
+        self.backoff = backoff
 
     def lazy_load(self) -> Iterator[Document]:
         """Load documents concurrently using FireCrawl."""
-        for url in self.web_paths:
-            try:
-                self._safe_process_url_sync(url)
-                loader = FireCrawlLoader(
-                    url=url,
-                    api_key=self.api_key,
-                    api_url=self.api_url,
-                    mode=self.mode,
-                    params=self.params,
-                )
-                for document in loader.lazy_load():
-                    if not document.metadata.get("source"):
-                        document.metadata["source"] = document.metadata.get("sourceURL")
-                    yield document
-            except Exception as e:
-                if self.continue_on_failure:
-                    log.exception(f"Error loading {url}: {e}")
-                    continue
-                raise e
+        import time
 
-    async def alazy_load(self):
-        """Async version of lazy_load."""
         for url in self.web_paths:
-            try:
-                await self._safe_process_url(url)
-                loader = FireCrawlLoader(
-                    url=url,
-                    api_key=self.api_key,
-                    api_url=self.api_url,
-                    mode=self.mode,
-                    params=self.params,
-                )
-                async for document in loader.alazy_load():
-                    if not document.metadata.get("source"):
-                        document.metadata["source"] = document.metadata.get("sourceURL")
-                    yield document
-            except Exception as e:
-                if self.continue_on_failure:
-                    log.exception(f"Error loading {url}: {e}")
-                    continue
-                raise e
+            for i in range(self.retries):
+                try:
+                    self._safe_process_url_sync(url)
+                    loader = FireCrawlLoader(
+                        url=url,
+                        api_key=self.api_key,
+                        api_url=self.api_url,
+                        mode=self.mode,
+                        params=self.params,
+                    )
+                    docs = list(loader.lazy_load())
+                    for document in docs:
+                        if not document.metadata.get("source"):
+                            document.metadata["source"] = document.metadata.get(
+                                "sourceURL"
+                            )
+                        yield document
+                    break  # Success
+                except Exception as e:
+                    log.warning(
+                        f"Error loading {url} on attempt {i + 1}/{self.retries}: {e}"
+                    )
+                    if i < self.retries - 1:
+                        time.sleep(self.cooldown * (self.backoff**i))
+                    elif self.continue_on_failure:
+                        log.exception(
+                            f"Failed to load {url} after {self.retries} attempts."
+                        )
+                    else:
+                        raise e
+
+    async def alazy_load(self) -> AsyncIterator[Document]:
+        """Async version of lazy_load."""
+        import asyncio
+
+        for url in self.web_paths:
+            for i in range(self.retries):
+                try:
+                    await self._safe_process_url(url)
+                    loader = FireCrawlLoader(
+                        url=url,
+                        api_key=self.api_key,
+                        api_url=self.api_url,
+                        mode=self.mode,
+                        params=self.params,
+                    )
+                    docs = [doc async for doc in loader.alazy_load()]
+                    for document in docs:
+                        if not document.metadata.get("source"):
+                            document.metadata["source"] = document.metadata.get(
+                                "sourceURL"
+                            )
+                        yield document
+                    break  # Success
+                except Exception as e:
+                    log.warning(
+                        f"Error loading {url} on attempt {i + 1}/{self.retries}: {e}"
+                    )
+                    if i < self.retries - 1:
+                        await asyncio.sleep(self.cooldown * (self.backoff**i))
+                    elif self.continue_on_failure:
+                        log.exception(
+                            f"Failed to load {url} after {self.retries} attempts."
+                        )
+                    else:
+                        raise e
 
 
 class SafeTavilyLoader(BaseLoader, RateLimitMixin, URLProcessingMixin):
@@ -272,6 +312,10 @@ class SafeTavilyLoader(BaseLoader, RateLimitMixin, URLProcessingMixin):
         verify_ssl: bool = True,
         trust_env: bool = False,
         proxy: Optional[Dict[str, str]] = None,
+        timeout: int = 8,
+        retries: int = 2,
+        cooldown: int = 1,
+        backoff: float = 1.5,
     ):
         """Initialize SafeTavilyLoader with rate limiting and SSL verification support.
 
@@ -304,6 +348,10 @@ class SafeTavilyLoader(BaseLoader, RateLimitMixin, URLProcessingMixin):
         self.verify_ssl = verify_ssl
         self.trust_env = trust_env
         self.proxy = proxy
+        self.timeout = timeout
+        self.retries = retries
+        self.cooldown = cooldown
+        self.backoff = backoff
 
         # Add rate limiting
         self.requests_per_second = requests_per_second
@@ -311,6 +359,8 @@ class SafeTavilyLoader(BaseLoader, RateLimitMixin, URLProcessingMixin):
 
     def lazy_load(self) -> Iterator[Document]:
         """Load documents with rate limiting support, delegating to TavilyLoader."""
+        import time
+
         valid_urls = []
         for url in self.web_paths:
             try:
@@ -325,22 +375,34 @@ class SafeTavilyLoader(BaseLoader, RateLimitMixin, URLProcessingMixin):
                 log.warning("No valid URLs to process after SSL verification")
                 return
             raise ValueError("No valid URLs to process after SSL verification")
-        try:
-            loader = TavilyLoader(
-                urls=valid_urls,
-                api_key=self.api_key,
-                extract_depth=self.extract_depth,
-                continue_on_failure=self.continue_on_failure,
-            )
-            yield from loader.lazy_load()
-        except Exception as e:
-            if self.continue_on_failure:
-                log.exception(f"Error extracting content from URLs: {e}")
-            else:
-                raise e
+
+        for i in range(self.retries):
+            try:
+                loader = TavilyLoader(
+                    urls=valid_urls,
+                    api_key=self.api_key,
+                    extract_depth=self.extract_depth,
+                    continue_on_failure=self.continue_on_failure,
+                )
+                yield from loader.lazy_load()
+                break  # Success
+            except Exception as e:
+                log.warning(
+                    f"Error extracting content from URLs on attempt {i + 1}/{self.retries}: {e}"
+                )
+                if i < self.retries - 1:
+                    time.sleep(self.cooldown * (self.backoff**i))
+                elif self.continue_on_failure:
+                    log.exception(
+                        f"Failed to extract content after {self.retries} attempts."
+                    )
+                else:
+                    raise e
 
     async def alazy_load(self) -> AsyncIterator[Document]:
         """Async version with rate limiting and SSL verification."""
+        import asyncio
+
         valid_urls = []
         for url in self.web_paths:
             try:
@@ -357,20 +419,27 @@ class SafeTavilyLoader(BaseLoader, RateLimitMixin, URLProcessingMixin):
                 return
             raise ValueError("No valid URLs to process after SSL verification")
 
-        try:
-            loader = TavilyLoader(
-                urls=valid_urls,
-                api_key=self.api_key,
-                extract_depth=self.extract_depth,
-                continue_on_failure=self.continue_on_failure,
-            )
-            async for document in loader.alazy_load():
-                yield document
-        except Exception as e:
-            if self.continue_on_failure:
-                log.exception(f"Error loading URLs: {e}")
-            else:
-                raise e
+        for i in range(self.retries):
+            try:
+                loader = TavilyLoader(
+                    urls=valid_urls,
+                    api_key=self.api_key,
+                    extract_depth=self.extract_depth,
+                    continue_on_failure=self.continue_on_failure,
+                )
+                async for document in loader.alazy_load():
+                    yield document
+                break  # Success
+            except Exception as e:
+                log.warning(
+                    f"Error loading URLs on attempt {i + 1}/{self.retries}: {e}"
+                )
+                if i < self.retries - 1:
+                    await asyncio.sleep(self.cooldown * (self.backoff**i))
+                elif self.continue_on_failure:
+                    log.exception(f"Failed to load URLs after {self.retries} attempts.")
+                else:
+                    raise e
 
 
 class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessingMixin):
@@ -399,7 +468,10 @@ class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessing
         remove_selectors: Optional[List[str]] = None,
         proxy: Optional[Dict[str, str]] = None,
         playwright_ws_url: Optional[str] = None,
-        playwright_timeout: Optional[int] = 10000,
+        timeout: int = 8,
+        retries: int = 2,
+        cooldown: int = 1,
+        backoff: float = 1.5,
     ):
         """Initialize with additional safety parameters and remote browser support."""
 
@@ -426,11 +498,15 @@ class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessing
         self.last_request_time = None
         self.playwright_ws_url = playwright_ws_url
         self.trust_env = trust_env
-        self.playwright_timeout = playwright_timeout
+        self.timeout = timeout
+        self.retries = retries
+        self.cooldown = cooldown
+        self.backoff = backoff
 
     def lazy_load(self) -> Iterator[Document]:
         """Safely load URLs synchronously with support for remote browser."""
         from playwright.sync_api import sync_playwright
+        import time
 
         with sync_playwright() as p:
             # Use remote browser if ws_endpoint is provided, otherwise use local browser
@@ -440,26 +516,37 @@ class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessing
                 browser = p.chromium.launch(headless=self.headless, proxy=self.proxy)
 
             for url in self.urls:
-                try:
-                    self._safe_process_url_sync(url)
-                    page = browser.new_page()
-                    response = page.goto(url, timeout=self.playwright_timeout)
-                    if response is None:
-                        raise ValueError(f"page.goto() returned None for url {url}")
+                for i in range(self.retries):
+                    try:
+                        self._safe_process_url_sync(url)
+                        page = browser.new_page()
+                        response = page.goto(url, timeout=self.timeout * 1000)
+                        if response is None:
+                            raise ValueError(f"page.goto() returned None for url {url}")
 
-                    text = self.evaluator.evaluate(page, browser, response)
-                    metadata = {"source": url}
-                    yield Document(page_content=text, metadata=metadata)
-                except Exception as e:
-                    if self.continue_on_failure:
-                        log.exception(f"Error loading {url}: {e}")
-                        continue
-                    raise e
+                        text = self.evaluator.evaluate(page, browser, response)
+                        metadata = {"source": url}
+                        yield Document(page_content=text, metadata=metadata)
+                        break  # Success
+                    except Exception as e:
+                        log.warning(
+                            f"Error loading {url} on attempt {i + 1}/{self.retries}: {e}"
+                        )
+                        if i < self.retries - 1:
+                            time.sleep(self.cooldown * (self.backoff**i))
+                        else:
+                            if self.continue_on_failure:
+                                log.exception(
+                                    f"Failed to load {url} after {self.retries} attempts."
+                                )
+                            else:
+                                raise e
             browser.close()
 
     async def alazy_load(self) -> AsyncIterator[Document]:
         """Safely load URLs asynchronously with support for remote browser."""
         from playwright.async_api import async_playwright
+        import asyncio
 
         async with async_playwright() as p:
             # Use remote browser if ws_endpoint is provided, otherwise use local browser
@@ -471,28 +558,47 @@ class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessing
                 )
 
             for url in self.urls:
-                try:
-                    await self._safe_process_url(url)
-                    page = await browser.new_page()
-                    response = await page.goto(url, timeout=self.playwright_timeout)
-                    if response is None:
-                        raise ValueError(f"page.goto() returned None for url {url}")
+                for i in range(self.retries):
+                    try:
+                        await self._safe_process_url(url)
+                        page = await browser.new_page()
+                        response = await page.goto(url, timeout=self.timeout * 1000)
+                        if response is None:
+                            raise ValueError(f"page.goto() returned None for url {url}")
 
-                    text = await self.evaluator.evaluate_async(page, browser, response)
-                    metadata = {"source": url}
-                    yield Document(page_content=text, metadata=metadata)
-                except Exception as e:
-                    if self.continue_on_failure:
-                        log.exception(f"Error loading {url}: {e}")
-                        continue
-                    raise e
+                        text = await self.evaluator.evaluate_async(page, browser, response)
+                        metadata = {"source": url}
+                        yield Document(page_content=text, metadata=metadata)
+                        break  # Success
+                    except Exception as e:
+                        log.warning(
+                            f"Error loading {url} on attempt {i + 1}/{self.retries}: {e}"
+                        )
+                        if i < self.retries - 1:
+                            await asyncio.sleep(self.cooldown * (self.backoff**i))
+                        else:
+                            if self.continue_on_failure:
+                                log.exception(
+                                    f"Failed to load {url} after {self.retries} attempts."
+                                )
+                            else:
+                                raise e
             await browser.close()
 
 
 class SafeWebBaseLoader(WebBaseLoader):
     """WebBaseLoader with enhanced error handling for URLs."""
 
-    def __init__(self, trust_env: bool = False, *args, **kwargs):
+    def __init__(
+        self,
+        *args,
+        trust_env: bool = False,
+        timeout: int = 8,
+        retries: int = 2,
+        cooldown: int = 1,
+        backoff: float = 1.5,
+        **kwargs,
+    ):
         """Initialize SafeWebBaseLoader
         Args:
             trust_env (bool, optional): set to True if using proxy to make web requests, for example
@@ -500,12 +606,19 @@ class SafeWebBaseLoader(WebBaseLoader):
         """
         super().__init__(*args, **kwargs)
         self.trust_env = trust_env
+        self.timeout = timeout
+        self.retries = retries
+        self.cooldown = cooldown
+        self.backoff = backoff
 
     async def _fetch(
-        self, url: str, retries: int = 3, cooldown: int = 2, backoff: float = 1.5
+        self,
+        url: str,
     ) -> str:
-        async with aiohttp.ClientSession(trust_env=self.trust_env) as session:
-            for i in range(retries):
+        async with aiohttp.ClientSession(
+            trust_env=self.trust_env, timeout=aiohttp.ClientTimeout(total=self.timeout)
+        ) as session:
+            for i in range(self.retries):
                 try:
                     kwargs: Dict = dict(
                         headers=self.session.headers,
@@ -522,15 +635,15 @@ class SafeWebBaseLoader(WebBaseLoader):
                         if self.raise_for_status:
                             response.raise_for_status()
                         return await response.text()
-                except aiohttp.ClientConnectionError as e:
-                    if i == retries - 1:
+                except (aiohttp.ClientConnectionError, asyncio.TimeoutError) as e:
+                    if i >= self.retries - 1:
                         raise
                     else:
                         log.warning(
                             f"Error fetching {url} with attempt "
-                            f"{i + 1}/{retries}: {e}. Retrying..."
+                            f"{i + 1}/{self.retries}: {e}. Retrying..."
                         )
-                        await asyncio.sleep(cooldown * backoff**i)
+                        await asyncio.sleep(self.cooldown * self.backoff**i)
         raise ValueError("retry count exceeded")
 
     def _unpack_fetch_results(
@@ -609,43 +722,40 @@ def get_web_loader(
         "requests_per_second": requests_per_second,
         "continue_on_failure": True,
         "trust_env": trust_env,
+        "timeout": WEB_LOADER_TIMEOUT.value,
+        "retries": WEB_LOADER_RETRIES.value,
+        "cooldown": WEB_LOADER_RETRY_COOLDOWN.value,
+        "backoff": WEB_LOADER_RETRY_BACKOFF.value,
     }
 
     if WEB_LOADER_ENGINE.value == "" or WEB_LOADER_ENGINE.value == "safe_web":
         WebLoaderClass = SafeWebBaseLoader
-    if WEB_LOADER_ENGINE.value == "playwright":
+    elif WEB_LOADER_ENGINE.value == "playwright":
         WebLoaderClass = SafePlaywrightURLLoader
-        web_loader_args["playwright_timeout"] = PLAYWRIGHT_TIMEOUT.value
         if PLAYWRIGHT_WS_URL.value:
             web_loader_args["playwright_ws_url"] = PLAYWRIGHT_WS_URL.value
-
-    if WEB_LOADER_ENGINE.value == "firecrawl":
+    elif WEB_LOADER_ENGINE.value == "firecrawl":
         WebLoaderClass = SafeFireCrawlLoader
         web_loader_args["api_key"] = FIRECRAWL_API_KEY.value
         web_loader_args["api_url"] = FIRECRAWL_API_BASE_URL.value
-
-    if WEB_LOADER_ENGINE.value == "tavily":
+    elif WEB_LOADER_ENGINE.value == "tavily":
         WebLoaderClass = SafeTavilyLoader
         web_loader_args["api_key"] = TAVILY_API_KEY.value
         web_loader_args["extract_depth"] = TAVILY_EXTRACT_DEPTH.value
-
-    if WEB_LOADER_ENGINE.value == "external":
+    elif WEB_LOADER_ENGINE.value == "external":
         WebLoaderClass = ExternalWebLoader
         web_loader_args["external_url"] = EXTERNAL_WEB_LOADER_URL.value
         web_loader_args["external_api_key"] = EXTERNAL_WEB_LOADER_API_KEY.value
-
-    if WebLoaderClass:
-        web_loader = WebLoaderClass(**web_loader_args)
-
-        log.debug(
-            "Using WEB_LOADER_ENGINE %s for %s URLs",
-            web_loader.__class__.__name__,
-            len(safe_urls),
-        )
-
-        return web_loader
     else:
         raise ValueError(
             f"Invalid WEB_LOADER_ENGINE: {WEB_LOADER_ENGINE.value}. "
             "Please set it to 'safe_web', 'playwright', 'firecrawl', or 'tavily'."
         )
+
+    web_loader = WebLoaderClass(**web_loader_args)
+    log.debug(
+        "Using WEB_LOADER_ENGINE %s for %s URLs",
+        web_loader.__class__.__name__,
+        len(safe_urls),
+    )
+    return web_loader
