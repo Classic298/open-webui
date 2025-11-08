@@ -757,6 +757,7 @@ class PruneDataForm(BaseModel):
     delete_inactive_users_days: Optional[int] = None
     exempt_admin_users: bool = True
     exempt_pending_users: bool = True
+    run_vacuum: bool = False
     dry_run: bool = True
 
 
@@ -1516,33 +1517,37 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
         log.info("Cleaning audio cache")
         cleanup_audio_cache(form_data.audio_cache_max_age_days)
 
-        # Stage 6: Database optimization
-        log.info("Optimizing database")
+        # Stage 6: Database optimization (optional)
+        if form_data.run_vacuum:
+            log.info("Optimizing database with VACUUM (this may take a while and lock the database)")
 
-        try:
-            with get_db() as db:
-                db.execute(text("VACUUM"))
-        except Exception as e:
-            log.error(f"Failed to vacuum main database: {e}")
+            try:
+                with get_db() as db:
+                    db.execute(text("VACUUM"))
+                    log.info("Vacuumed main database")
+            except Exception as e:
+                log.error(f"Failed to vacuum main database: {e}")
 
-        # Vector database-specific optimization
-        if isinstance(vector_cleaner, ChromaDatabaseCleaner):
-            try:
-                with sqlite3.connect(str(vector_cleaner.chroma_db_path)) as conn:
-                    conn.execute("VACUUM")
-                    log.info("Vacuumed ChromaDB database")
-            except Exception as e:
-                log.error(f"Failed to vacuum ChromaDB database: {e}")
-        elif (
-            isinstance(vector_cleaner, PGVectorDatabaseCleaner)
-            and vector_cleaner.session
-        ):
-            try:
-                vector_cleaner.session.execute(text("VACUUM ANALYZE"))
-                vector_cleaner.session.commit()
-                log.info("Executed VACUUM ANALYZE on PostgreSQL database")
-            except Exception as e:
-                log.error(f"Failed to vacuum PostgreSQL database: {e}")
+            # Vector database-specific optimization
+            if isinstance(vector_cleaner, ChromaDatabaseCleaner):
+                try:
+                    with sqlite3.connect(str(vector_cleaner.chroma_db_path)) as conn:
+                        conn.execute("VACUUM")
+                        log.info("Vacuumed ChromaDB database")
+                except Exception as e:
+                    log.error(f"Failed to vacuum ChromaDB database: {e}")
+            elif (
+                isinstance(vector_cleaner, PGVectorDatabaseCleaner)
+                and vector_cleaner.session
+            ):
+                try:
+                    vector_cleaner.session.execute(text("VACUUM ANALYZE"))
+                    vector_cleaner.session.commit()
+                    log.info("Executed VACUUM ANALYZE on PostgreSQL database")
+                except Exception as e:
+                    log.error(f"Failed to vacuum PostgreSQL database: {e}")
+        else:
+            log.info("Skipping VACUUM optimization (not enabled)")
 
         log.info("Data pruning completed successfully")
         return True
