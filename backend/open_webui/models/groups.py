@@ -162,10 +162,6 @@ class GroupTable:
         try:
             with get_db() as db:
                 update_data = form_data.model_dump(exclude_none=True)
-                log.info(f"[DEBUG] Updating group {id} with data: {update_data}")
-                log.info(f"[DEBUG] permissions in update_data: {update_data.get('permissions')}")
-                log.info(f"[DEBUG] permissions.ui: {update_data.get('permissions', {}).get('ui')}")
-
                 db.query(Group).filter_by(id=id).update(
                     {
                         **update_data,
@@ -174,10 +170,7 @@ class GroupTable:
                 )
                 db.commit()
 
-                result = self.get_group_by_id(id=id)
-                log.info(f"[DEBUG] After update, group permissions: {result.permissions if result else 'None'}")
-                log.info(f"[DEBUG] After update, group permissions.ui: {result.permissions.get('ui') if result and result.permissions else 'None'}")
-                return result
+                return self.get_group_by_id(id=id)
         except Exception as e:
             log.exception(e)
             return None

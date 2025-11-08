@@ -90,9 +90,6 @@
 			user_ids: userIds
 		};
 
-		console.log('[DEBUG EditGroupModal] Submitting group with permissions:', permissions);
-		console.log('[DEBUG EditGroupModal] permissions.ui:', permissions.ui);
-
 		await onSubmit(group);
 
 		loading = false;
@@ -100,15 +97,12 @@
 	};
 
 	const init = () => {
-		console.log('[DEBUG EditGroupModal] init() called with group:', group);
 		if (group) {
 			name = group.name;
 			description = group.description;
 
 			// Load permissions and fill in any missing properties (including new ui.interface_settings)
 			const loadedPermissions = group?.permissions ?? {};
-			console.log('[DEBUG EditGroupModal init] group.permissions from database:', group.permissions);
-			console.log('[DEBUG EditGroupModal init] loadedPermissions.ui:', loadedPermissions.ui);
 
 			permissions = {
 				workspace: { ...permissions.workspace, ...loadedPermissions.workspace },
@@ -118,16 +112,11 @@
 				ui: { ...permissions.ui, ...loadedPermissions.ui }
 			};
 
-			console.log('[DEBUG EditGroupModal init] Final permissions.ui:', permissions.ui);
-
 			userIds = group?.user_ids ?? [];
-		} else {
-			console.log('[DEBUG EditGroupModal] init() - no group object!');
 		}
 	};
 
 	$: {
-		console.log('[DEBUG EditGroupModal] Reactive statement: show =', show, ', group =', group);
 		if (show && group) {
 			init();
 		}
