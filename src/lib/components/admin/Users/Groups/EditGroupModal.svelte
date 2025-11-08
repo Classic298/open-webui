@@ -100,6 +100,7 @@
 	};
 
 	const init = () => {
+		console.log('[DEBUG EditGroupModal] init() called with group:', group);
 		if (group) {
 			name = group.name;
 			description = group.description;
@@ -120,11 +121,16 @@
 			console.log('[DEBUG EditGroupModal init] Final permissions.ui:', permissions.ui);
 
 			userIds = group?.user_ids ?? [];
+		} else {
+			console.log('[DEBUG EditGroupModal] init() - no group object!');
 		}
 	};
 
-	$: if (show) {
-		init();
+	$: {
+		console.log('[DEBUG EditGroupModal] Reactive statement: show =', show);
+		if (show) {
+			init();
+		}
 	}
 
 	onMount(() => {
