@@ -73,6 +73,9 @@
 			web_search: true,
 			image_generation: true,
 			code_interpreter: true
+		},
+		ui: {
+			interface_settings: true
 		}
 	};
 	export let userIds = [];
