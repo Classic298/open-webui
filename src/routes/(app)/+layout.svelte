@@ -127,6 +127,14 @@
 			console.log('[DEBUG] Merged settings to set:', mergedSettings);
 			settings.set(mergedSettings);
 			console.log('[DEBUG] Settings store has been set');
+
+			// Verify the store actually contains the data
+			let currentValue;
+			const unsubscribe = settings.subscribe(value => {
+				currentValue = value;
+			});
+			unsubscribe();
+			console.log('[DEBUG] Verified store value immediately after set:', currentValue);
 		} else {
 			console.log('[DEBUG] Skipped setting settings store - condition failed');
 		}
