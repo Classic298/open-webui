@@ -855,11 +855,11 @@
 
 				if (htmlContent || cssContent || jsContent) {
 					const renderedContent = `
-                        <!DOCTYPE html>
-                        <html lang="en">
-                        <head>
-                            <meta charset="UTF-8">
-                            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+						<!DOCTYPE html>
+						<html lang="en">
+						<head>
+							<meta charset="UTF-8">
+							<meta name="viewport" content="width=device-width, initial-scale=1.0">
 							<${''}style>
 								body {
 									background-color: white; /* Ensure the iframe has a white background */
@@ -867,16 +867,16 @@
 
 								${cssContent}
 							</${''}style>
-                        </head>
-                        <body>
-                            ${htmlContent}
+						</head>
+						<body>
+							${htmlContent}
 
 							<${''}script>
-                            	${jsContent}
+								${jsContent}
 							</${''}script>
-                        </body>
-                        </html>
-                    `;
+						</body>
+						</html>
+					`;
 					contents = [...contents, { type: 'iframe', content: renderedContent }];
 				} else {
 					// Check for SVG content
@@ -1558,7 +1558,7 @@
 	// Chat functions
 	//////////////////////////
 
-	const submitPrompt = async (userPrompt, { _raw = false } = {}) => {
+	const submitPrompt = async (userPrompt, metadata = {}, { _raw = false } = {}) => {
 		console.log('submitPrompt', userPrompt, $chatId);
 
 		const _selectedModels = selectedModels.map((modelId) =>
@@ -1662,7 +1662,7 @@
 
 		saveSessionSelectedModels();
 
-		await sendMessage(history, userMessageId, { newChat: true });
+		await sendMessage(history, userMessageId, { newChat: true, metadata: metadata });
 	};
 
 	const sendMessage = async (
@@ -1672,12 +1672,14 @@
 			messages = null,
 			modelId = null,
 			modelIdx = null,
-			newChat = false
+			newChat = false,
+			metadata = {}
 		}: {
 			messages?: any[] | null;
 			modelId?: string | null;
 			modelIdx?: number | null;
 			newChat?: boolean;
+			metadata?: object;
 		} = {}
 	) => {
 		if (autoScroll) {
@@ -1773,7 +1775,8 @@
 							: createMessagesList(_history, responseMessageId),
 						_history,
 						responseMessageId,
-						_chatId
+						_chatId,
+						metadata
 					);
 
 					if (chatEventEmitter) clearInterval(chatEventEmitter);
@@ -1827,7 +1830,7 @@
 		return features;
 	};
 
-	const sendMessageSocket = async (model, _messages, _history, responseMessageId, _chatId) => {
+	const sendMessageSocket = async (model, _messages, _history, responseMessageId, _chatId, metadata = {}) => {
 		const responseMessage = _history.messages[responseMessageId];
 		const userMessage = _history.messages[responseMessage.parentId];
 
@@ -1967,6 +1970,8 @@
 				session_id: $socket?.id,
 				chat_id: $chatId,
 				id: responseMessageId,
+				...metadata,
+				call: $showCallOverlay,
 
 				background_tasks: {
 					...(!$temporaryChatEnabled &&
@@ -2555,8 +2560,7 @@
 										clearDraft();
 										if (e.detail || files.length > 0) {
 											await tick();
-
-											submitPrompt(e.detail.replaceAll('\n\n', '\n'));
+											dispatch('submit', e.detail.replaceAll('\n\n', '\n'));
 										}
 									}}
 								/>
