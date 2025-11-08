@@ -127,8 +127,8 @@
 	};
 
 	$: {
-		console.log('[DEBUG EditGroupModal] Reactive statement: show =', show);
-		if (show) {
+		console.log('[DEBUG EditGroupModal] Reactive statement: show =', show, ', group =', group);
+		if (show && group) {
 			init();
 		}
 	}
