@@ -23,6 +23,7 @@
 	import { PaneGroup, Pane, PaneResizer } from 'paneforge';
 
 	import { compressImage, copyToClipboard, splitStream, convertHeicToJpeg } from '$lib/utils';
+	import { ReasoningStripper } from '$lib/utils/stream';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { uploadFile } from '$lib/apis/files';
 	import { chatCompletion, generateOpenAIChatCompletion } from '$lib/apis/openai';
@@ -752,6 +753,8 @@ Provide the enhanced notes in markdown format. Use markdown syntax for headings,
 				.pipeThrough(splitStream('\n'))
 				.getReader();
 
+			const stripper = new ReasoningStripper();
+
 			while (true) {
 				const { value, done } = await reader.read();
 				if (done || stopResponseFlag) {
@@ -779,14 +782,17 @@ Provide the enhanced notes in markdown format. Use markdown syntax for headings,
 								if (data.choices && data.choices.length > 0) {
 									const choice = data.choices[0];
 									if (choice.delta && choice.delta.content) {
-										enhancedContent.md += choice.delta.content;
-										enhancedContent.html = marked.parse(enhancedContent.md);
+										const processedContent = stripper.processChunk(choice.delta.content);
+										if (processedContent) {
+											enhancedContent.md += processedContent;
+											enhancedContent.html = marked.parse(enhancedContent.md);
 
-										note.data.content.md = enhancedContent.md;
-										note.data.content.html = enhancedContent.html;
-										note.data.content.json = null;
+											note.data.content.md = enhancedContent.md;
+											note.data.content.html = enhancedContent.html;
+											note.data.content.json = null;
 
-										scrollToBottom();
+											scrollToBottom();
+										}
 									}
 								}
 							}

@@ -46,6 +46,7 @@
 	import { chatCompletion } from '$lib/apis/openai';
 
 	import { splitStream } from '$lib/utils';
+	import { ReasoningStripper } from '$lib/utils/stream';
 
 	import Messages from '$lib/components/notes/NoteEditor/Chat/Messages.svelte';
 	import MessageInput from '$lib/components/channel/MessageInput.svelte';
@@ -206,6 +207,8 @@ Based on the user's instruction, update and enhance the existing notes or select
 				.pipeThrough(splitStream('\n'))
 				.getReader();
 
+			const stripper = new ReasoningStripper();
+
 			while (true) {
 				const { value, done } = await reader.read();
 				if (done || stopResponseFlag) {
@@ -259,16 +262,19 @@ Based on the user's instruction, update and enhance the existing notes or select
 										editing = true;
 										streaming = true;
 
-										enhancedContent.md += deltaContent;
-										enhancedContent.html = marked.parse(enhancedContent.md);
+										const processedContent = stripper.processChunk(deltaContent);
+										if (processedContent) {
+											enhancedContent.md += processedContent;
+											enhancedContent.html = marked.parse(enhancedContent.md);
 
-										if (!selectedContent || !selectedContent?.text) {
-											note.data.content.md = enhancedContent.md;
-											note.data.content.html = enhancedContent.html;
-											note.data.content.json = null;
+											if (!selectedContent || !selectedContent?.text) {
+												note.data.content.md = enhancedContent.md;
+												note.data.content.html = enhancedContent.html;
+												note.data.content.json = null;
+											}
+
+											scrollToBottomHandler();
 										}
-
-										scrollToBottomHandler();
 
 										responseMessage.content = `<status title="${$i18n.t('Editing')}" done="false" />`;
 										messages = messages;
