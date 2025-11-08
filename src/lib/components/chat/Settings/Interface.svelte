@@ -18,6 +18,11 @@
 	// Allow passing custom settings object (for admin defaults modal)
 	export let initialSettings: any = null;
 
+	// Debug: direct subscription to settings store to see if it's updating
+	settings.subscribe((value) => {
+		console.log('[DEBUG Interface.svelte] Direct store subscription fired with:', value);
+	});
+
 	// Debug: track when $settings changes
 	$: console.log('[DEBUG Interface.svelte] $settings changed:', $settings);
 	$: console.log('[DEBUG Interface.svelte] initialSettings:', initialSettings);
