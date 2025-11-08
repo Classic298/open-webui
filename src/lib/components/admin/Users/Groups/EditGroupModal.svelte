@@ -100,7 +100,16 @@
 		if (group) {
 			name = group.name;
 			description = group.description;
-			permissions = group?.permissions ?? {};
+
+			// Load permissions and fill in any missing properties (including new ui.interface_settings)
+			const loadedPermissions = group?.permissions ?? {};
+			permissions = {
+				workspace: { ...permissions.workspace, ...loadedPermissions.workspace },
+				sharing: { ...permissions.sharing, ...loadedPermissions.sharing },
+				chat: { ...permissions.chat, ...loadedPermissions.chat },
+				features: { ...permissions.features, ...loadedPermissions.features },
+				ui: { ...permissions.ui, ...loadedPermissions.ui }
+			};
 
 			userIds = group?.user_ids ?? [];
 		}
