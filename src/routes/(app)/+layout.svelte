@@ -91,6 +91,7 @@
 		let adminDefaults = {};
 		try {
 			adminDefaults = await getInterfaceDefaults(localStorage.token);
+			console.log('[DEBUG] Admin defaults loaded:', adminDefaults);
 		} catch (error) {
 			console.log('No admin interface defaults configured or error loading them:', error);
 		}
@@ -101,14 +102,20 @@
 			return null;
 		});
 
+		console.log('[DEBUG] User settings from API:', userSettings);
+
 		if (!userSettings) {
 			try {
 				userSettings = JSON.parse(localStorage.getItem('settings') ?? '{}');
+				console.log('[DEBUG] User settings from localStorage:', userSettings);
 			} catch (e: unknown) {
 				console.error('Failed to parse settings from localStorage', e);
 				userSettings = {};
 			}
 		}
+
+		console.log('[DEBUG] userSettings?.ui:', userSettings?.ui);
+		console.log('[DEBUG] Object.keys(adminDefaults).length:', Object.keys(adminDefaults).length);
 
 		// Implement fallback logic: User custom → Admin default → System default
 		// Merge admin defaults with user settings, where user settings take precedence
@@ -117,7 +124,11 @@
 				...adminDefaults,
 				...(userSettings?.ui || {})
 			};
+			console.log('[DEBUG] Merged settings to set:', mergedSettings);
 			settings.set(mergedSettings);
+			console.log('[DEBUG] Settings store has been set');
+		} else {
+			console.log('[DEBUG] Skipped setting settings store - condition failed');
 		}
 
 		if (cb) {
