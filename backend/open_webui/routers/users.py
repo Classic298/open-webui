@@ -219,9 +219,8 @@ async def get_default_user_permissions(request: Request, user=Depends(get_admin_
 async def update_default_user_permissions(
     request: Request, form_data: UserPermissions, user=Depends(get_admin_user)
 ):
-    request.app.state.config.USER_PERMISSIONS.value = form_data.model_dump()
-    request.app.state.config.USER_PERMISSIONS.save()
-    return request.app.state.config.USER_PERMISSIONS.value
+    request.app.state.config.USER_PERMISSIONS = form_data.model_dump()
+    return request.app.state.config.USER_PERMISSIONS
 
 
 ############################
