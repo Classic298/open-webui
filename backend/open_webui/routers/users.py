@@ -190,11 +190,16 @@ class FeaturesPermissions(BaseModel):
     notes: bool = True
 
 
+class UIPermissions(BaseModel):
+    interface_settings: bool = True
+
+
 class UserPermissions(BaseModel):
     workspace: WorkspacePermissions
     sharing: SharingPermissions
     chat: ChatPermissions
     features: FeaturesPermissions
+    ui: UIPermissions
 
 
 @router.get("/default/permissions", response_model=UserPermissions)
@@ -211,6 +216,9 @@ async def get_default_user_permissions(request: Request, user=Depends(get_admin_
         ),
         "features": FeaturesPermissions(
             **request.app.state.config.USER_PERMISSIONS.get("features", {})
+        ),
+        "ui": UIPermissions(
+            **request.app.state.config.USER_PERMISSIONS.get("ui", {})
         ),
     }
 
