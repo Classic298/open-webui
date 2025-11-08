@@ -18,18 +18,8 @@
 	// Allow passing custom settings object (for admin defaults modal)
 	export let initialSettings: any = null;
 
-	// Debug: direct subscription to settings store to see if it's updating
-	settings.subscribe((value) => {
-		console.log('[DEBUG Interface.svelte] Direct store subscription fired with:', value);
-	});
-
-	// Debug: track when $settings changes
-	$: console.log('[DEBUG Interface.svelte] $settings changed:', $settings);
-	$: console.log('[DEBUG Interface.svelte] initialSettings:', initialSettings);
-
 	// Use either provided initialSettings or global $settings store
 	$: settingsSource = initialSettings ?? $settings;
-	$: console.log('[DEBUG Interface.svelte] settingsSource calculated:', settingsSource);
 
 	let backgroundImageUrl = null;
 	let inputFiles = null;
@@ -196,7 +186,6 @@
 
 	// Load settings reactively when settingsSource changes
 	$: {
-		console.log('[DEBUG Interface.svelte] settingsSource changed:', settingsSource);
 		titleAutoGenerate = settingsSource?.title?.auto ?? true;
 		autoTags = settingsSource?.autoTags ?? true;
 		autoFollowUps = settingsSource?.autoFollowUps ?? true;
