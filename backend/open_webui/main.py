@@ -430,6 +430,7 @@ from open_webui.config import (
     TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE,
     QUERY_GENERATION_PROMPT_TEMPLATE,
     AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE,
+    SYSTEM_PROMPT_CALLING_TEMPLATE,
     AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH,
     AppConfig,
     reset_config,
@@ -1199,6 +1200,7 @@ app.state.config.FOLLOW_UP_GENERATION_PROMPT_TEMPLATE = (
 app.state.config.TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE = (
     TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE
 )
+app.state.config.SYSTEM_PROMPT_CALLING_TEMPLATE = SYSTEM_PROMPT_CALLING_TEMPLATE
 app.state.config.QUERY_GENERATION_PROMPT_TEMPLATE = QUERY_GENERATION_PROMPT_TEMPLATE
 app.state.config.AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE = (
     AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE
@@ -1533,6 +1535,7 @@ async def chat_completion(
             "variables": form_data.get("variables", {}),
             "model": model,
             "direct": model_item.get("direct", False),
+            "call": form_data.pop("call", False),
             "params": {
                 "stream_delta_chunk_size": stream_delta_chunk_size,
                 "reasoning_tags": reasoning_tags,

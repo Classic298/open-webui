@@ -54,7 +54,10 @@ from open_webui.utils.filter import (
     get_sorted_filter_ids,
     process_filter_functions,
 )
-
+from open_webui.utils.misc import add_or_update_system_message
+from open_webui.config import (
+    DEFAULT_SYSTEM_PROMPT_CALLING,
+)
 from open_webui.env import SRC_LOG_LEVELS, GLOBAL_LOG_LEVEL, BYPASS_MODEL_ACCESS_CONTROL
 
 
@@ -206,6 +209,18 @@ async def generate_chat_completion(
                 check_model_access(user, model)
             except Exception as e:
                 raise e
+
+        # Add calling system prompt if call feature is enabled
+        if form_data.get("metadata", {}).get("call", False):
+            if request.app.state.config.SYSTEM_PROMPT_CALLING_TEMPLATE != "":
+                template = request.app.state.config.SYSTEM_PROMPT_CALLING_TEMPLATE
+            else:
+                template = DEFAULT_SYSTEM_PROMPT_CALLING
+
+            form_data["messages"] = add_or_update_system_message(
+                template,
+                form_data["messages"],
+            )
 
         if model.get("owned_by") == "arena":
             model_ids = model.get("info", {}).get("meta", {}).get("model_ids")
