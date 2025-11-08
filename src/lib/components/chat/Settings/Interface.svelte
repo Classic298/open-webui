@@ -184,7 +184,8 @@
 		saveSettings({ webSearch: webSearch });
 	};
 
-	onMount(async () => {
+	// Load settings reactively when settingsSource changes
+	$: if (settingsSource !== undefined) {
 		titleAutoGenerate = settingsSource?.title?.auto ?? true;
 		autoTags = settingsSource?.autoTags ?? true;
 		autoFollowUps = settingsSource?.autoFollowUps ?? true;
@@ -257,7 +258,7 @@
 
 		backgroundImageUrl = settingsSource?.backgroundImageUrl ?? null;
 		webSearch = settingsSource?.webSearch ?? null;
-	});
+	}
 </script>
 
 <ManageFloatingActionButtonsModal
