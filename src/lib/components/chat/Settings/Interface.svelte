@@ -185,7 +185,8 @@
 	};
 
 	// Load settings reactively when settingsSource changes
-	$: if (settingsSource !== undefined) {
+	$: {
+		console.log('[DEBUG Interface.svelte] settingsSource changed:', settingsSource);
 		titleAutoGenerate = settingsSource?.title?.auto ?? true;
 		autoTags = settingsSource?.autoTags ?? true;
 		autoFollowUps = settingsSource?.autoFollowUps ?? true;
