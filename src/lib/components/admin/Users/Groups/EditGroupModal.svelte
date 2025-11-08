@@ -90,6 +90,9 @@
 			user_ids: userIds
 		};
 
+		console.log('[DEBUG EditGroupModal] Submitting group with permissions:', permissions);
+		console.log('[DEBUG EditGroupModal] permissions.ui:', permissions.ui);
+
 		await onSubmit(group);
 
 		loading = false;
@@ -103,6 +106,9 @@
 
 			// Load permissions and fill in any missing properties (including new ui.interface_settings)
 			const loadedPermissions = group?.permissions ?? {};
+			console.log('[DEBUG EditGroupModal init] group.permissions from database:', group.permissions);
+			console.log('[DEBUG EditGroupModal init] loadedPermissions.ui:', loadedPermissions.ui);
+
 			permissions = {
 				workspace: { ...permissions.workspace, ...loadedPermissions.workspace },
 				sharing: { ...permissions.sharing, ...loadedPermissions.sharing },
@@ -110,6 +116,8 @@
 				features: { ...permissions.features, ...loadedPermissions.features },
 				ui: { ...permissions.ui, ...loadedPermissions.ui }
 			};
+
+			console.log('[DEBUG EditGroupModal init] Final permissions.ui:', permissions.ui);
 
 			userIds = group?.user_ids ?? [];
 		}
