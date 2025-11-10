@@ -479,6 +479,7 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
         "RAG_EXTERNAL_RERANKER_API_KEY": request.app.state.config.RAG_EXTERNAL_RERANKER_API_KEY,
         # Chunking settings
         "TEXT_SPLITTER": request.app.state.config.TEXT_SPLITTER,
+        "ENABLE_MARKDOWN_HEADER_SPLITTING": request.app.state.config.ENABLE_MARKDOWN_HEADER_SPLITTING,
         "CHUNK_SIZE": request.app.state.config.CHUNK_SIZE,
         "CHUNK_OVERLAP": request.app.state.config.CHUNK_OVERLAP,
         # File upload settings
@@ -668,6 +669,7 @@ class ConfigForm(BaseModel):
 
     # Chunking settings
     TEXT_SPLITTER: Optional[str] = None
+    ENABLE_MARKDOWN_HEADER_SPLITTING: Optional[bool] = None
     CHUNK_SIZE: Optional[int] = None
     CHUNK_OVERLAP: Optional[int] = None
 
@@ -1002,6 +1004,11 @@ async def update_rag_config(
         if form_data.TEXT_SPLITTER is not None
         else request.app.state.config.TEXT_SPLITTER
     )
+    request.app.state.config.ENABLE_MARKDOWN_HEADER_SPLITTING = (
+        form_data.ENABLE_MARKDOWN_HEADER_SPLITTING
+        if form_data.ENABLE_MARKDOWN_HEADER_SPLITTING is not None
+        else request.app.state.config.ENABLE_MARKDOWN_HEADER_SPLITTING
+    )
     request.app.state.config.CHUNK_SIZE = (
         form_data.CHUNK_SIZE
         if form_data.CHUNK_SIZE is not None
@@ -1204,6 +1211,7 @@ async def update_rag_config(
         "RAG_EXTERNAL_RERANKER_API_KEY": request.app.state.config.RAG_EXTERNAL_RERANKER_API_KEY,
         # Chunking settings
         "TEXT_SPLITTER": request.app.state.config.TEXT_SPLITTER,
+        "ENABLE_MARKDOWN_HEADER_SPLITTING": request.app.state.config.ENABLE_MARKDOWN_HEADER_SPLITTING,
         "CHUNK_SIZE": request.app.state.config.CHUNK_SIZE,
         "CHUNK_OVERLAP": request.app.state.config.CHUNK_OVERLAP,
         # File upload settings
