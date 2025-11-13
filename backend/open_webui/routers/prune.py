@@ -1711,54 +1711,45 @@ async def prune_data(form_data: PruneDataForm, user=Depends(get_admin_user)):
                 warnings.append(f"Vector cleanup warning: {vector_error}")
                 log.warning(f"Vector cleanup completed with errors: {vector_error}")
 
-        # Use modular vector database cleanup
-        warnings = []
-        deleted_vector_count, vector_error = vector_cleaner.cleanup_orphaned_collections(
-            final_active_file_ids, final_active_kb_ids
-        )
-        if vector_error:
-            warnings.append(f"Vector cleanup warning: {vector_error}")
-            log.warning(f"Vector cleanup completed with errors: {vector_error}")
+            # Stage 5: Audio cache cleanup
+            log.info("Cleaning audio cache")
+            cleanup_audio_cache(form_data.audio_cache_max_age_days)
 
             # Stage 6: Database optimization (optional)
             if form_data.run_vacuum:
                 log.info("Optimizing database with VACUUM (this may take a while and lock the database)")
 
-        # Stage 6: Database optimization (optional)
-        if form_data.run_vacuum:
-            log.info("Optimizing database with VACUUM (this may take a while and lock the database)")
-
-            try:
-                with get_db() as db:
-                    db.execute(text("VACUUM"))
-                    log.info("Vacuumed main database")
-            except Exception as e:
-                log.error(f"Failed to vacuum main database: {e}")
-
-            # Vector database-specific optimization
-            if isinstance(vector_cleaner, ChromaDatabaseCleaner):
                 try:
-                    with sqlite3.connect(str(vector_cleaner.chroma_db_path)) as conn:
-                        conn.execute("VACUUM")
-                        log.info("Vacuumed ChromaDB database")
+                    with get_db() as db:
+                        db.execute(text("VACUUM"))
+                        log.info("Vacuumed main database")
                 except Exception as e:
-                    log.error(f"Failed to vacuum ChromaDB database: {e}")
-            elif (
-                isinstance(vector_cleaner, PGVectorDatabaseCleaner)
-                and vector_cleaner.session
-            ):
-                try:
-                    vector_cleaner.session.execute(text("VACUUM ANALYZE"))
-                    vector_cleaner.session.commit()
-                    log.info("Executed VACUUM ANALYZE on PostgreSQL database")
-                except Exception as e:
-                    log.error(f"Failed to vacuum PostgreSQL database: {e}")
-        else:
-            log.info("Skipping VACUUM optimization (not enabled)")
+                    log.error(f"Failed to vacuum main database: {e}")
 
-        # Log any warnings collected during pruning
-        if warnings:
-            log.warning(f"Data pruning completed with warnings: {'; '.join(warnings)}")
+                # Vector database-specific optimization
+                if isinstance(vector_cleaner, ChromaDatabaseCleaner):
+                    try:
+                        with sqlite3.connect(str(vector_cleaner.chroma_db_path)) as conn:
+                            conn.execute("VACUUM")
+                            log.info("Vacuumed ChromaDB database")
+                    except Exception as e:
+                        log.error(f"Failed to vacuum ChromaDB database: {e}")
+                elif (
+                    isinstance(vector_cleaner, PGVectorDatabaseCleaner)
+                    and vector_cleaner.session
+                ):
+                    try:
+                        vector_cleaner.session.execute(text("VACUUM ANALYZE"))
+                        vector_cleaner.session.commit()
+                        log.info("Executed VACUUM ANALYZE on PostgreSQL database")
+                    except Exception as e:
+                        log.error(f"Failed to vacuum PostgreSQL database: {e}")
+            else:
+                log.info("Skipping VACUUM optimization (not enabled)")
+
+            # Log any warnings collected during pruning
+            if warnings:
+                log.warning(f"Data pruning completed with warnings: {'; '.join(warnings)}")
 
             log.info("Data pruning completed successfully")
             return True
