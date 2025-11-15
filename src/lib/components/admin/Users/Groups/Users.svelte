@@ -9,6 +9,7 @@
 	dayjs.extend(localizedFormat);
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import Plus from '$lib/components/icons/Plus.svelte';
 	import { WEBUI_BASE_URL } from '$lib/constants';
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import Badge from '$lib/components/common/Badge.svelte';
@@ -93,6 +94,7 @@
 
 			return direction === 'asc' ? compareResult : -compareResult;
 		});
+
 </script>
 
 <div>
