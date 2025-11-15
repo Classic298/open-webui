@@ -60,13 +60,11 @@ def validate_url(url: Union[str, Sequence[str]]):
             log.warning(f"Blocked non-HTTP(S) protocol: {parsed_url.scheme} in URL: {url}")
             raise ValueError(ERROR_MESSAGES.INVALID_URL)
 
-        # Blocklist check (includes cloud metadata endpoints)
-        # ALWAYS enforced regardless of ENABLE_RAG_LOCAL_WEB_FETCH setting
+        # Blocklist check
         if is_blocked_url(url):
             log.warning(f"URL blocked by blocklist: {url}")
             raise ValueError(ERROR_MESSAGES.INVALID_URL)
 
-        # Private IP check (only if ENABLE_RAG_LOCAL_WEB_FETCH is disabled)
         if not ENABLE_RAG_LOCAL_WEB_FETCH:
             # Local web fetch is disabled, filter out any URLs that resolve to private IP addresses
             # Get IPv4 and IPv6 addresses
@@ -110,19 +108,7 @@ def resolve_hostname(hostname):
 
 
 def is_blocked_url(url: str) -> bool:
-    """
-    Check if URL is in blocklist.
-
-    Performs two checks:
-    1. Direct hostname check against blocklist
-    2. DNS resolution check to prevent DNS rebinding attacks
-
-    Args:
-        url: URL to check
-
-    Returns:
-        bool: True if URL is blocked, False otherwise
-    """
+    # Check if URL is in blocklist. Checks hostname against blocklist and DNS resolution check to prevent DNS rebinding attacks
     if not WEB_FETCH_BLOCKLIST:
         return False
 
@@ -132,12 +118,11 @@ def is_blocked_url(url: str) -> bool:
     if not hostname:
         return False
 
-    # Direct check - catches direct IPs and known domains
+    # Direct check
     if hostname in WEB_FETCH_BLOCKLIST:
         return True
 
     # DNS resolution check - catches DNS rebinding attacks
-    # e.g., evil.com -> 169.254.169.254
     try:
         ipv4_addresses, ipv6_addresses = resolve_hostname(hostname)
         for ip in ipv4_addresses + ipv6_addresses:
