@@ -262,8 +262,8 @@
 									<img
 										class="rounded-full w-6 h-6 object-cover mr-2.5 flex-shrink-0"
 										src={user?.profile_image_url?.startsWith(WEBUI_BASE_URL) ||
-										user?.profile_image_url?.startsWith('https://www.gravatar.com/avatar/') ||
-										user?.profile_image_url?.startsWith('data:')
+										user.profile_image_url.startsWith('https://www.gravatar.com/avatar/') ||
+										user.profile_image_url.startsWith('data:')
 											? user.profile_image_url
 											: `${WEBUI_BASE_URL}/user.png`}
 										alt="user"
@@ -274,10 +274,10 @@
 							</td>
 							<td class="px-3 py-1">{user.email}</td>
 							<td class="px-3 py-1">
-								{user.last_active_at ? dayjs(user.last_active_at * 1000).fromNow() : 'Never'}
+								{dayjs(user.last_active_at * 1000).fromNow()}
 							</td>
 							<td class="px-3 py-1">
-								{user.created_at ? dayjs(user.created_at * 1000).format('LL') : '-'}
+								{dayjs(user.created_at * 1000).format('LL')}
 							</td>
 						</tr>
 					{/each}
