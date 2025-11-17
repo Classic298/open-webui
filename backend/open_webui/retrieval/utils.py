@@ -89,15 +89,16 @@ class VectorSearchRetriever(BaseRetriever):
     embedding_function: Any
     top_k: int
 
-    def _get_relevant_documents(
+    async def _aget_relevant_documents(
         self,
         query: str,
         *,
         run_manager: CallbackManagerForRetrieverRun,
     ) -> list[Document]:
+        embedding = await self.embedding_function(query, RAG_EMBEDDING_QUERY_PREFIX)
         result = VECTOR_DB_CLIENT.search(
             collection_name=self.collection_name,
-            vectors=[self.embedding_function(query, RAG_EMBEDDING_QUERY_PREFIX)],
+            vectors=[embedding],
             limit=self.top_k,
         )
 
@@ -150,7 +151,7 @@ def get_doc(collection_name: str, user: UserModel = None):
         raise e
 
 
-def query_doc_with_hybrid_search(
+async def query_doc_with_hybrid_search(
     collection_name: str,
     collection_result: GetResult,
     query: str,
@@ -219,7 +220,7 @@ def query_doc_with_hybrid_search(
             base_compressor=compressor, base_retriever=ensemble_retriever
         )
 
-        result = compression_retriever.invoke(query)
+        result = await compression_retriever.ainvoke(query)
 
         distances = [d.metadata.get("score") for d in result]
         documents = [d.page_content for d in result]
@@ -338,7 +339,7 @@ def get_all_items_from_collections(collection_names: list[str]) -> dict:
     return merge_get_results(results)
 
 
-def query_collection(
+async def query_collection(
     collection_names: list[str],
     queries: list[str],
     embedding_function,
@@ -363,7 +364,7 @@ def query_collection(
             return None, e
 
     # Generate all query embeddings (in one call)
-    query_embeddings = embedding_function(queries, prefix=RAG_EMBEDDING_QUERY_PREFIX)
+    query_embeddings = await embedding_function(queries, prefix=RAG_EMBEDDING_QUERY_PREFIX)
     log.debug(
         f"query_collection: processing {len(queries)} queries across {len(collection_names)} collections"
     )
@@ -390,7 +391,7 @@ def query_collection(
     return merge_and_sort_query_results(results, k=k)
 
 
-def query_collection_with_hybrid_search(
+async def query_collection_with_hybrid_search(
     collection_names: list[str],
     queries: list[str],
     embedding_function,
@@ -421,9 +422,9 @@ def query_collection_with_hybrid_search(
         f"Starting hybrid search for {len(queries)} queries in {len(collection_names)} collections..."
     )
 
-    def process_query(collection_name, query):
+    async def process_query(collection_name, query):
         try:
-            result = query_doc_with_hybrid_search(
+            result = await query_doc_with_hybrid_search(
                 collection_name=collection_name,
                 collection_result=collection_results[collection_name],
                 query=query,
@@ -448,9 +449,8 @@ def query_collection_with_hybrid_search(
         for q in queries
     ]
 
-    with ThreadPoolExecutor() as executor:
-        future_results = [executor.submit(process_query, cn, q) for cn, q in tasks]
-        task_results = [future.result() for future in future_results]
+    # Run all queries in parallel using asyncio.gather
+    task_results = await asyncio.gather(*[process_query(cn, q) for cn, q in tasks])
 
     for result, err in task_results:
         if err is not None:
@@ -510,14 +510,12 @@ def get_embedding_function(
                 user=user,
             )
 
-        # Return synchronous wrapper that runs async function with parallel batch processing
-        def embedding_wrapper(query, prefix=None, user=None):
+        # Return async function for parallel batch processing (FastAPI-compatible)
+        async def embedding_wrapper(query, prefix=None, user=None):
             if isinstance(query, list):
-                return asyncio.run(
-                    generate_multiple_async(query, prefix, user, func_async, embedding_batch_size)
-                )
+                return await generate_multiple_async(query, prefix, user, func_async, embedding_batch_size)
             else:
-                result = asyncio.run(func_async([query], prefix=prefix, user=user))
+                result = await func_async([query], prefix=prefix, user=user)
                 return result[0] if result else None
 
         return embedding_wrapper
@@ -1233,7 +1231,7 @@ class RerankCompressor(BaseDocumentCompressor):
         extra = "forbid"
         arbitrary_types_allowed = True
 
-    def compress_documents(
+    async def acompress_documents(
         self,
         documents: Sequence[Document],
         query: str,
@@ -1247,8 +1245,8 @@ class RerankCompressor(BaseDocumentCompressor):
         else:
             from sentence_transformers import util
 
-            query_embedding = self.embedding_function(query, RAG_EMBEDDING_QUERY_PREFIX)
-            document_embedding = self.embedding_function(
+            query_embedding = await self.embedding_function(query, RAG_EMBEDDING_QUERY_PREFIX)
+            document_embedding = await self.embedding_function(
                 [doc.page_content for doc in documents], RAG_EMBEDDING_CONTENT_PREFIX
             )
             scores = util.cos_sim(query_embedding, document_embedding)[0]
