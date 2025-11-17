@@ -1287,7 +1287,7 @@ async def update_rag_config(
 ####################################
 
 
-async def save_docs_to_vector_db(
+def save_docs_to_vector_db(
     request: Request,
     docs,
     collection_name,
@@ -1460,11 +1460,12 @@ async def save_docs_to_vector_db(
             ),
         )
 
-        embeddings = await embedding_function(
+        # Run async embedding in sync context
+        embeddings = asyncio.run(embedding_function(
             list(map(lambda x: x.replace("\n", " "), texts)),
             prefix=RAG_EMBEDDING_CONTENT_PREFIX,
             user=user,
-        )
+        ))
         log.info(f"embeddings generated {len(embeddings)} for {len(texts)} items")
 
         items = [
@@ -1497,7 +1498,7 @@ class ProcessFileForm(BaseModel):
 
 
 @router.post("/process/file")
-async def process_file(
+def process_file(
     request: Request,
     form_data: ProcessFileForm,
     user=Depends(get_verified_user),
@@ -1671,7 +1672,7 @@ async def process_file(
                 }
             else:
                 try:
-                    result = await save_docs_to_vector_db(
+                    result = save_docs_to_vector_db(
                         request,
                         docs=docs,
                         collection_name=collection_name,
@@ -1740,7 +1741,7 @@ class ProcessTextForm(BaseModel):
 
 
 @router.post("/process/text")
-async def process_text(
+def process_text(
     request: Request,
     form_data: ProcessTextForm,
     user=Depends(get_verified_user),
@@ -1758,7 +1759,7 @@ async def process_text(
     text_content = form_data.content
     log.debug(f"text_content: {text_content}")
 
-    result = await save_docs_to_vector_db(request, docs, collection_name, user=user)
+    result = save_docs_to_vector_db(request, docs, collection_name, user=user)
     if result:
         return {
             "status": True,
@@ -1774,7 +1775,7 @@ async def process_text(
 
 @router.post("/process/youtube")
 @router.post("/process/web")
-async def process_web(
+def process_web(
     request: Request, form_data: ProcessUrlForm, user=Depends(get_verified_user)
 ):
     try:
@@ -1786,7 +1787,7 @@ async def process_web(
         log.debug(f"text_content: {content}")
 
         if not request.app.state.config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL:
-            await save_docs_to_vector_db(
+            save_docs_to_vector_db(
                 request,
                 docs,
                 collection_name,
@@ -2466,7 +2467,7 @@ class BatchProcessFilesResponse(BaseModel):
 
 
 @router.post("/process/files/batch")
-async def process_files_batch(
+def process_files_batch(
     request: Request,
     form_data: BatchProcessFilesForm,
     user=Depends(get_verified_user),
@@ -2521,7 +2522,7 @@ async def process_files_batch(
     # Save all documents in one batch
     if all_docs:
         try:
-            await save_docs_to_vector_db(
+            save_docs_to_vector_db(
                 request=request,
                 docs=all_docs,
                 collection_name=collection_name,

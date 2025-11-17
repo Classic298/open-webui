@@ -223,7 +223,7 @@ async def reindex_knowledge_files(request: Request, user=Depends(get_verified_us
             failed_files = []
             for file in files:
                 try:
-                    await process_file(
+                    process_file(
                         request,
                         ProcessFileForm(
                             file_id=file.id, collection_name=knowledge_base.id
@@ -357,7 +357,7 @@ class KnowledgeFileIdForm(BaseModel):
 
 
 @router.post("/{id}/file/add", response_model=Optional[KnowledgeFilesResponse])
-async def add_file_to_knowledge_by_id(
+def add_file_to_knowledge_by_id(
     request: Request,
     id: str,
     form_data: KnowledgeFileIdForm,
@@ -395,7 +395,7 @@ async def add_file_to_knowledge_by_id(
 
     # Add content to the vector database
     try:
-        await process_file(
+        process_file(
             request,
             ProcessFileForm(file_id=form_data.file_id, collection_name=id),
             user=user,
@@ -442,7 +442,7 @@ async def add_file_to_knowledge_by_id(
 
 
 @router.post("/{id}/file/update", response_model=Optional[KnowledgeFilesResponse])
-async def update_file_from_knowledge_by_id(
+def update_file_from_knowledge_by_id(
     request: Request,
     id: str,
     form_data: KnowledgeFileIdForm,
@@ -480,7 +480,7 @@ async def update_file_from_knowledge_by_id(
 
     # Add content to the vector database
     try:
-        await process_file(
+        process_file(
             request,
             ProcessFileForm(file_id=form_data.file_id, collection_name=id),
             user=user,
@@ -706,7 +706,7 @@ async def reset_knowledge_by_id(id: str, user=Depends(get_verified_user)):
 
 
 @router.post("/{id}/files/batch/add", response_model=Optional[KnowledgeFilesResponse])
-async def add_files_to_knowledge_batch(
+def add_files_to_knowledge_batch(
     request: Request,
     id: str,
     form_data: list[KnowledgeFileIdForm],
@@ -746,7 +746,7 @@ async def add_files_to_knowledge_batch(
 
     # Process files
     try:
-        result = await process_files_batch(
+        result = process_files_batch(
             request=request,
             form_data=BatchProcessFilesForm(files=files, collection_name=id),
             user=user,
