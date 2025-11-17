@@ -38,6 +38,7 @@ from open_webui.config import (
     TAVILY_EXTRACT_DEPTH,
     EXTERNAL_WEB_LOADER_URL,
     EXTERNAL_WEB_LOADER_API_KEY,
+    WEB_FETCH_FILTER_LIST,
 )
 from open_webui.env import SRC_LOG_LEVELS
 
@@ -48,11 +49,24 @@ log.setLevel(SRC_LOG_LEVELS["RAG"])
 
 def validate_url(url: Union[str, Sequence[str]]):
     if isinstance(url, str):
+        # Basic URL format validation
         if isinstance(validators.url(url), validators.ValidationError):
             raise ValueError(ERROR_MESSAGES.INVALID_URL)
+
+        parsed_url = urllib.parse.urlparse(url)
+
+        # Protocol validation - only allow http/https
+        if parsed_url.scheme not in ["http", "https"]:
+            log.warning(f"Blocked non-HTTP(S) protocol: {parsed_url.scheme} in URL: {url}")
+            raise ValueError(ERROR_MESSAGES.INVALID_URL)
+
+        # Blocklist check
+        if is_blocked_url(url):
+            log.warning(f"URL blocked by filter list: {url}")
+            raise ValueError(ERROR_MESSAGES.INVALID_URL)
+
         if not ENABLE_RAG_LOCAL_WEB_FETCH:
             # Local web fetch is disabled, filter out any URLs that resolve to private IP addresses
-            parsed_url = urllib.parse.urlparse(url)
             # Get IPv4 and IPv6 addresses
             ipv4_addresses, ipv6_addresses = resolve_hostname(parsed_url.hostname)
             # Check if any of the resolved addresses are private
@@ -91,6 +105,65 @@ def resolve_hostname(hostname):
     ipv6_addresses = [info[4][0] for info in addr_info if info[0] == socket.AF_INET6]
 
     return ipv4_addresses, ipv6_addresses
+
+
+def is_blocked_url(url: str) -> bool:
+    """Check if URL should be blocked based on the filter list.
+
+    Filter list supports both allowlist and blocklist:
+    - Items with "!" prefix are blocked
+    - Items without "!" prefix are explicitly allowed
+
+    Logic:
+    1. If allowlist is non-empty, hostname/IP must match one of the allowed entries
+    2. Blocklist entries always block matching hostnames/IPs
+    3. Checks both hostname and resolved IPs to prevent DNS rebinding attacks
+    """
+    if not WEB_FETCH_FILTER_LIST:
+        return False
+
+    parsed = urllib.parse.urlparse(url)
+    hostname = parsed.hostname
+
+    if not hostname:
+        return False
+
+    # Separate allow and block lists based on "!" prefix
+    allow_list = [entry for entry in WEB_FETCH_FILTER_LIST if not entry.startswith("!")]
+    block_list = [entry[1:] for entry in WEB_FETCH_FILTER_LIST if entry.startswith("!")]
+
+    # Resolve hostname to IPs for comprehensive checking
+    resolved_ips = []
+    try:
+        ipv4_addresses, ipv6_addresses = resolve_hostname(hostname)
+        resolved_ips = ipv4_addresses + ipv6_addresses
+    except Exception:
+        # If DNS resolution fails, we'll just check the hostname
+        pass
+
+    # Check all identifiers (hostname + resolved IPs)
+    identifiers = [hostname] + resolved_ips
+
+    # If allow list is non-empty, require at least one identifier to match
+    if allow_list:
+        allowed = any(
+            identifier == allowed_entry or identifier.endswith("." + allowed_entry)
+            for identifier in identifiers
+            for allowed_entry in allow_list
+        )
+        if not allowed:
+            return True
+
+    # Block list always blocks matching identifiers
+    blocked = any(
+        identifier == blocked_entry or identifier.endswith("." + blocked_entry)
+        for identifier in identifiers
+        for blocked_entry in block_list
+    )
+    if blocked:
+        return True
+
+    return False
 
 
 def extract_metadata(soup, url):
