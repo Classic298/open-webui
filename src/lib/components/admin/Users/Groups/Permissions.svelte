@@ -11,7 +11,13 @@
 			models: false,
 			knowledge: false,
 			prompts: false,
-			tools: false
+			tools: false,
+			models_import: false,
+			models_export: false,
+			prompts_import: false,
+			prompts_export: false,
+			tools_import: false,
+			tools_export: false
 		},
 		sharing: {
 			public_models: false,
