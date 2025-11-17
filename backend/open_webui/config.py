@@ -2753,18 +2753,14 @@ ENABLE_RAG_LOCAL_WEB_FETCH = (
     os.getenv("ENABLE_RAG_LOCAL_WEB_FETCH", "False").lower() == "true"
 )
 
-# Default filter list - Common Cloud Metadata URIs (prefixed with ! for blocking)
 DEFAULT_WEB_FETCH_FILTER_LIST = [
     "!169.254.169.254",
     "!fd00:ec2::254",
     "!metadata.google.internal",
     "!metadata.azure.com",
-    "!100.100.100.200",  # Alibaba Cloud
+    "!100.100.100.200",
 ]
 
-# Parse WEB_FETCH_FILTER_LIST from environment variable
-# Items with "!" prefix are blocked, items without are explicitly allowed
-# Comma-separated list supporting both allowlist and blocklist
 _web_fetch_filter_env = os.getenv("WEB_FETCH_FILTER_LIST", "")
 _web_fetch_filter_custom = (
     [item.strip() for item in _web_fetch_filter_env.split(",") if item.strip()]

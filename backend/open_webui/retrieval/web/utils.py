@@ -108,17 +108,6 @@ def resolve_hostname(hostname):
 
 
 def is_blocked_url(url: str) -> bool:
-    """Check if URL should be blocked based on the filter list.
-
-    Filter list supports both allowlist and blocklist:
-    - Items with "!" prefix are blocked
-    - Items without "!" prefix are explicitly allowed
-
-    Logic:
-    1. If allowlist is non-empty, hostname/IP must match one of the allowed entries
-    2. Blocklist entries always block matching hostnames/IPs
-    3. Checks both hostname and resolved IPs to prevent DNS rebinding attacks
-    """
     if not WEB_FETCH_FILTER_LIST:
         return False
 
