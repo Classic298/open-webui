@@ -25,7 +25,7 @@
 	import { createNewGroup, getGroups } from '$lib/apis/groups';
 	import {
 		getUserDefaultPermissions,
-		getAllUsers,
+		getUsers,
 		updateUserDefaultPermissions
 	} from '$lib/apis/users';
 
