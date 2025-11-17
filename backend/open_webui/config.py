@@ -1124,10 +1124,7 @@ ENABLE_LOGIN_FORM = PersistentConfig(
     os.environ.get("ENABLE_LOGIN_FORM", "True").lower() == "true",
 )
 
-ENABLE_PASSWORD_AUTH = (
-    os.environ.get("ENABLE_PASSWORD_AUTH", "True").lower()
-    == "true"
-)
+ENABLE_PASSWORD_AUTH = os.environ.get("ENABLE_PASSWORD_AUTH", "True").lower() == "true"
 
 DEFAULT_LOCALE = PersistentConfig(
     "DEFAULT_LOCALE",
@@ -1819,6 +1816,38 @@ Output:
 <text>{{PROMPT}}</text>  
 #### Output:
 """
+
+
+VOICE_MODE_PROMPT_TEMPLATE = PersistentConfig(
+    "VOICE_MODE_PROMPT_TEMPLATE",
+    "task.voice.prompt_template",
+    os.environ.get("VOICE_MODE_PROMPT_TEMPLATE", ""),
+)
+
+DEFAULT_VOICE_MODE_PROMPT_TEMPLATE = """You are a friendly, concise voice assistant.
+
+Everything you say will be spoken aloud.
+Keep responses short, clear, and natural.
+
+STYLE:
+- Use simple words and short sentences.
+- Sound warm and conversational.
+- Avoid long explanations, lists, or complex phrasing.
+
+BEHAVIOR:
+- Give the quickest helpful answer first.
+- Offer extra detail only if needed.
+- Ask for clarification only when necessary.
+
+VOICE OPTIMIZATION:
+- Break information into small, easy-to-hear chunks.
+- Avoid dense wording or anything that sounds like reading text.
+
+ERROR HANDLING:
+- If unsure, say so briefly and offer options.
+- If something is unsafe or impossible, decline kindly and suggest a safe alternative.
+
+Stay consistent, helpful, and easy to listen to."""
 
 TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE = PersistentConfig(
     "TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE",
@@ -2811,6 +2840,7 @@ WEB_SEARCH_DOMAIN_FILTER_LIST = PersistentConfig(
         # "wikipedia.com",
         # "wikimedia.org",
         # "wikidata.org",
+        # "!stackoverflow.com",
     ],
 )
 
@@ -2982,6 +3012,24 @@ BING_SEARCH_V7_SUBSCRIPTION_KEY = PersistentConfig(
     os.environ.get("BING_SEARCH_V7_SUBSCRIPTION_KEY", ""),
 )
 
+AZURE_AI_SEARCH_API_KEY = PersistentConfig(
+    "AZURE_AI_SEARCH_API_KEY",
+    "rag.web.search.azure_ai_search_api_key",
+    os.environ.get("AZURE_AI_SEARCH_API_KEY", ""),
+)
+
+AZURE_AI_SEARCH_ENDPOINT = PersistentConfig(
+    "AZURE_AI_SEARCH_ENDPOINT",
+    "rag.web.search.azure_ai_search_endpoint",
+    os.environ.get("AZURE_AI_SEARCH_ENDPOINT", ""),
+)
+
+AZURE_AI_SEARCH_INDEX_NAME = PersistentConfig(
+    "AZURE_AI_SEARCH_INDEX_NAME",
+    "rag.web.search.azure_ai_search_index_name",
+    os.environ.get("AZURE_AI_SEARCH_INDEX_NAME", ""),
+)
+
 EXA_API_KEY = PersistentConfig(
     "EXA_API_KEY",
     "rag.web.search.exa_api_key",
@@ -3137,10 +3185,9 @@ try:
 except json.JSONDecodeError:
     automatic1111_params = {}
 
-
 AUTOMATIC1111_PARAMS = PersistentConfig(
     "AUTOMATIC1111_PARAMS",
-    "image_generation.automatic1111.api_auth",
+    "image_generation.automatic1111.api_params",
     automatic1111_params,
 )
 

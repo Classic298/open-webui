@@ -104,6 +104,7 @@ from open_webui.utils.mcp.client import MCPClient
 
 from open_webui.config import (
     CACHE_DIR,
+    DEFAULT_VOICE_MODE_PROMPT_TEMPLATE,
     DEFAULT_TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE,
     DEFAULT_CODE_INTERPRETER_PROMPT,
     CODE_INTERPRETER_BLOCKED_MODULES,
@@ -968,37 +969,30 @@ async def chat_completion_files_handler(
             queries = [get_last_user_message(body["messages"])]
 
         try:
-            # Offload get_sources_from_items to a separate thread
-            loop = asyncio.get_running_loop()
-            with ThreadPoolExecutor() as executor:
-                sources = await loop.run_in_executor(
-                    executor,
-                    lambda: get_sources_from_items(
-                        request=request,
-                        items=files,
-                        queries=queries,
-                        embedding_function=lambda query, prefix: request.app.state.EMBEDDING_FUNCTION(
-                            query, prefix=prefix, user=user
-                        ),
-                        k=request.app.state.config.TOP_K,
-                        reranking_function=(
-                            (
-                                lambda sentences: request.app.state.RERANKING_FUNCTION(
-                                    sentences, user=user
-                                )
-                            )
-                            if request.app.state.RERANKING_FUNCTION
-                            else None
-                        ),
-                        k_reranker=request.app.state.config.TOP_K_RERANKER,
-                        r=request.app.state.config.RELEVANCE_THRESHOLD,
-                        hybrid_bm25_weight=request.app.state.config.HYBRID_BM25_WEIGHT,
-                        hybrid_search=request.app.state.config.ENABLE_RAG_HYBRID_SEARCH,
-                        full_context=all_full_context
-                        or request.app.state.config.RAG_FULL_CONTEXT,
-                        user=user,
-                    ),
-                )
+            # Directly await async get_sources_from_items (no thread needed - fully async now)
+            sources = await get_sources_from_items(
+                request=request,
+                items=files,
+                queries=queries,
+                embedding_function=request.app.state.EMBEDDING_FUNCTION,
+                k=request.app.state.config.TOP_K,
+                reranking_function=(
+                    (
+                        lambda sentences: request.app.state.RERANKING_FUNCTION(
+                            sentences, user=user
+                        )
+                    )
+                    if request.app.state.RERANKING_FUNCTION
+                    else None
+                ),
+                k_reranker=request.app.state.config.TOP_K_RERANKER,
+                r=request.app.state.config.RELEVANCE_THRESHOLD,
+                hybrid_bm25_weight=request.app.state.config.HYBRID_BM25_WEIGHT,
+                hybrid_search=request.app.state.config.ENABLE_RAG_HYBRID_SEARCH,
+                full_context=all_full_context
+                or request.app.state.config.RAG_FULL_CONTEXT,
+                user=user,
+            )
         except Exception as e:
             log.exception(e)
 
@@ -1237,6 +1231,18 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     features = form_data.pop("features", None)
     if features:
+        if "voice" in features and features["voice"]:
+            if request.app.state.config.VOICE_MODE_PROMPT_TEMPLATE != None:
+                if request.app.state.config.VOICE_MODE_PROMPT_TEMPLATE != "":
+                    template = request.app.state.config.VOICE_MODE_PROMPT_TEMPLATE
+                else:
+                    template = DEFAULT_VOICE_MODE_PROMPT_TEMPLATE
+
+                form_data["messages"] = add_or_update_system_message(
+                    template,
+                    form_data["messages"],
+                )
+
         if "memory" in features and features["memory"]:
             form_data = await chat_memory_handler(
                 request, form_data, extra_params, user
@@ -1367,7 +1373,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                             oauth_token = None
 
                     connection_headers = mcp_server_connection.get("headers", None)
-                    if connection_headers:
+                    if connection_headers and isinstance(connection_headers, dict):
                         for key, value in connection_headers.items():
                             headers[key] = value
 

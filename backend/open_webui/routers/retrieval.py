@@ -64,6 +64,7 @@ from open_webui.retrieval.web.serply import search_serply
 from open_webui.retrieval.web.serpstack import search_serpstack
 from open_webui.retrieval.web.tavily import search_tavily
 from open_webui.retrieval.web.bing import search_bing
+from open_webui.retrieval.web.azure import search_azure
 from open_webui.retrieval.web.exa import search_exa
 from open_webui.retrieval.web.perplexity import search_perplexity
 from open_webui.retrieval.web.sougou import search_sougou
@@ -1459,11 +1460,12 @@ def save_docs_to_vector_db(
             ),
         )
 
-        embeddings = embedding_function(
+        # Run async embedding in sync context
+        embeddings = asyncio.run(embedding_function(
             list(map(lambda x: x.replace("\n", " "), texts)),
             prefix=RAG_EMBEDDING_CONTENT_PREFIX,
             user=user,
-        )
+        ))
         log.info(f"embeddings generated {len(embeddings)} for {len(texts)} items")
 
         items = [
@@ -2037,6 +2039,24 @@ def search_web(
             request.app.state.config.WEB_SEARCH_RESULT_COUNT,
             request.app.state.config.WEB_SEARCH_DOMAIN_FILTER_LIST,
         )
+    elif engine == "azure":
+        if (
+            request.app.state.config.AZURE_AI_SEARCH_API_KEY
+            and request.app.state.config.AZURE_AI_SEARCH_ENDPOINT
+            and request.app.state.config.AZURE_AI_SEARCH_INDEX_NAME
+        ):
+            return search_azure(
+                request.app.state.config.AZURE_AI_SEARCH_API_KEY,
+                request.app.state.config.AZURE_AI_SEARCH_ENDPOINT,
+                request.app.state.config.AZURE_AI_SEARCH_INDEX_NAME,
+                query,
+                request.app.state.config.WEB_SEARCH_RESULT_COUNT,
+                request.app.state.config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+            )
+        else:
+            raise Exception(
+                "AZURE_AI_SEARCH_API_KEY, AZURE_AI_SEARCH_ENDPOINT, and AZURE_AI_SEARCH_INDEX_NAME are required for Azure AI Search"
+            )
     elif engine == "exa":
         return search_exa(
             request.app.state.config.EXA_API_KEY,
@@ -2236,7 +2256,7 @@ class QueryDocForm(BaseModel):
 
 
 @router.post("/query/doc")
-def query_doc_handler(
+async def query_doc_handler(
     request: Request,
     form_data: QueryDocForm,
     user=Depends(get_verified_user),
@@ -2249,13 +2269,11 @@ def query_doc_handler(
             collection_results[form_data.collection_name] = VECTOR_DB_CLIENT.get(
                 collection_name=form_data.collection_name
             )
-            return query_doc_with_hybrid_search(
+            return await query_doc_with_hybrid_search(
                 collection_name=form_data.collection_name,
                 collection_result=collection_results[form_data.collection_name],
                 query=form_data.query,
-                embedding_function=lambda query, prefix: request.app.state.EMBEDDING_FUNCTION(
-                    query, prefix=prefix, user=user
-                ),
+                embedding_function=request.app.state.EMBEDDING_FUNCTION,
                 k=form_data.k if form_data.k else request.app.state.config.TOP_K,
                 reranking_function=(
                     (
@@ -2281,11 +2299,12 @@ def query_doc_handler(
                 user=user,
             )
         else:
+            query_embedding = await request.app.state.EMBEDDING_FUNCTION(
+                form_data.query, prefix=RAG_EMBEDDING_QUERY_PREFIX, user=user
+            )
             return query_doc(
                 collection_name=form_data.collection_name,
-                query_embedding=request.app.state.EMBEDDING_FUNCTION(
-                    form_data.query, prefix=RAG_EMBEDDING_QUERY_PREFIX, user=user
-                ),
+                query_embedding=query_embedding,
                 k=form_data.k if form_data.k else request.app.state.config.TOP_K,
                 user=user,
             )
@@ -2308,7 +2327,7 @@ class QueryCollectionsForm(BaseModel):
 
 
 @router.post("/query/collection")
-def query_collection_handler(
+async def query_collection_handler(
     request: Request,
     form_data: QueryCollectionsForm,
     user=Depends(get_verified_user),
@@ -2317,12 +2336,10 @@ def query_collection_handler(
         if request.app.state.config.ENABLE_RAG_HYBRID_SEARCH and (
             form_data.hybrid is None or form_data.hybrid
         ):
-            return query_collection_with_hybrid_search(
+            return await query_collection_with_hybrid_search(
                 collection_names=form_data.collection_names,
                 queries=[form_data.query],
-                embedding_function=lambda query, prefix: request.app.state.EMBEDDING_FUNCTION(
-                    query, prefix=prefix, user=user
-                ),
+                embedding_function=request.app.state.EMBEDDING_FUNCTION,
                 k=form_data.k if form_data.k else request.app.state.config.TOP_K,
                 reranking_function=(
                     (
@@ -2347,12 +2364,10 @@ def query_collection_handler(
                 ),
             )
         else:
-            return query_collection(
+            return await query_collection(
                 collection_names=form_data.collection_names,
                 queries=[form_data.query],
-                embedding_function=lambda query, prefix: request.app.state.EMBEDDING_FUNCTION(
-                    query, prefix=prefix, user=user
-                ),
+                embedding_function=request.app.state.EMBEDDING_FUNCTION,
                 k=form_data.k if form_data.k else request.app.state.config.TOP_K,
             )
 
@@ -2429,7 +2444,7 @@ if ENV == "dev":
     @router.get("/ef/{text}")
     async def get_embeddings(request: Request, text: Optional[str] = "Hello World!"):
         return {
-            "result": request.app.state.EMBEDDING_FUNCTION(
+            "result": await request.app.state.EMBEDDING_FUNCTION(
                 text, prefix=RAG_EMBEDDING_QUERY_PREFIX
             )
         }
