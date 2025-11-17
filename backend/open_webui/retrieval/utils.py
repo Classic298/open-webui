@@ -332,7 +332,7 @@ def get_all_items_from_collections(collection_names: list[str]) -> dict:
     return merge_get_results(results)
 
 
-def query_collection(
+async def query_collection(
     collection_names: list[str],
     queries: list[str],
     embedding_function,
@@ -357,8 +357,7 @@ def query_collection(
             return None, e
 
     # Generate all query embeddings (in one call)
-    # Run async embedding in sync context
-    query_embeddings = asyncio.run(embedding_function(queries, prefix=RAG_EMBEDDING_QUERY_PREFIX))
+    query_embeddings = await embedding_function(queries, prefix=RAG_EMBEDDING_QUERY_PREFIX)
     log.debug(
         f"query_collection: processing {len(queries)} queries across {len(collection_names)} collections"
     )
@@ -935,7 +934,7 @@ async def get_sources_from_items(
 
                     # fallback to non-hybrid search
                     if not hybrid_search and query_result is None:
-                        query_result = query_collection(
+                        query_result = await query_collection(
                             collection_names=collection_names,
                             queries=queries,
                             embedding_function=embedding_function,
