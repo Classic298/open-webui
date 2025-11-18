@@ -1386,7 +1386,7 @@ def save_docs_to_vector_db(
                     )
                 return results
 
-            with ThreadPoolExecutor(max_workers=8) as executor:
+            with ThreadPoolExecutor() as executor:
                 doc_chunks = list(executor.map(process_single_doc_markdown, docs))
             
             # Flatten results
@@ -1404,43 +1404,43 @@ def save_docs_to_vector_db(
                     encoding = tiktoken.get_encoding(str(request.app.state.config.TIKTOKEN_ENCODING_NAME))
                     
                     merged_docs = []
-                    i = 0
-                    while i < len(docs):
-                        current_doc = docs[i]
+                    doc_index = 0
+                    while doc_index < len(docs):
+                        current_doc = docs[doc_index]
                         current_tokens = len(encoding.encode(current_doc.page_content))
-                        
+
                         # If chunk meets minimum, keep it as is
                         if current_tokens >= min_tokens:
                             merged_docs.append(current_doc)
-                            i += 1
+                            doc_index += 1
                             continue
-                        
+
                         # Merge with subsequent chunks
                         combined_content = current_doc.page_content
                         combined_headings = list(current_doc.metadata.get("headings", []))
-                        j = i + 1
-                        
-                        while j < len(docs):
-                            next_content = docs[j].page_content
-                            next_headings = docs[j].metadata.get("headings", [])
-                            
+                        merge_index = doc_index + 1
+
+                        while merge_index < len(docs):
+                            next_content = docs[merge_index].page_content
+                            next_headings = docs[merge_index].metadata.get("headings", [])
+
                             # Check if adding next chunk would exceed max
                             test_content = combined_content + "\n\n" + next_content
                             test_tokens = len(encoding.encode(test_content))
-                            
+
                             if test_tokens > max_size:
                                 # Stop merging, use what we have even if below minimum
                                 break
-                            
+
                             # Add the chunk
                             combined_content = test_content
                             combined_headings.extend(next_headings)
-                            j += 1
-                            
+                            merge_index += 1
+
                             # Check if we've met the minimum
                             if test_tokens >= min_tokens:
                                 break
-                        
+
                         # Create merged document with first chunk's metadata
                         merged_docs.append(
                             Document(
@@ -1448,50 +1448,50 @@ def save_docs_to_vector_db(
                                 metadata={**current_doc.metadata, "headings": combined_headings},
                             )
                         )
-                        i = j
-                    
+                        doc_index = merge_index
+
                     docs = merged_docs
             else:
                 # Character mode: use min_size and len() for measurement
                 if min_size > 0:
                     merged_docs = []
-                    i = 0
-                    while i < len(docs):
-                        current_doc = docs[i]
+                    doc_index = 0
+                    while doc_index < len(docs):
+                        current_doc = docs[doc_index]
                         current_length = len(current_doc.page_content)
-                        
+
                         # If chunk meets minimum, keep it as is
                         if current_length >= min_size:
                             merged_docs.append(current_doc)
-                            i += 1
+                            doc_index += 1
                             continue
-                        
+
                         # Merge with subsequent chunks
                         combined_content = current_doc.page_content
                         combined_headings = list(current_doc.metadata.get("headings", []))
-                        j = i + 1
-                        
-                        while j < len(docs):
-                            next_content = docs[j].page_content
-                            next_headings = docs[j].metadata.get("headings", [])
-                            
+                        merge_index = doc_index + 1
+
+                        while merge_index < len(docs):
+                            next_content = docs[merge_index].page_content
+                            next_headings = docs[merge_index].metadata.get("headings", [])
+
                             # Check if adding next chunk would exceed max
                             test_content = combined_content + "\n\n" + next_content
                             test_length = len(test_content)
-                            
+
                             if test_length > max_size:
                                 # Stop merging, use what we have even if below minimum
                                 break
-                            
+
                             # Add the chunk
                             combined_content = test_content
                             combined_headings.extend(next_headings)
-                            j += 1
-                            
+                            merge_index += 1
+
                             # Check if we've met the minimum
                             if test_length >= min_size:
                                 break
-                        
+
                         # Create merged document with first chunk's metadata
                         merged_docs.append(
                             Document(
@@ -1499,8 +1499,8 @@ def save_docs_to_vector_db(
                                 metadata={**current_doc.metadata, "headings": combined_headings},
                             )
                         )
-                        i = j
-                    
+                        doc_index = merge_index
+
                     docs = merged_docs
 
         # Stage 2: Apply character or token splitting
