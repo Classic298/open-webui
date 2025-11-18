@@ -178,25 +178,45 @@
 
 	const fetchUsers = async () => {
 		try {
-			let allUsers = [];
-			let page = 1;
-			let hasMore = true;
+			// Fetch first page to get total count
+			const firstPage = await getUsers(localStorage.token, '', '', '', 1).catch((error) => {
+				toast.error(`${error}`);
+				return null;
+			});
 
-			// Fetch all pages of users (30 per page)
-			while (hasMore) {
-				const res = await getUsers(localStorage.token, '', '', '', page).catch((error) => {
-					toast.error(`${error}`);
-					return null;
-				});
+			if (!firstPage || !firstPage.users) {
+				users = [];
+				return;
+			}
 
-				if (res && res.users && Array.isArray(res.users)) {
-					allUsers = [...allUsers, ...res.users];
-					// Check if there are more pages (30 users per page)
-					hasMore = res.users.length === 30;
-					page++;
-				} else {
-					hasMore = false;
+			const total = firstPage.total;
+			const perPage = 30;
+			const totalPages = Math.ceil(total / perPage);
+			let allUsers = [...firstPage.users];
+
+			// If only one page, we're done
+			if (totalPages === 1) {
+				users = allUsers;
+				return;
+			}
+
+			// Fetch remaining pages in parallel batches of 5
+			const BATCH_SIZE = 5;
+
+			for (let i = 2; i <= totalPages; i += BATCH_SIZE) {
+				const batch = [];
+				const endPage = Math.min(i + BATCH_SIZE, totalPages + 1);
+
+				for (let page = i; page < endPage; page++) {
+					batch.push(getUsers(localStorage.token, '', '', '', page));
 				}
+
+				const results = await Promise.all(batch);
+				results.forEach((res) => {
+					if (res && res.users && Array.isArray(res.users)) {
+						allUsers = [...allUsers, ...res.users];
+					}
+				});
 			}
 
 			users = allUsers;
