@@ -112,32 +112,36 @@
 			config.ENABLE_IMAGE_GENERATION = false;
 
 			return null;
-		} else if (config.IMAGE_GENERATION_ENGINE === 'openai' && config.OPENAI_API_KEY === '') {
+		} else if (config.IMAGE_GENERATION_ENGINE === 'openai' && config.IMAGES_OPENAI_API_KEY === '') {
 			toast.error($i18n.t('OpenAI API Key is required.'));
 			config.ENABLE_IMAGE_GENERATION = false;
 
 			return null;
-		} else if (config.IMAGE_GENERATION_ENGINE === 'gemini' && config.GEMINI_API_KEY === '') {
+		} else if (config.IMAGE_GENERATION_ENGINE === 'gemini' && config.IMAGES_GEMINI_API_KEY === '') {
 			toast.error($i18n.t('Gemini API Key is required.'));
 			config.ENABLE_IMAGE_GENERATION = false;
 
 			return null;
 		}
 
-		const res = await updateConfig(localStorage.token, config).catch((error) => {
+		const res = await updateConfig(localStorage.token, {
+			...config,
+			AUTOMATIC1111_PARAMS:
+				typeof config.AUTOMATIC1111_PARAMS === 'string' && config.AUTOMATIC1111_PARAMS.trim() !== ''
+					? JSON.parse(config.AUTOMATIC1111_PARAMS)
+					: {}
+		}).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
 
 		if (res) {
-			config = res;
-
-			if (config.ENABLE_IMAGE_GENERATION) {
+			if (res.ENABLE_IMAGE_GENERATION) {
 				backendConfig.set(await getBackendConfig());
 				getModels();
 			}
 
-			return config;
+			return res;
 		}
 
 		return null;
@@ -244,6 +248,11 @@
 					console.error(e);
 				}
 			}
+
+			config.AUTOMATIC1111_PARAMS =
+				typeof config.AUTOMATIC1111_PARAMS === 'object'
+					? JSON.stringify(config.AUTOMATIC1111_PARAMS ?? {}, null, 2)
+					: config.AUTOMATIC1111_PARAMS;
 
 			REQUIRED_EDIT_WORKFLOW_NODES = REQUIRED_EDIT_WORKFLOW_NODES.map((node) => {
 				const n =
@@ -1170,7 +1179,7 @@
 								</div>
 							</div>
 						{/if}
-					{:else if config?.IMAGE_GENERATION_ENGINE === 'gemini'}
+					{:else if config?.IMAGE_EDIT_ENGINE === 'gemini'}
 						<div class="mb-2.5">
 							<div class="flex w-full justify-between items-center">
 								<div class="text-xs pr-2 shrink-0">
