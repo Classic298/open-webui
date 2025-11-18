@@ -1350,6 +1350,7 @@ def save_docs_to_vector_db(
                 log.info(f"Document with hash {metadata['hash']} already exists")
                 raise ValueError(ERROR_MESSAGES.DUPLICATE_CONTENT)
 
+    if split:
         # Stage 1: Optional markdown header preprocessing
         if request.app.state.config.ENABLE_MARKDOWN_HEADER_SPLITTING:
             log.info("Applying markdown header preprocessing (parallel)")
