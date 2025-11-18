@@ -1400,9 +1400,8 @@ def save_docs_to_vector_db(
             if request.app.state.config.TEXT_SPLITTER == "token":
                 # Token mode: use min_tokens and tiktoken for measurement
                 if min_tokens > 0:
-                    tiktoken.get_encoding(str(request.app.state.config.TIKTOKEN_ENCODING_NAME))
                     encoding = tiktoken.get_encoding(str(request.app.state.config.TIKTOKEN_ENCODING_NAME))
-                    
+
                     merged_docs = []
                     doc_index = 0
                     while doc_index < len(docs):
