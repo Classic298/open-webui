@@ -5,10 +5,21 @@
 	import { toast } from 'svelte-sonner';
 
 	export let suggestions = [];
+	export let showWarning = true;
 
 	const i18n = getContext('i18n');
 
 	let importInputElement;
+
+	// Migrate old schema { content: '' } to new schema { title: ['', ''], content: '' }
+	let migrated = false;
+	$: if (!migrated && suggestions?.length > 0) {
+		suggestions = suggestions.map((s) => ({
+			...s,
+			title: s.title || ['', '']
+		}));
+		migrated = true;
+	}
 
 	const handleImport = (event) => {
 		const files = event.target.files;
@@ -17,7 +28,7 @@
 		}
 
 		const reader = new FileReader();
-		reader.onload = async (e) => {
+		reader.onload = (e) => {
 			try {
 				let importedSuggestions = JSON.parse(e.target.result as string);
 
@@ -32,7 +43,7 @@
 
 				suggestions = [...suggestions, ...importedSuggestions];
 			} catch (error) {
-				toast.error(i18n.t('Invalid JSON file'));
+				toast.error($i18n.t('Invalid JSON file'));
 				return;
 			}
 		};
@@ -129,7 +140,7 @@
 		{/each}
 	</div>
 
-	{#if suggestions.length > 0}
+	{#if showWarning && suggestions.length > 0}
 		<div class="text-xs text-left w-full mt-2">
 			{$i18n.t('Adjusting these settings will apply changes universally to all users.')}
 		</div>

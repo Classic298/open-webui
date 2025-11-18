@@ -677,7 +677,7 @@
 						</div>
 
 						{#if info?.meta?.suggestion_prompts}
-							<PromptSuggestionsModal bind:suggestions={info.meta.suggestion_prompts} />
+							<PromptSuggestionsModal bind:suggestions={info.meta.suggestion_prompts} showWarning={false} />
 						{/if}
 					</div>
 
