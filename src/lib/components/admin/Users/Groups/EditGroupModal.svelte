@@ -333,7 +333,7 @@
 							{/if}
 						</div>
 
-						<div class="flex-1 mt-1 lg:mt-1 lg:h-[28rem] lg:max-h-[28rem] flex flex-col">
+						<div class="flex-1 mt-1 lg:mt-1 lg:h-[30rem] lg:max-h-[30rem] flex flex-col">
 							<div class="w-full h-full overflow-y-auto scrollbar-hidden">
 								{#if selectedTab == 'general'}
 									<Display
