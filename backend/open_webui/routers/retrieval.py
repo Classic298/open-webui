@@ -1421,8 +1421,15 @@ def save_docs_to_vector_db(
                         merge_index = doc_index + 1
 
                         while merge_index < len(docs):
-                            next_content = docs[merge_index].page_content
-                            next_headings = docs[merge_index].metadata.get("headings", [])
+                            next_doc = docs[merge_index]
+                            next_content = next_doc.page_content
+                            next_headings = next_doc.metadata.get("headings", [])
+
+                            # Don't merge across source boundaries (different files/URLs)
+                            if current_doc.metadata.get('file_id') != next_doc.metadata.get('file_id'):
+                                break
+                            if current_doc.metadata.get('source') != next_doc.metadata.get('source'):
+                                break
 
                             # Check if adding next chunk would exceed max
                             test_content = combined_content + "\n\n" + next_content
@@ -1472,8 +1479,15 @@ def save_docs_to_vector_db(
                         merge_index = doc_index + 1
 
                         while merge_index < len(docs):
-                            next_content = docs[merge_index].page_content
-                            next_headings = docs[merge_index].metadata.get("headings", [])
+                            next_doc = docs[merge_index]
+                            next_content = next_doc.page_content
+                            next_headings = next_doc.metadata.get("headings", [])
+
+                            # Don't merge across source boundaries (different files/URLs)
+                            if current_doc.metadata.get('file_id') != next_doc.metadata.get('file_id'):
+                                break
+                            if current_doc.metadata.get('source') != next_doc.metadata.get('source'):
+                                break
 
                             # Check if adding next chunk would exceed max
                             test_content = combined_content + "\n\n" + next_content
