@@ -113,14 +113,34 @@
 					await setGroupUserIds(localStorage.token, groupId, validUserIds);
 				}
 			}
+
+			loading = false;
+			show = false;
 		} catch (error) {
 			toast.error(`Error saving group: ${error}`);
 			loading = false;
 			return;
 		}
+	};
 
-		loading = false;
-		show = false;
+	const saveUsersHandler = async () => {
+		loading = true;
+
+		try {
+			// Ensure user_ids is always an array
+			const validUserIds = Array.isArray(userIds) ? userIds : [];
+
+			if (group?.id) {
+				await setGroupUserIds(localStorage.token, group.id, validUserIds);
+				toast.success($i18n.t('Group users updated successfully'));
+			}
+
+			loading = false;
+			show = false;
+		} catch (error) {
+			toast.error(`Error updating group users: ${error}`);
+			loading = false;
+		}
 	};
 
 	const init = async () => {
@@ -154,8 +174,8 @@
 			});
 
 			if (res) {
-				// getAllUsers returns the users array directly
-				users = Array.isArray(res) ? res : [];
+				// getAllUsers returns {users: [], total: number}
+				users = Array.isArray(res?.users) ? res.users : [];
 			}
 		} catch (error) {
 			console.error('Error fetching users:', error);
@@ -312,6 +332,25 @@
 											: ''}"
 										type="submit"
 										disabled={loading}
+									>
+										{$i18n.t('Save')}
+
+										{#if loading}
+											<div class="ml-2 self-center">
+												<Spinner />
+											</div>
+										{/if}
+									</button>
+								</div>
+							{:else if selectedTab === 'users'}
+								<div class="flex justify-end pt-3 text-sm font-medium gap-1.5">
+									<button
+										class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex flex-row space-x-1 items-center {loading
+											? ' cursor-not-allowed'
+											: ''}"
+										type="button"
+										disabled={loading}
+										on:click={saveUsersHandler}
 									>
 										{$i18n.t('Save')}
 
