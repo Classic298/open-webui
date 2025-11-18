@@ -571,21 +571,27 @@ async def reset_all_users_interface_settings(user=Depends(get_admin_user)):
     Admin only.
     """
     try:
-        # Get all users
-        all_users = Users.get_users(skip=0, limit=None)
+        from open_webui.internal.db import get_db
+        from open_webui.models.users import User
+
         reset_count = 0
 
-        for user_data in all_users["users"]:
-            user_obj = Users.get_user_by_id(user_data.id)
-            if user_obj and user_obj.settings:
-                # Get current settings
-                current_settings = user_obj.settings.model_dump() if hasattr(user_obj.settings, 'model_dump') else user_obj.settings
+        # Single transaction for all updates (optimized for performance)
+        with get_db() as db:
+            # Get all users with settings in one query
+            users = db.query(User).filter(User.settings.isnot(None)).all()
 
-                # Clear ui settings (will force fallback to admin defaults)
-                if current_settings and "ui" in current_settings:
-                    current_settings["ui"] = {}
-                    Users.update_user_settings_by_id(user_data.id, current_settings)
-                    reset_count += 1
+            for user_obj in users:
+                if user_obj.settings and isinstance(user_obj.settings, dict):
+                    if "ui" in user_obj.settings:
+                        # Clear ui settings (will force fallback to admin defaults)
+                        user_obj.settings["ui"] = {}
+                        # Mark for update (SQLAlchemy tracks changes automatically)
+                        db.add(user_obj)
+                        reset_count += 1
+
+            # Single commit for all changes
+            db.commit()
 
         log.info(f"Reset interface settings for {reset_count} users by admin {user.id}")
 

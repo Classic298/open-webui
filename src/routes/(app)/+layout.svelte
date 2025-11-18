@@ -19,7 +19,7 @@
 	import { getUserSettings } from '$lib/apis/users';
 
 	import { WEBUI_VERSION } from '$lib/constants';
-	import { compareVersion } from '$lib/utils';
+	import { compareVersion, deepMerge } from '$lib/utils';
 
 	import {
 		config,
@@ -111,12 +111,10 @@
 		}
 
 		// Implement fallback logic: User custom → Admin default → System default
-		// Merge admin defaults with user settings, where user settings take precedence
+		// Deep merge admin defaults with user settings, where user settings take precedence
+		// This ensures users get new admin defaults for nested properties they haven't customized
 		if (userSettings?.ui || Object.keys(adminDefaults).length > 0) {
-			const mergedSettings = {
-				...adminDefaults,
-				...(userSettings?.ui || {})
-			};
+			const mergedSettings = deepMerge(adminDefaults, userSettings?.ui || {});
 			settings.set(mergedSettings);
 		}
 

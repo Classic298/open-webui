@@ -274,9 +274,9 @@ class UsersTable:
             else:
                 query = query.order_by(User.created_at.desc())
 
-            if skip:
+            if skip is not None:
                 query = query.offset(skip)
-            if limit:
+            if limit is not None:
                 query = query.limit(limit)
 
             users = query.all()

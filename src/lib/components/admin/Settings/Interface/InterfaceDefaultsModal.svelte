@@ -94,11 +94,10 @@
 		<div class="px-4 pb-4" style="max-height: calc(100vh - 300px); overflow-y: auto;">
 			{#if !loading}
 				<!-- Pass adminDefaults to Interface component as initialSettings -->
-				{#key $adminDefaults}
-					<div class="interface-defaults-wrapper">
-						<InterfaceSettings initialSettings={$adminDefaults} saveSettings={saveAdminSettings} />
-					</div>
-				{/key}
+				<!-- Component updates reactively when initialSettings prop changes -->
+				<div class="interface-defaults-wrapper">
+					<InterfaceSettings initialSettings={$adminDefaults} saveSettings={saveAdminSettings} />
+				</div>
 			{:else}
 				<div class="flex justify-center items-center py-8">
 					<div
