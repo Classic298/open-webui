@@ -154,7 +154,12 @@ class KnowledgeFileTable:
                 db.refresh(result)
                 return KnowledgeFileModel.model_validate(result) if result else None
             except Exception as e:
-                log.exception(e)
+                # Check if it's a duplicate entry error
+                error_msg = str(e).lower()
+                if "unique constraint" in error_msg or "duplicate" in error_msg:
+                    log.warning(f"Duplicate file {file_id} in knowledge {knowledge_id}")
+                else:
+                    log.exception(e)
                 return None
 
     def get_knowledge_files_by_knowledge_id(
@@ -183,6 +188,23 @@ class KnowledgeFileTable:
     ) -> list[str]:
         knowledge_files = self.get_knowledge_files_by_knowledge_id(knowledge_id, limit, offset)
         return [kf.file_id for kf in knowledge_files]
+
+    def get_file_ids_by_knowledge_ids(self, knowledge_ids: list[str]) -> dict[str, list[str]]:
+        """Bulk fetch file_ids for multiple knowledge bases to avoid N+1 queries"""
+        with get_db() as db:
+            if not knowledge_ids:
+                return {}
+
+            knowledge_files = db.query(KnowledgeFile).filter(
+                KnowledgeFile.knowledge_id.in_(knowledge_ids)
+            ).all()
+
+            # Group file_ids by knowledge_id
+            result = {kid: [] for kid in knowledge_ids}
+            for kf in knowledge_files:
+                result[kf.knowledge_id].append(kf.file_id)
+
+            return result
 
     def delete_knowledge_file(self, knowledge_id: str, file_id: str) -> bool:
         try:

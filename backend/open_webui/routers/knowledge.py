@@ -49,16 +49,20 @@ async def get_knowledge(user=Depends(get_verified_user)):
     else:
         knowledge_bases = Knowledges.get_knowledge_bases_by_user_id(user.id, "read")
 
-    # Get files for each knowledge base
+    # Get files for each knowledge base (bulk fetch to avoid N+1 queries)
+    knowledge_ids = [kb.id for kb in knowledge_bases]
+    knowledge_file_ids_map = KnowledgeFiles.get_file_ids_by_knowledge_ids(knowledge_ids)
+
     knowledge_with_files = []
     for knowledge_base in knowledge_bases:
-        file_ids = KnowledgeFiles.get_file_ids_by_knowledge_id(knowledge_base.id)
+        file_ids = knowledge_file_ids_map.get(knowledge_base.id, [])
         files = Files.get_file_metadatas_by_ids(file_ids)
 
         # Check if all files exist and clean up missing ones
         if len(files) != len(file_ids):
             missing_files = list(set(file_ids) - set([file.id for file in files]))
             if missing_files:
+                # Batch delete missing files
                 for missing_file in missing_files:
                     KnowledgeFiles.delete_knowledge_file(knowledge_base.id, missing_file)
 
@@ -85,16 +89,20 @@ async def get_knowledge_list(user=Depends(get_verified_user)):
     else:
         knowledge_bases = Knowledges.get_knowledge_bases_by_user_id(user.id, "write")
 
-    # Get files for each knowledge base
+    # Get files for each knowledge base (bulk fetch to avoid N+1 queries)
+    knowledge_ids = [kb.id for kb in knowledge_bases]
+    knowledge_file_ids_map = KnowledgeFiles.get_file_ids_by_knowledge_ids(knowledge_ids)
+
     knowledge_with_files = []
     for knowledge_base in knowledge_bases:
-        file_ids = KnowledgeFiles.get_file_ids_by_knowledge_id(knowledge_base.id)
+        file_ids = knowledge_file_ids_map.get(knowledge_base.id, [])
         files = Files.get_file_metadatas_by_ids(file_ids)
 
         # Check if all files exist and clean up missing ones
         if len(files) != len(file_ids):
             missing_files = list(set(file_ids) - set([file.id for file in files]))
             if missing_files:
+                # Batch delete missing files
                 for missing_file in missing_files:
                     KnowledgeFiles.delete_knowledge_file(knowledge_base.id, missing_file)
 
@@ -171,20 +179,6 @@ async def reindex_knowledge_files(request: Request, user=Depends(get_verified_us
     deleted_knowledge_bases = []
 
     for knowledge_base in knowledge_bases:
-        # -- Robust error handling for missing or invalid data
-        if not knowledge_base.data or not isinstance(knowledge_base.data, dict):
-            log.warning(
-                f"Knowledge base {knowledge_base.id} has no data or invalid data ({knowledge_base.data!r}). Deleting."
-            )
-            try:
-                Knowledges.delete_knowledge_by_id(id=knowledge_base.id)
-                deleted_knowledge_bases.append(knowledge_base.id)
-            except Exception as e:
-                log.error(
-                    f"Failed to delete invalid knowledge base {knowledge_base.id}: {e}"
-                )
-            continue
-
         try:
             file_ids = KnowledgeFiles.get_file_ids_by_knowledge_id(knowledge_base.id)
             files = Files.get_files_by_ids(file_ids)

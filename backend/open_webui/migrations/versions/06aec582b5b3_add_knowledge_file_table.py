@@ -100,14 +100,18 @@ def upgrade():
                     })
 
     # Bulk insert knowledge_file entries
+    # Note: This operation is transactional - if it fails, the entire migration rolls back
     if knowledge_file_entries:
         conn.execute(
             knowledge_file_table.insert(),
             knowledge_file_entries
         )
         print(f"Migrated {len(knowledge_file_entries)} file associations to knowledge_file table")
+    else:
+        print("No file associations to migrate")
 
     # Set data field to NULL for all knowledge entries
+    # This only persists if the above operations succeed (same transaction)
     print("Setting knowledge.data to NULL")
     conn.execute(
         knowledge_table.update().values(data=None)
@@ -150,15 +154,25 @@ def downgrade():
             knowledge_file_map[knowledge_id] = []
         knowledge_file_map[knowledge_id].append(file_id)
 
-    # Update knowledge.data with file_ids
-    for knowledge_id, file_ids in knowledge_file_map.items():
+    # Get all knowledge bases to ensure we restore data structure even for empty ones
+    all_knowledge = conn.execute(
+        select(knowledge_table.c.id)
+    )
+
+    # Restore data for all knowledge bases
+    restored_count = 0
+    for knowledge_entry in all_knowledge:
+        knowledge_id = knowledge_entry.id
+        # Restore file_ids array (empty if no files existed)
+        file_ids = knowledge_file_map.get(knowledge_id, [])
         conn.execute(
             knowledge_table.update()
             .where(knowledge_table.c.id == knowledge_id)
             .values(data={"file_ids": file_ids})
         )
+        restored_count += 1
 
-    print(f"Restored file_ids to {len(knowledge_file_map)} knowledge entries")
+    print(f"Restored file_ids to {restored_count} knowledge entries ({len(knowledge_file_map)} with files, {restored_count - len(knowledge_file_map)} empty)")
 
     # Drop foreign key constraint
     op.drop_constraint("fk_knowledge_file_knowledge_id", "knowledge_file", type_="foreignkey")
