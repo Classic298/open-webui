@@ -742,6 +742,27 @@ def get_last_images(message_list):
     return images
 
 
+def get_image_urls(delta_images, request, metadata, user) -> list[str]:
+    if not isinstance(delta_images, list):
+        return []
+
+    image_urls = []
+    for img in delta_images:
+        if not isinstance(img, dict) or img.get("type") != "image_url":
+            continue
+
+        url = img.get("image_url", {}).get("url")
+        if not url:
+            continue
+
+        if url.startswith("data:image/png;base64"):
+            url = get_image_url_from_base64(request, url, metadata, user)
+
+        image_urls.append(url)
+
+    return image_urls
+
+
 async def chat_image_generation_handler(
     request: Request, form_data: dict, extra_params: dict, user
 ):
@@ -2573,6 +2594,26 @@ async def process_chat_response(
                                                         ][
                                                             "arguments"
                                                         ] += delta_arguments
+
+                                    image_urls = get_image_urls(
+                                        delta.get("images", []), request, metadata, user
+                                    )
+                                    if image_urls:
+                                        message_files = Chats.add_message_files_by_id_and_message_id(
+                                            metadata["chat_id"],
+                                            metadata["message_id"],
+                                            [
+                                                {"type": "image", "url": url}
+                                                for url in image_urls
+                                            ],
+                                        )
+
+                                        await event_emitter(
+                                            {
+                                                "type": "files",
+                                                "data": {"files": message_files},
+                                            }
+                                        )
 
                                     value = delta.get("content")
 
