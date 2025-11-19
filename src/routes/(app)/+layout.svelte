@@ -88,15 +88,13 @@
 	};
 
 	const setUserSettings = async (cb: () => Promise<void>) => {
-		// Load admin-configured interface defaults first
 		let adminDefaults = {};
 		try {
 			adminDefaults = await getInterfaceDefaults(localStorage.token);
 		} catch (error) {
-			// No admin interface defaults configured or error loading them
+			// Ignore
 		}
 
-		// Load user settings
 		let userSettings = await getUserSettings(localStorage.token).catch((error) => {
 			console.error(error);
 			return null;
@@ -111,12 +109,7 @@
 			}
 		}
 
-		// Implement fallback logic: User custom → Admin default → System default
-		// Deep merge admin defaults with user settings, where user settings take precedence
-		// This ensures users get new admin defaults for nested properties they haven't customized
 		if (userSettings?.ui || Object.keys(adminDefaults).length > 0) {
-			// Filter out null values from user settings so they don't override admin defaults
-			// null means "no preference", not "explicitly want null"
 			const cleanedUserSettings = userSettings?.ui ?
 				Object.fromEntries(
 					Object.entries(userSettings.ui).filter(([_, value]) => value !== null)
@@ -166,13 +159,10 @@
 		tools.set(toolsData);
 	};
 
-	// Track previous textScale to avoid unnecessary applications
 	let previousTextScale = null;
 
-	// Apply textScale when settings change
 	$: {
 		const currentTextScale = $settings?.textScale ?? null;
-		// Convert null to default value of 1
 		const scaleToApply = currentTextScale === null ? 1 : currentTextScale;
 		if (scaleToApply !== previousTextScale) {
 			previousTextScale = scaleToApply;

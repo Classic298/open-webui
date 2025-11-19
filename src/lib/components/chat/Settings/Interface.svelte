@@ -189,10 +189,7 @@
 	const setTextScaleHandler = (scale) => {
 		textScale = scale;
 
-		// Only apply immediately if this is user settings, not admin defaults configuration
-		// initialSettings will be null for user settings, and an object for admin defaults
 		const isAdminMode = initialSettings !== null;
-
 		if (!isAdminMode) {
 			setTextScale(textScale);
 		}
@@ -282,8 +279,6 @@
 		if (newTextScale !== textScale) {
 			textScale = newTextScale;
 
-			// Only apply textScale when loaded if this is user settings, NOT admin defaults configuration
-			// In admin mode, initialSettings is an object; in user mode, it's null
 			const isAdminMode = initialSettings !== null;
 			if (!isAdminMode && textScale !== null) {
 				setTextScale(textScale);
@@ -400,7 +395,6 @@
 							step="0.1"
 							value={textScale || 1}
 							on:input={(e) => {
-								console.log('Slider on:input fired, e.isTrusted:', e.isTrusted);
 								setTextScaleHandler(parseFloat(e.target.value));
 							}}
 							aria-label={$i18n.t('Text scale slider')}
