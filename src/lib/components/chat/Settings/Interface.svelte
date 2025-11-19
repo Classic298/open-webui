@@ -13,11 +13,6 @@
 	const i18n = getContext('i18n');
 
 	export let saveSettings: Function;
-	// Allow passing custom settings object (for admin defaults modal)
-	export let initialSettings: any = null;
-
-	// Use either provided initialSettings or global $settings store
-	$: settingsSource = initialSettings ?? $settings;
 
 	let backgroundImageUrl = null;
 	let inputFiles = null;
@@ -182,92 +177,80 @@
 		saveSettings({ webSearch: webSearch });
 	};
 
-	const setTextScaleHandler = (scale) => {
-		textScale = scale;
-		setTextScale(textScale);
+	onMount(async () => {
+		titleAutoGenerate = $settings?.title?.auto ?? true;
+		autoTags = $settings?.autoTags ?? true;
+		autoFollowUps = $settings?.autoFollowUps ?? true;
 
-		if (textScale === 1) {
-			textScale = null;
-		}
-		saveSettings({ textScale });
-	};
+		highContrastMode = $settings?.highContrastMode ?? false;
 
-	// Load settings reactively when settingsSource changes
-	$: {
-		titleAutoGenerate = settingsSource?.title?.auto ?? true;
-		autoTags = settingsSource?.autoTags ?? true;
-		autoFollowUps = settingsSource?.autoFollowUps ?? true;
+		detectArtifacts = $settings?.detectArtifacts ?? true;
+		responseAutoCopy = $settings?.responseAutoCopy ?? false;
 
-		highContrastMode = settingsSource?.highContrastMode ?? false;
+		showUsername = $settings?.showUsername ?? false;
+		showUpdateToast = $settings?.showUpdateToast ?? true;
+		showChangelog = $settings?.showChangelog ?? true;
 
-		detectArtifacts = settingsSource?.detectArtifacts ?? true;
-		responseAutoCopy = settingsSource?.responseAutoCopy ?? false;
+		showEmojiInCall = $settings?.showEmojiInCall ?? false;
+		voiceInterruption = $settings?.voiceInterruption ?? false;
 
-		showUsername = settingsSource?.showUsername ?? false;
-		showUpdateToast = settingsSource?.showUpdateToast ?? true;
-		showChangelog = settingsSource?.showChangelog ?? true;
+		displayMultiModelResponsesInTabs = $settings?.displayMultiModelResponsesInTabs ?? false;
+		chatFadeStreamingText = $settings?.chatFadeStreamingText ?? true;
 
-		showEmojiInCall = settingsSource?.showEmojiInCall ?? false;
-		voiceInterruption = settingsSource?.voiceInterruption ?? false;
+		richTextInput = $settings?.richTextInput ?? true;
+		showFormattingToolbar = $settings?.showFormattingToolbar ?? false;
+		insertPromptAsRichText = $settings?.insertPromptAsRichText ?? false;
+		promptAutocomplete = $settings?.promptAutocomplete ?? false;
 
-		displayMultiModelResponsesInTabs = settingsSource?.displayMultiModelResponsesInTabs ?? false;
-		chatFadeStreamingText = settingsSource?.chatFadeStreamingText ?? true;
+		insertSuggestionPrompt = $settings?.insertSuggestionPrompt ?? false;
+		keepFollowUpPrompts = $settings?.keepFollowUpPrompts ?? false;
+		insertFollowUpPrompt = $settings?.insertFollowUpPrompt ?? false;
 
-		richTextInput = settingsSource?.richTextInput ?? true;
-		showFormattingToolbar = settingsSource?.showFormattingToolbar ?? false;
-		insertPromptAsRichText = settingsSource?.insertPromptAsRichText ?? false;
-		promptAutocomplete = settingsSource?.promptAutocomplete ?? false;
+		regenerateMenu = $settings?.regenerateMenu ?? true;
 
-		insertSuggestionPrompt = settingsSource?.insertSuggestionPrompt ?? false;
-		keepFollowUpPrompts = settingsSource?.keepFollowUpPrompts ?? false;
-		insertFollowUpPrompt = settingsSource?.insertFollowUpPrompt ?? false;
+		largeTextAsFile = $settings?.largeTextAsFile ?? false;
+		copyFormatted = $settings?.copyFormatted ?? false;
 
-		regenerateMenu = settingsSource?.regenerateMenu ?? true;
+		collapseCodeBlocks = $settings?.collapseCodeBlocks ?? false;
+		expandDetails = $settings?.expandDetails ?? false;
 
-		largeTextAsFile = settingsSource?.largeTextAsFile ?? false;
-		copyFormatted = settingsSource?.copyFormatted ?? false;
+		landingPageMode = $settings?.landingPageMode ?? '';
+		chatBubble = $settings?.chatBubble ?? true;
+		widescreenMode = $settings?.widescreenMode ?? false;
+		splitLargeChunks = $settings?.splitLargeChunks ?? false;
+		scrollOnBranchChange = $settings?.scrollOnBranchChange ?? true;
 
-		collapseCodeBlocks = settingsSource?.collapseCodeBlocks ?? false;
-		expandDetails = settingsSource?.expandDetails ?? false;
+		temporaryChatByDefault = $settings?.temporaryChatByDefault ?? false;
+		chatDirection = $settings?.chatDirection ?? 'auto';
+		userLocation = $settings?.userLocation ?? false;
+		showChatTitleInTab = $settings?.showChatTitleInTab ?? true;
 
-		landingPageMode = settingsSource?.landingPageMode ?? '';
-		chatBubble = settingsSource?.chatBubble ?? true;
-		widescreenMode = settingsSource?.widescreenMode ?? false;
-		splitLargeChunks = settingsSource?.splitLargeChunks ?? false;
-		scrollOnBranchChange = settingsSource?.scrollOnBranchChange ?? true;
+		notificationSound = $settings?.notificationSound ?? true;
+		notificationSoundAlways = $settings?.notificationSoundAlways ?? false;
 
-		temporaryChatByDefault = settingsSource?.temporaryChatByDefault ?? false;
-		chatDirection = settingsSource?.chatDirection ?? 'auto';
-		userLocation = settingsSource?.userLocation ?? false;
-		showChatTitleInTab = settingsSource?.showChatTitleInTab ?? true;
+		iframeSandboxAllowSameOrigin = $settings?.iframeSandboxAllowSameOrigin ?? false;
+		iframeSandboxAllowForms = $settings?.iframeSandboxAllowForms ?? false;
 
-		notificationSound = settingsSource?.notificationSound ?? true;
-		notificationSoundAlways = settingsSource?.notificationSoundAlways ?? false;
+		stylizedPdfExport = $settings?.stylizedPdfExport ?? true;
 
-		iframeSandboxAllowSameOrigin = settingsSource?.iframeSandboxAllowSameOrigin ?? false;
-		iframeSandboxAllowForms = settingsSource?.iframeSandboxAllowForms ?? false;
+		hapticFeedback = $settings?.hapticFeedback ?? false;
+		ctrlEnterToSend = $settings?.ctrlEnterToSend ?? false;
 
-		stylizedPdfExport = settingsSource?.stylizedPdfExport ?? true;
+		showFloatingActionButtons = $settings?.showFloatingActionButtons ?? true;
+		floatingActionButtons = $settings?.floatingActionButtons ?? null;
 
-		hapticFeedback = settingsSource?.hapticFeedback ?? false;
-		ctrlEnterToSend = settingsSource?.ctrlEnterToSend ?? false;
+		imageCompression = $settings?.imageCompression ?? false;
+		imageCompressionSize = $settings?.imageCompressionSize ?? { width: '', height: '' };
+		imageCompressionInChannels = $settings?.imageCompressionInChannels ?? true;
 
-		showFloatingActionButtons = settingsSource?.showFloatingActionButtons ?? true;
-		floatingActionButtons = settingsSource?.floatingActionButtons ?? null;
-
-		imageCompression = settingsSource?.imageCompression ?? false;
-		imageCompressionSize = settingsSource?.imageCompressionSize ?? { width: '', height: '' };
-		imageCompressionInChannels = settingsSource?.imageCompressionInChannels ?? true;
-
-		defaultModelId = settingsSource?.models?.at(0) ?? '';
+		defaultModelId = $settings?.models?.at(0) ?? '';
 		if ($config?.default_models) {
 			defaultModelId = $config.default_models.split(',')[0];
 		}
 
-		backgroundImageUrl = settingsSource?.backgroundImageUrl ?? null;
-		webSearch = settingsSource?.webSearch ?? null;
-		textScale = settingsSource?.textScale ?? null;
-	}
+		backgroundImageUrl = $settings?.backgroundImageUrl ?? null;
+		webSearch = $settings?.webSearch ?? null;
+	});
 </script>
 
 <ManageFloatingActionButtonsModal
