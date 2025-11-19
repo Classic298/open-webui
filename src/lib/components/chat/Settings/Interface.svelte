@@ -178,6 +178,7 @@
 	};
 
 	onMount(async () => {
+		console.log('🔍 Interface.svelte mounted - textScale fix active');
 		titleAutoGenerate = $settings?.title?.auto ?? true;
 		autoTags = $settings?.autoTags ?? true;
 		autoFollowUps = $settings?.autoFollowUps ?? true;
