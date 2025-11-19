@@ -184,6 +184,16 @@
 		saveSettings({ webSearch: webSearch });
 	};
 
+	const setTextScaleHandler = (scale) => {
+		textScale = scale;
+		setTextScale(textScale);
+
+		if (textScale === 1) {
+			textScale = null;
+		}
+		saveSettings({ textScale });
+	};
+
 	// Load settings reactively when settingsSource changes
 	$: {
 		titleAutoGenerate = settingsSource?.title?.auto ?? true;
@@ -258,6 +268,7 @@
 
 		backgroundImageUrl = settingsSource?.backgroundImageUrl ?? null;
 		webSearch = settingsSource?.webSearch ?? null;
+		textScale = settingsSource?.textScale ?? null;
 	}
 </script>
 

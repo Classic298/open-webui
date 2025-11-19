@@ -1059,15 +1059,6 @@
 			$models.map((m) => m.id).includes(modelId) ? modelId : ''
 		);
 
-		// Don't reload settings here - they're already loaded in +layout.svelte with admin defaults fallback
-		// This prevents overwriting the merged admin defaults + user settings
-		// const userSettings = await getUserSettings(localStorage.token);
-		// if (userSettings) {
-		// 	settings.set(userSettings.ui);
-		// } else {
-		// 	settings.set(JSON.parse(localStorage.getItem('settings') ?? '{}'));
-		// }
-
 		const chatInput = document.getElementById('chat-input');
 		setTimeout(() => chatInput?.focus(), 0);
 	};
@@ -1111,14 +1102,6 @@
 						: convertMessagesToHistory(chatContent.messages);
 
 				chatTitle.set(chatContent.title);
-
-				// Don't reload settings here - they're already loaded in +layout.svelte with admin defaults fallback
-				// const userSettings = await getUserSettings(localStorage.token);
-				// if (userSettings) {
-				// 	await settings.set(userSettings.ui);
-				// } else {
-				// 	await settings.set(JSON.parse(localStorage.getItem('settings') ?? '{}'));
-				// }
 
 				params = chatContent?.params ?? {};
 				chatFiles = chatContent?.files ?? [];
