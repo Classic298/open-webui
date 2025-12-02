@@ -431,10 +431,6 @@ For issues or questions:
 - Open an issue on [Open WebUI GitHub](https://github.com/open-webui/open-webui)
 - Join [Open WebUI Discord](https://discord.gg/5rJgQTnV4s)
 
-## License
-
-This tool is part of Open WebUI and follows the same license as the main project.
-
 ---
 
 **Remember:** With great power comes great responsibility. Always preview first, create backups, and start with conservative settings!
