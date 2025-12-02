@@ -1478,6 +1478,16 @@ class OAuthManager:
                                 "user": user.model_dump_json(exclude_none=True),
                             },
                         )
+
+                    # Apply default group assignment for OAuth users
+                    default_group_id = getattr(
+                        request.app.state.config, "DEFAULT_GROUP_ID", ""
+                    )
+                    if default_group_id and default_group_id:
+                        Groups.add_users_to_group(default_group_id, [user.id])
+                        log.info(
+                            f"Added OAuth user {user.email} to default group {default_group_id}"
+                        )
                 else:
                     raise HTTPException(
                         status.HTTP_403_FORBIDDEN,
