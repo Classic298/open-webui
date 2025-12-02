@@ -466,7 +466,6 @@ async def ldap_auth(request: Request, response: Response, form_data: LdapForm):
                 ):
                     if ENABLE_LDAP_GROUP_CREATION:
                         Groups.create_groups_by_group_names(user.id, user_groups)
-
                     try:
                         Groups.sync_groups_by_group_names(user.id, user_groups)
                         log.info(
@@ -474,6 +473,12 @@ async def ldap_auth(request: Request, response: Response, form_data: LdapForm):
                         )
                     except Exception as e:
                         log.error(f"Failed to sync groups for user {user.id}: {e}")
+                    # Re-apply default group after sync (sync may have removed it)
+                    default_group_id = getattr(
+                        request.app.state.config, "DEFAULT_GROUP_ID", ""
+                    )
+                    if default_group_id:
+                        Groups.add_users_to_group(default_group_id, [user.id])
 
                 return {
                     "token": token,
