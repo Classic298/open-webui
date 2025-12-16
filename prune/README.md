@@ -121,28 +121,15 @@ docker exec <container-name> python /app/prune/prune.py --days 90 --dry-run
 
 **Required Environment Variables:**
 
-The prune script needs these environment variables to function:
+⚠️ **IMPORTANT:** The prune script requires a **properly configured** Open WebUI container to function. If you get "*Required environment variable not found*" error, your Open WebUI container is not configured correctly.
+
+**Required variables:**
 - `WEBUI_SECRET_KEY` - Secret key for Open WebUI (required)
 - `DATABASE_URL` - Database connection string (required)
 - `DATA_DIR` - Data directory path (optional, default: `/app/backend/data`)
 - `VECTOR_DB` - Vector database type if using RAG (optional)
 
-**If you get "Required environment variable not found" error:**
-
-```bash
-# Quick fix - Set variables manually in the container:
-docker exec -it <container-name> bash
-
-# Inside container:
-export WEBUI_SECRET_KEY="your-secret-key"
-export DATABASE_URL="sqlite:////app/backend/data/webui.db"
-export DATA_DIR="/app/backend/data"
-
-# Now run the script:
-python /app/prune/prune.py
-```
-
-**Permanent fix - Start container with environment variables:**
+**How to properly configure your Open WebUI container:**
 
 Using docker-compose.yml (recommended):
 ```yaml
