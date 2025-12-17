@@ -7,7 +7,8 @@ from typing import Optional
 from open_webui.internal.db import Base, get_db
 from open_webui.models.tags import TagModel, Tag, Tags
 from open_webui.models.folders import Folders
-from open_webui.env import SRC_LOG_LEVELS
+from open_webui.env import SRC_LOG_LEVELS, ENABLE_CHAT_INPUT_BASE64_IMAGE_URL_CONVERSION
+from open_webui.utils.files import convert_message_content_images
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Boolean, Column, String, Text, JSON, Index
@@ -208,50 +209,30 @@ class ChatTable:
         return changed
 
     def _convert_chat_images(self, request, chat_data, user):
-        """
-        Convert base64 images in chat messages to file URLs.
-        Returns the modified chat data.
-        """
-        from open_webui.env import ENABLE_CHAT_INPUT_BASE64_IMAGE_URL_CONVERSION
-        from open_webui.utils.files import convert_message_content_images
-
         if not ENABLE_CHAT_INPUT_BASE64_IMAGE_URL_CONVERSION:
             return chat_data
 
         if not chat_data or not isinstance(chat_data, dict):
             return chat_data
 
-        # Convert images in messages
+        def convert_message(message):
+            if not (isinstance(message, dict) and "content" in message):
+                return
+            try:
+                message["content"] = convert_message_content_images(
+                    request, message["content"], {"source": "chat"}, user
+                )
+            except Exception as e:
+                log.exception(f"Error converting images: {e}")
+
         if "messages" in chat_data and isinstance(chat_data["messages"], list):
             for message in chat_data["messages"]:
-                if isinstance(message, dict) and "content" in message:
-                    try:
-                        message["content"] = convert_message_content_images(
-                            request,
-                            message["content"],
-                            {"source": "chat"},
-                            user,
-                        )
-                    except Exception as e:
-                        log.exception(f"Error converting images in message: {e}")
+                convert_message(message)
 
-        # Convert images in history.messages (if present)
-        if "history" in chat_data and isinstance(chat_data["history"], dict):
-            history = chat_data["history"]
-            if "messages" in history and isinstance(history["messages"], dict):
-                for message_id, message in history["messages"].items():
-                    if isinstance(message, dict) and "content" in message:
-                        try:
-                            message["content"] = convert_message_content_images(
-                                request,
-                                message["content"],
-                                {"source": "chat"},
-                                user,
-                            )
-                        except Exception as e:
-                            log.exception(
-                                f"Error converting images in history message {message_id}: {e}"
-                            )
+        history = chat_data.get("history", {})
+        if isinstance(history, dict) and isinstance(history.get("messages"), dict):
+            for message in history["messages"].values():
+                convert_message(message)
 
         return chat_data
 

@@ -120,56 +120,34 @@ def get_file_url_from_base64(request, base64_file_string, metadata, user):
 
 
 def convert_message_content_images(request, message_content, metadata, user):
-    """
-    Convert base64 images in message content to file URLs.
-    Handles both string content (markdown) and array content (OpenAI format with image_url types).
-
-    Args:
-        request: FastAPI request object
-        message_content: Either a string or a list of content items
-        metadata: Metadata to attach to uploaded files
-        user: User object
-
-    Returns:
-        Converted message content with base64 images replaced by file URLs
-    """
     if message_content is None:
         return message_content
 
-    # Handle string content (markdown format)
     if isinstance(message_content, str):
         return convert_markdown_base64_images(request, message_content, metadata, user)
 
-    # Handle array content (OpenAI format)
-    elif isinstance(message_content, list):
-        converted_content = []
-        for item in message_content:
-            if isinstance(item, dict) and item.get("type") == "image_url":
-                image_url_obj = item.get("image_url", {})
-                url = image_url_obj.get("url", "") if isinstance(image_url_obj, dict) else ""
+    if not isinstance(message_content, list):
+        return message_content
 
-                # Check if it's a base64 image
-                if url and url.startswith("data:image/"):
-                    MIN_REPLACEMENT_URL_LENGTH = 1024
-                    if len(url) > MIN_REPLACEMENT_URL_LENGTH:
-                        # Convert base64 to file URL
-                        file_url = get_image_url_from_base64(
-                            request, url, metadata, user
-                        )
-                        if file_url:
-                            # Create a new item with the converted URL
-                            item = {
-                                **item,
-                                "image_url": {
-                                    **image_url_obj,
-                                    "url": file_url,
-                                },
-                            }
+    converted_content = []
+    for item in message_content:
+        if not (isinstance(item, dict) and item.get("type") == "image_url"):
             converted_content.append(item)
-        return converted_content
+            continue
 
-    # Return as-is for other types
-    return message_content
+        image_url_obj = item.get("image_url", {})
+        url = image_url_obj.get("url", "") if isinstance(image_url_obj, dict) else ""
+
+        if url and url.startswith("data:image/") and len(url) > 1024:
+            file_url = get_image_url_from_base64(request, url, metadata, user)
+            if file_url:
+                item = {
+                    **item,
+                    "image_url": {**image_url_obj, "url": file_url},
+                }
+
+        converted_content.append(item)
+    return converted_content
 
 
 def get_image_base64_from_file_id(id: str) -> Optional[str]:
