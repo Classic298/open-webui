@@ -156,7 +156,7 @@ async def get_file_content_by_id(id: str, user=Depends(get_verified_user)):
 
 ## Solution Approach
 
-### Phase 1: Fix User Input Images (Not Yet Implemented)
+### Phase 1: Fix User Input Images (**✅ IMPLEMENTED**)
 
 **Goal**: Convert user message images to use file URLs instead of base64
 
@@ -331,11 +331,148 @@ async def get_file_content_by_id(id: str, user=Depends(get_verified_user)):
    - Test conversion of existing chats
    - Verify no data loss
 
+## Implementation Summary
+
+### Changes Made
+
+#### 1. Environment Variable (`backend/open_webui/env.py:575-578`)
+```python
+ENABLE_CHAT_INPUT_BASE64_IMAGE_URL_CONVERSION = (
+    os.environ.get("ENABLE_CHAT_INPUT_BASE64_IMAGE_URL_CONVERSION", "True").lower()
+    == "true"
+)
+```
+- **Default**: `True` (enabled by default for performance)
+- **Purpose**: Controls whether user input images are converted from base64 to file URLs
+
+#### 2. Conversion Function (`backend/open_webui/utils/files.py:122-172`)
+```python
+def convert_message_content_images(request, message_content, metadata, user):
+    """
+    Convert base64 images in message content to file URLs.
+    Handles both string content (markdown) and array content (OpenAI format).
+    """
+```
+- **Handles String Content**: Markdown format with `![alt](data:image/...)`
+- **Handles Array Content**: OpenAI format with `{"type": "image_url", "image_url": {"url": "data:..."}}`
+- **Minimum Size**: Only converts base64 strings > 1024 characters
+- **File Storage**: Uses existing `upload_image()` infrastructure
+- **URL Format**: Returns `/api/v1/files/{id}/content`
+
+#### 3. Chat History Converter (`backend/open_webui/models/chats.py:210-256`)
+```python
+def _convert_chat_images(self, request, chat_data, user):
+    """
+    Convert base64 images in chat messages to file URLs.
+    Processes both chat.messages and chat.history.messages.
+    """
+```
+- **Checks Environment Variable**: Only runs if `ENABLE_CHAT_INPUT_BASE64_IMAGE_URL_CONVERSION` is True
+- **Handles Two Formats**:
+  - `chat.messages[]` - Array of messages
+  - `chat.history.messages{}` - Dictionary of message_id → message
+- **Error Handling**: Logs exceptions but doesn't fail the entire operation
+
+#### 4. Router Integration (`backend/open_webui/routers/chats.py`)
+
+**Create New Chat** (Line 262-276):
+```python
+@router.post("/new", response_model=Optional[ChatResponse])
+async def create_new_chat(
+    request: Request, form_data: ChatForm, user=Depends(get_verified_user)
+):
+    # Convert base64 images to file URLs
+    converted_chat_data = Chats._convert_chat_images(request, form_data.chat, user)
+    form_data.chat = converted_chat_data
+    chat = Chats.insert_new_chat(user.id, form_data)
+    return ChatResponse(**chat.model_dump())
+```
+
+**Update Chat** (Line 580-597):
+```python
+@router.post("/{id}", response_model=Optional[ChatResponse])
+async def update_chat_by_id(
+    request: Request, id: str, form_data: ChatForm, user=Depends(get_verified_user)
+):
+    chat = Chats.get_chat_by_id_and_user_id(id, user.id)
+    if chat:
+        updated_chat = {**chat.chat, **form_data.chat}
+        # Convert base64 images to file URLs
+        converted_chat_data = Chats._convert_chat_images(request, updated_chat, user)
+        chat = Chats.update_chat_by_id(id, converted_chat_data)
+        return ChatResponse(**chat.model_dump())
+```
+
+**Import Chats** (Line 285-302):
+```python
+@router.post("/import", response_model=list[ChatResponse])
+async def import_chats(
+    request: Request, form_data: ChatsImportForm, user=Depends(get_verified_user)
+):
+    # Convert base64 images to file URLs in all imported chats
+    for chat_form in form_data.chats:
+        converted_chat_data = Chats._convert_chat_images(
+            request, chat_form.chat, user
+        )
+        chat_form.chat = converted_chat_data
+    chats = Chats.import_chats(user.id, form_data.chats)
+    return chats
+```
+
+### How It Works
+
+1. **User Sends Message with Image**:
+   - Frontend uploads image as base64 in message content
+   - Router receives POST to `/api/v1/chats/new` or `/api/v1/chats/{id}`
+
+2. **Conversion Process**:
+   - Router calls `Chats._convert_chat_images(request, chat_data, user)`
+   - Iterates through all messages in the chat
+   - For each message with image content:
+     - Detects base64 images (starts with `data:image/`)
+     - If > 1024 bytes, calls `get_image_url_from_base64()`
+     - Uploads image as file via `upload_image()` → `upload_file_handler()`
+     - Creates database record in `Files` table
+     - Replaces base64 with file URL: `/api/v1/files/{id}/content`
+
+3. **Storage**:
+   - **Physical**: File stored via `Storage.upload_file()`
+   - **Database**: Record in `Files` table with metadata
+   - **Access Control**: Enforced via existing file permissions system
+
+4. **Chat Saved**:
+   - Chat JSON now contains file URLs instead of base64
+   - Dramatically reduced payload size
+   - Images loaded on-demand via browser caching
+
+### Migration for Existing Chats
+
+Existing chats with base64 images will continue to work as-is. The conversion only applies to:
+- New chats created after this change
+- Updates to existing chats (next time they're saved)
+- Imported chats
+
+For bulk migration of existing chats, a separate migration script could be created.
+
+### Configuration
+
+To disable this feature (e.g., for testing or compatibility):
+```bash
+export ENABLE_CHAT_INPUT_BASE64_IMAGE_URL_CONVERSION=False
+```
+
+Or in `.env` file:
+```
+ENABLE_CHAT_INPUT_BASE64_IMAGE_URL_CONVERSION=False
+```
+
 ## References
 
 - GitHub Discussion: https://github.com/open-webui/open-webui/discussions/13122
 - Related Issue: #11934 (similar issue in different context)
-- Environment Variables: `backend/open_webui/env.py:570-573`
+- Environment Variables: `backend/open_webui/env.py:570-578`
 - File Upload: `backend/open_webui/routers/files.py:170-290`
-- Image Conversion: `backend/open_webui/utils/files.py:47-57`
+- Image Conversion: `backend/open_webui/utils/files.py:122-172`
 - Middleware: `backend/open_webui/utils/middleware.py:2697-2700`
+- Chat Model: `backend/open_webui/models/chats.py:210-256`
+- Chat Router: `backend/open_webui/routers/chats.py` (lines 262-302, 580-597)
