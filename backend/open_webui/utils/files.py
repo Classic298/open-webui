@@ -131,19 +131,17 @@ def convert_message_content_images(request, message_content, metadata, user):
 
     converted_content = []
     for item in message_content:
-        if not (isinstance(item, dict) and item.get("type") == "image_url"):
+        if not isinstance(item, dict) or item.get("type") != "image_url":
             converted_content.append(item)
             continue
 
-        image_url_obj = item.get("image_url", {})
-        url = image_url_obj.get("url", "") if isinstance(image_url_obj, dict) else ""
-
+        url = item.get("image_url", {}).get("url", "")
         if url and url.startswith("data:image/") and len(url) > 1024:
             file_url = get_image_url_from_base64(request, url, metadata, user)
             if file_url:
                 item = {
                     **item,
-                    "image_url": {**image_url_obj, "url": file_url},
+                    "image_url": {**item.get("image_url", {}), "url": file_url},
                 }
 
         converted_content.append(item)

@@ -212,11 +212,11 @@ class ChatTable:
         if not ENABLE_CHAT_INPUT_BASE64_IMAGE_URL_CONVERSION:
             return chat_data
 
-        if not chat_data or not isinstance(chat_data, dict):
+        if not isinstance(chat_data, dict):
             return chat_data
 
         def convert_message(message):
-            if not (isinstance(message, dict) and "content" in message):
+            if not isinstance(message, dict) or "content" not in message:
                 return
             try:
                 message["content"] = convert_message_content_images(
@@ -225,13 +225,12 @@ class ChatTable:
             except Exception as e:
                 log.exception(f"Error converting images: {e}")
 
-        if "messages" in chat_data and isinstance(chat_data["messages"], list):
-            for message in chat_data["messages"]:
-                convert_message(message)
+        for message in chat_data.get("messages", []):
+            convert_message(message)
 
-        history = chat_data.get("history", {})
-        if isinstance(history, dict) and isinstance(history.get("messages"), dict):
-            for message in history["messages"].values():
+        history_messages = chat_data.get("history", {}).get("messages", {})
+        if isinstance(history_messages, dict):
+            for message in history_messages.values():
                 convert_message(message)
 
         return chat_data
