@@ -61,7 +61,7 @@
 
 	// Determine if user can see active user count based on role and config
 	$: canSeeActiveUserCount =
-		!$config?.features?.show_active_users_count_admin_only || role === 'admin';
+		!$config?.features?.enable_active_users_count_admin_only || role === 'admin';
 
 	$: if (show && canSeeActiveUserCount) {
 		getUsageInfo();

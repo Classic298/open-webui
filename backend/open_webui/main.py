@@ -471,7 +471,7 @@ from open_webui.env import (
     EXTERNAL_PWA_MANIFEST_URL,
     AIOHTTP_CLIENT_SESSION_SSL,
     ENABLE_STAR_SESSIONS_MIDDLEWARE,
-    SHOW_ACTIVE_USERS_COUNT_ADMIN_ONLY,
+    ENABLE_ACTIVE_USERS_COUNT_ADMIN_ONLY,
 )
 
 
@@ -1844,7 +1844,7 @@ async def get_app_config(request: Request):
             "enable_login_form": app.state.config.ENABLE_LOGIN_FORM,
             "enable_websocket": ENABLE_WEBSOCKET_SUPPORT,
             "enable_version_update_check": ENABLE_VERSION_UPDATE_CHECK,
-            "show_active_users_count_admin_only": SHOW_ACTIVE_USERS_COUNT_ADMIN_ONLY,
+            "enable_active_users_count_admin_only": ENABLE_ACTIVE_USERS_COUNT_ADMIN_ONLY,
             **(
                 {
                     "enable_direct_connections": app.state.config.ENABLE_DIRECT_CONNECTIONS,

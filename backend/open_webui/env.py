@@ -364,9 +364,9 @@ if DATABASE_USER_ACTIVE_STATUS_UPDATE_INTERVAL is not None:
     except Exception:
         DATABASE_USER_ACTIVE_STATUS_UPDATE_INTERVAL = 0.0
 
-# Show active user count only to admin users
-SHOW_ACTIVE_USERS_COUNT_ADMIN_ONLY = (
-    os.environ.get("SHOW_ACTIVE_USERS_COUNT_ADMIN_ONLY", "False").lower() == "true"
+# Enable restriction to show active user count only to admin users
+ENABLE_ACTIVE_USERS_COUNT_ADMIN_ONLY = (
+    os.environ.get("ENABLE_ACTIVE_USERS_COUNT_ADMIN_ONLY", "False").lower() == "true"
 )
 
 RESET_CONFIG_ON_START = (
