@@ -82,8 +82,8 @@
 	const init = async () => {
 		models = null;
 
-		workspaceModels = await getBaseModels(localStorage.token);
-		baseModels = await getModels(localStorage.token, null, true);
+		workspaceModels = await getBaseModels(localStorage.token, true);
+		baseModels = await getModels(localStorage.token, null, true, true);
 
 		models = baseModels.map((m) => {
 			const workspaceModel = workspaceModels.find((wm) => wm.id === m.id);
@@ -139,7 +139,10 @@
 			await getModels(
 				localStorage.token,
 				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-			)
+			,
+			false,
+			true
+		)
 		);
 	};
 
@@ -165,7 +168,10 @@
 			await getModels(
 				localStorage.token,
 				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-			)
+			,
+			false,
+			true
+		)
 		);
 	};
 
