@@ -41,7 +41,6 @@ from open_webui.models.messages import (
 
 from open_webui.config import ENABLE_ADMIN_CHAT_ACCESS, ENABLE_ADMIN_EXPORT
 from open_webui.constants import ERROR_MESSAGES
-from open_webui.env import SRC_LOG_LEVELS
 
 
 from open_webui.utils.models import (
@@ -62,7 +61,6 @@ from open_webui.utils.webhook import post_webhook
 from open_webui.utils.channels import extract_mentions, replace_mentions
 
 log = logging.getLogger(__name__)
-log.setLevel(SRC_LOG_LEVELS["MODELS"])
 
 router = APIRouter()
 

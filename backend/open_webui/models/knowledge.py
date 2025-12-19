@@ -5,7 +5,6 @@ from typing import Optional
 import uuid
 
 from open_webui.internal.db import Base, get_db
-from open_webui.env import SRC_LOG_LEVELS
 
 from open_webui.models.files import File, FileModel, FileMetadataResponse
 from open_webui.models.groups import Groups
@@ -26,7 +25,6 @@ from sqlalchemy import (
 from open_webui.utils.access_control import has_access
 
 log = logging.getLogger(__name__)
-log.setLevel(SRC_LOG_LEVELS["MODELS"])
 
 ####################
 # Knowledge DB Schema
