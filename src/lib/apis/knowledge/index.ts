@@ -38,12 +38,15 @@ export const createNewKnowledge = async (
 	return res;
 };
 
-export const getKnowledgeBases = async (token: string = '', refresh: boolean = false) => {
+export const getKnowledgeBases = async (token: string = '', refresh: boolean = false, page: number | null = null) => {
 	let error = null;
 
 	const searchParams = new URLSearchParams();
 	if (refresh) {
 		searchParams.append('refresh', 'true');
+	}
+	if (page) {
+		searchParams.append('page', page.toString());
 	}
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/knowledge/?${searchParams.toString()}`, {
