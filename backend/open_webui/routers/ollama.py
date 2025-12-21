@@ -51,6 +51,7 @@ from open_webui.utils.payload import (
 )
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_access
+from open_webui.utils.models import get_fallback_model_id
 
 
 from open_webui.config import (
@@ -64,7 +65,6 @@ from open_webui.env import (
     AIOHTTP_CLIENT_TIMEOUT,
     AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST,
     BYPASS_MODEL_ACCESS_CONTROL,
-    ENABLE_CUSTOM_MODEL_FALLBACK,
 )
 from open_webui.constants import ERROR_MESSAGES
 
@@ -1314,19 +1314,15 @@ async def generate_chat_completion(
         payload["model"] = f"{payload['model']}:latest"
 
     # Try fallback to default model for custom models if base model not found
-    if (
-        ENABLE_CUSTOM_MODEL_FALLBACK
-        and url_idx is None
-        and payload["model"] not in request.app.state.OLLAMA_MODELS
-        and model_info
-        and model_info.base_model_id
-        and request.app.state.config.DEFAULT_MODELS
-    ):
-        fallback_model_id = request.app.state.config.DEFAULT_MODELS.split(",")[0].strip()
-        if ":" not in fallback_model_id:
-            fallback_model_id = f"{fallback_model_id}:latest"
+    if url_idx is None and payload["model"] not in request.app.state.OLLAMA_MODELS:
+        fallback_model_id = get_fallback_model_id(
+            model_info,
+            request.app.state.OLLAMA_MODELS,
+            request.app.state.config.DEFAULT_MODELS,
+            add_latest_tag=True,
+        )
 
-        if fallback_model_id in request.app.state.OLLAMA_MODELS:
+        if fallback_model_id:
             log.warning(
                 f"Base model '{model_info.base_model_id}' not found for custom model '{model_id}'. "
                 f"Falling back to default model '{fallback_model_id}'."

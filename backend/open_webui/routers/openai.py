@@ -31,7 +31,6 @@ from open_webui.env import (
     AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST,
     ENABLE_FORWARD_USER_INFO_HEADERS,
     BYPASS_MODEL_ACCESS_CONTROL,
-    ENABLE_CUSTOM_MODEL_FALLBACK,
 )
 from open_webui.models.users import UserModel
 
@@ -51,6 +50,7 @@ from open_webui.utils.misc import (
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_access
 from open_webui.utils.headers import include_user_info_headers
+from open_webui.utils.models import get_fallback_model_id
 
 
 log = logging.getLogger(__name__)
@@ -848,31 +848,26 @@ async def generate_chat_completion(
     await get_all_models(request, user=user)
     model = request.app.state.OPENAI_MODELS.get(model_id)
 
-    if model:
-        idx = model["urlIdx"]
-    elif (
-        ENABLE_CUSTOM_MODEL_FALLBACK
-        and model_info
-        and model_info.base_model_id
-        and request.app.state.config.DEFAULT_MODELS
-    ):
+    if not model:
         # Try fallback to default model for custom models
-        fallback_model_id = request.app.state.config.DEFAULT_MODELS.split(",")[0].strip()
-        fallback_model = request.app.state.OPENAI_MODELS.get(fallback_model_id)
+        fallback_model_id = get_fallback_model_id(
+            model_info,
+            request.app.state.OPENAI_MODELS,
+            request.app.state.config.DEFAULT_MODELS,
+        )
 
-        if not fallback_model:
+        if fallback_model_id:
+            log.warning(
+                f"Base model '{model_info.base_model_id}' not found for custom model '{form_data.get('model')}'. "
+                f"Falling back to default model '{fallback_model_id}'."
+            )
+            payload["model"] = fallback_model_id
+            model_id = fallback_model_id
+            model = request.app.state.OPENAI_MODELS[fallback_model_id]
+        else:
             raise HTTPException(status_code=404, detail="Model not found")
 
-        log.warning(
-            f"Base model '{model_info.base_model_id}' not found for custom model '{form_data.get('model')}'. "
-            f"Falling back to default model '{fallback_model_id}'."
-        )
-        payload["model"] = fallback_model_id
-        model_id = fallback_model_id
-        model = fallback_model
-        idx = model["urlIdx"]
-    else:
-        raise HTTPException(status_code=404, detail="Model not found")
+    idx = model["urlIdx"]
 
     # Get the API config for the model
     api_config = request.app.state.config.OPENAI_API_CONFIGS.get(
