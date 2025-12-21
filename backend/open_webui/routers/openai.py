@@ -35,13 +35,13 @@ from open_webui.env import (
 from open_webui.models.users import UserModel
 
 from open_webui.constants import ERROR_MESSAGES
-from open_webui.env import SRC_LOG_LEVELS
 
 
 from open_webui.utils.payload import (
     apply_model_params_to_body_openai,
     apply_system_prompt_to_body,
 )
+from open_webui.utils.models import get_model_id_with_fallback
 from open_webui.utils.misc import (
     convert_logit_bias_input_to_json,
     stream_chunks_handler,
@@ -54,7 +54,6 @@ from open_webui.utils.models import get_fallback_model_id
 
 
 log = logging.getLogger(__name__)
-log.setLevel(SRC_LOG_LEVELS["OPENAI"])
 
 
 ##########################################
@@ -855,6 +854,15 @@ async def generate_chat_completion(
             request.app.state.OPENAI_MODELS,
             request.app.state.config.DEFAULT_MODELS,
         )
+        if did_fallback:
+            model = request.app.state.OPENAI_MODELS.get(fallback_id)
+            if model:
+                payload["model"] = fallback_id
+                model_id = fallback_id
+                idx = model["urlIdx"]
+
+        if not model:
+            raise HTTPException(status_code=404, detail="Model not found")
 
         if fallback_model_id:
             log.warning(
@@ -906,10 +914,11 @@ async def generate_chat_completion(
         del payload["max_tokens"]
 
     # Convert the modified body back to JSON
-    if "logit_bias" in payload:
-        payload["logit_bias"] = json.loads(
-            convert_logit_bias_input_to_json(payload["logit_bias"])
-        )
+    if "logit_bias" in payload and payload["logit_bias"]:
+        logit_bias = convert_logit_bias_input_to_json(payload["logit_bias"])
+
+        if logit_bias:
+            payload["logit_bias"] = json.loads(logit_bias)
 
     headers, cookies = await get_headers_and_cookies(
         request, url, key, api_config, metadata, user=user
