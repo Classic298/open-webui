@@ -1,13 +1,14 @@
+import asyncio
 import logging
 import time
 from typing import Optional
 
-from open_webui.internal.db import Base, JSONField, get_db
-from open_webui.models.users import Users, UserResponse
-from open_webui.models.groups import Groups
+from open_webui.internal.db import Base, JSONField, get_db, get_async_db
+from open_webui.models.users import Users, UserResponse, AsyncUsers
+from open_webui.models.groups import Groups, AsyncGroups
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import BigInteger, Column, String, Text, JSON
+from sqlalchemy import BigInteger, Column, String, Text, JSON, select, delete
 
 from open_webui.utils.access_control import has_access
 
@@ -270,3 +271,181 @@ class ToolsTable:
 
 
 Tools = ToolsTable()
+
+# =============================================================================
+# ASYNC TOOLSTABLE (Phase 3: Core Model Conversion)
+# =============================================================================
+
+
+class AsyncToolsTable:
+    """Native async version of ToolsTable for non-blocking database operations."""
+    
+    async def insert_new_tool(
+        self, user_id: str, form_data: ToolForm, specs: list[dict]
+    ) -> Optional[ToolModel]:
+        async with get_async_db() as db:
+            tool = ToolModel(
+                **form_data.model_dump(),
+                specs=specs,
+                user_id=user_id,
+                updated_at=int(time.time()),
+                created_at=int(time.time()),
+            )
+            
+            try:
+                result = Tool(**tool.model_dump())
+                db.add(result)
+                await db.commit()
+                await db.refresh(result)
+                return ToolModel.model_validate(result) if result else None
+            except Exception as e:
+                log.exception(f"Error creating a new tool: {e}")
+                return None
+
+    async def get_tool_by_id(self, id: str) -> Optional[ToolModel]:
+        try:
+            async with get_async_db() as db:
+                tool = await db.get(Tool, id)
+                return ToolModel.model_validate(tool) if tool else None
+        except Exception:
+            return None
+
+    async def get_tools(self) -> list[ToolUserModel]:
+        async with get_async_db() as db:
+            result = await db.execute(select(Tool).order_by(Tool.updated_at.desc()))
+            all_tools = result.scalars().all()
+            
+            user_ids = list(set(tool.user_id for tool in all_tools))
+            users = await AsyncUsers.get_users_by_user_ids(user_ids) if user_ids else []
+            users_dict = {user.id: user for user in users}
+            
+            tools = []
+            for tool in all_tools:
+                user = users_dict.get(tool.user_id)
+                tools.append(
+                    ToolUserModel.model_validate({
+                        **ToolModel.model_validate(tool).model_dump(),
+                        "user": user.model_dump() if user else None,
+                    })
+                )
+            return tools
+
+    async def get_tools_by_user_id(
+        self, user_id: str, permission: str = "write"
+    ) -> list[ToolUserModel]:
+        tools = await self.get_tools()
+        groups = await AsyncGroups.get_groups_by_member_id(user_id)
+        user_group_ids = {group.id for group in groups}
+        
+        return [
+            tool
+            for tool in tools
+            if tool.user_id == user_id
+            or has_access(user_id, permission, tool.access_control, user_group_ids)
+        ]
+
+    async def get_tool_valves_by_id(self, id: str) -> Optional[dict]:
+        try:
+            async with get_async_db() as db:
+                tool = await db.get(Tool, id)
+                return tool.valves if tool and tool.valves else {}
+        except Exception as e:
+            log.exception(f"Error getting tool valves by id {id}")
+            return None
+
+    async def update_tool_valves_by_id(self, id: str, valves: dict) -> Optional[ToolModel]:
+        try:
+            async with get_async_db() as db:
+                from sqlalchemy import update
+                await db.execute(
+                    update(Tool).where(Tool.id == id).values(
+                        valves=valves, updated_at=int(time.time())
+                    )
+                )
+                await db.commit()
+                return await self.get_tool_by_id(id)
+        except Exception:
+            return None
+
+    async def get_user_valves_by_id_and_user_id(
+        self, id: str, user_id: str
+    ) -> Optional[dict]:
+        try:
+            user = await AsyncUsers.get_user_by_id(user_id)
+            if not user:
+                return None
+                
+            user_settings = user.settings or {}
+
+            # Check if user has "tools" and "valves" settings
+            if "tools" not in user_settings:
+                user_settings["tools"] = {}
+            if "valves" not in user_settings["tools"]:
+                user_settings["tools"]["valves"] = {}
+
+            return user_settings["tools"]["valves"].get(id, {})
+        except Exception as e:
+            log.exception(
+                f"Error getting user values by id {id} and user_id {user_id}: {e}"
+            )
+            return None
+
+    async def update_user_valves_by_id_and_user_id(
+        self, id: str, user_id: str, valves: dict
+    ) -> Optional[dict]:
+        try:
+            user = await AsyncUsers.get_user_by_id(user_id)
+            if not user:
+                return None
+                
+            user_settings = user.settings or {}
+
+            # Check if user has "tools" and "valves" settings
+            if "tools" not in user_settings:
+                user_settings["tools"] = {}
+            if "valves" not in user_settings["tools"]:
+                user_settings["tools"]["valves"] = {}
+
+            user_settings["tools"]["valves"][id] = valves
+
+            # Update the user settings in the database
+            await AsyncUsers.update_user_by_id(user_id, {"settings": user_settings})
+
+            return user_settings["tools"]["valves"][id]
+        except Exception as e:
+            log.exception(
+                f"Error updating user valves by id {id} and user_id {user_id}: {e}"
+            )
+            return None
+
+    async def update_tool_by_id(self, id: str, updated: dict) -> Optional[ToolModel]:
+        try:
+            async with get_async_db() as db:
+                from sqlalchemy import update
+                await db.execute(
+                    update(Tool).where(Tool.id == id).values(
+                        **updated, updated_at=int(time.time())
+                    )
+                )
+                await db.commit()
+                
+                tool = await db.get(Tool, id)
+                await db.refresh(tool)
+                return ToolModel.model_validate(tool)
+        except Exception:
+            return None
+
+    async def delete_tool_by_id(self, id: str) -> bool:
+        try:
+            async with get_async_db() as db:
+                await db.execute(delete(Tool).where(Tool.id == id))
+                await db.commit()
+                return True
+        except Exception:
+            return False
+
+
+# Async instance
+AsyncTools = AsyncToolsTable()
+
+

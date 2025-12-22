@@ -6,6 +6,7 @@ from open_webui.models.prompts import (
     PromptUserResponse,
     PromptModel,
     Prompts,
+    AsyncPrompts,
 )
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.utils.auth import get_admin_user, get_verified_user
@@ -22,9 +23,9 @@ router = APIRouter()
 @router.get("/", response_model=list[PromptModel])
 async def get_prompts(user=Depends(get_verified_user)):
     if user.role == "admin" and BYPASS_ADMIN_ACCESS_CONTROL:
-        prompts = Prompts.get_prompts()
+        prompts = await AsyncPrompts.get_prompts()
     else:
-        prompts = Prompts.get_prompts_by_user_id(user.id, "read")
+        prompts = await AsyncPrompts.get_prompts_by_user_id(user.id, "read")
 
     return prompts
 
@@ -32,9 +33,9 @@ async def get_prompts(user=Depends(get_verified_user)):
 @router.get("/list", response_model=list[PromptUserResponse])
 async def get_prompt_list(user=Depends(get_verified_user)):
     if user.role == "admin" and BYPASS_ADMIN_ACCESS_CONTROL:
-        prompts = Prompts.get_prompts()
+        prompts = await AsyncPrompts.get_prompts()
     else:
-        prompts = Prompts.get_prompts_by_user_id(user.id, "write")
+        prompts = await AsyncPrompts.get_prompts_by_user_id(user.id, "write")
 
     return prompts
 
@@ -63,9 +64,9 @@ async def create_new_prompt(
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
-    prompt = Prompts.get_prompt_by_command(form_data.command)
+    prompt = await AsyncPrompts.get_prompt_by_command(form_data.command)
     if prompt is None:
-        prompt = Prompts.insert_new_prompt(user.id, form_data)
+        prompt = await AsyncPrompts.insert_new_prompt(user.id, form_data)
 
         if prompt:
             return prompt
@@ -86,7 +87,7 @@ async def create_new_prompt(
 
 @router.get("/command/{command}", response_model=Optional[PromptModel])
 async def get_prompt_by_command(command: str, user=Depends(get_verified_user)):
-    prompt = Prompts.get_prompt_by_command(f"/{command}")
+    prompt = await AsyncPrompts.get_prompt_by_command(f"/{command}")
 
     if prompt:
         if (
@@ -113,7 +114,7 @@ async def update_prompt_by_command(
     form_data: PromptForm,
     user=Depends(get_verified_user),
 ):
-    prompt = Prompts.get_prompt_by_command(f"/{command}")
+    prompt = await AsyncPrompts.get_prompt_by_command(f"/{command}")
     if not prompt:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -131,7 +132,7 @@ async def update_prompt_by_command(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    prompt = Prompts.update_prompt_by_command(f"/{command}", form_data)
+    prompt = await AsyncPrompts.update_prompt_by_command(f"/{command}", form_data)
     if prompt:
         return prompt
     else:
@@ -148,7 +149,7 @@ async def update_prompt_by_command(
 
 @router.delete("/command/{command}/delete", response_model=bool)
 async def delete_prompt_by_command(command: str, user=Depends(get_verified_user)):
-    prompt = Prompts.get_prompt_by_command(f"/{command}")
+    prompt = await AsyncPrompts.get_prompt_by_command(f"/{command}")
     if not prompt:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -165,5 +166,5 @@ async def delete_prompt_by_command(command: str, user=Depends(get_verified_user)
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    result = Prompts.delete_prompt_by_command(f"/{command}")
+    result = await AsyncPrompts.delete_prompt_by_command(f"/{command}")
     return result

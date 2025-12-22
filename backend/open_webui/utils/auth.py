@@ -23,7 +23,7 @@ from opentelemetry import trace
 
 
 from open_webui.utils.access_control import has_permission
-from open_webui.models.users import Users
+from open_webui.models.users import Users, AsyncUsers
 
 from open_webui.constants import ERROR_MESSAGES
 
@@ -285,7 +285,7 @@ async def get_current_user(
 
     # auth by api key
     if token.startswith("sk-"):
-        user = get_current_user_by_api_key(request, token)
+        user = await get_current_user_by_api_key(request, token)
 
         # Add user info to current span
         current_span = trace.get_current_span()
@@ -314,7 +314,8 @@ async def get_current_user(
                     detail="Invalid token",
                 )
 
-            user = Users.get_user_by_id(data["id"])
+            # ASYNC: Use AsyncUsers instead of blocking Users.get_user_by_id
+            user = await AsyncUsers.get_user_by_id(data["id"])
             if user is None:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -339,10 +340,10 @@ async def get_current_user(
                     current_span.set_attribute("client.user.role", user.role)
                     current_span.set_attribute("client.auth.type", "jwt")
 
-                # Refresh the user's last active timestamp asynchronously
-                # to prevent blocking the request
-                if background_tasks:
-                    background_tasks.add_task(Users.update_last_active_by_id, user.id)
+                # ASYNC: Update last active timestamp asynchronously
+                # Using asyncio.create_task to run in background without blocking
+                import asyncio
+                asyncio.create_task(AsyncUsers.update_last_active_by_id(user.id))
             return user
         else:
             raise HTTPException(
@@ -364,8 +365,9 @@ async def get_current_user(
         raise e
 
 
-def get_current_user_by_api_key(request, api_key: str):
-    user = Users.get_user_by_api_key(api_key)
+async def get_current_user_by_api_key(request, api_key: str):
+    # ASYNC: Use AsyncUsers instead of blocking Users.get_user_by_api_key
+    user = await AsyncUsers.get_user_by_api_key(api_key)
 
     if user is None:
         raise HTTPException(
@@ -393,7 +395,9 @@ def get_current_user_by_api_key(request, api_key: str):
         current_span.set_attribute("client.user.role", user.role)
         current_span.set_attribute("client.auth.type", "api_key")
 
-    Users.update_last_active_by_id(user.id)
+    # ASYNC: Update last active asynchronously
+    import asyncio
+    asyncio.create_task(AsyncUsers.update_last_active_by_id(user.id))
     return user
 
 

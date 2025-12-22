@@ -374,7 +374,7 @@ async def verify_url(request: Request, user=Depends(get_admin_user)):
 
 
 @router.get("/models")
-def get_models(request: Request, user=Depends(get_verified_user)):
+async def get_models(request: Request, user=Depends(get_verified_user)):
     try:
         if request.app.state.config.IMAGE_GENERATION_ENGINE == "openai":
             return [

@@ -1,11 +1,12 @@
+import asyncio
 import logging
 import uuid
 from typing import Optional
 
-from open_webui.internal.db import Base, get_db
-from open_webui.models.users import UserModel, UserProfileImageResponse, Users
+from open_webui.internal.db import Base, get_db, get_async_db
+from open_webui.models.users import UserModel, UserProfileImageResponse, Users, AsyncUsers
 from pydantic import BaseModel
-from sqlalchemy import Boolean, Column, String, Text
+from sqlalchemy import Boolean, Column, String, Text, select, delete, update
 
 log = logging.getLogger(__name__)
 
@@ -194,3 +195,129 @@ class AuthsTable:
 
 
 Auths = AuthsTable()
+
+
+# =============================================================================
+# ASYNC AUTHS TABLE (Phase 3: Core Model Conversion)
+# =============================================================================
+
+
+class AsyncAuthsTable:
+    """Native async version of AuthsTable for non-blocking database operations."""
+    
+    async def insert_new_auth(
+        self,
+        email: str,
+        password: str,
+        name: str,
+        profile_image_url: str = "/user.png",
+        role: str = "pending",
+        oauth: Optional[dict] = None,
+    ) -> Optional[UserModel]:
+        async with get_async_db() as db:
+            log.info("insert_new_auth")
+            
+            id = str(uuid.uuid4())
+            
+            auth = AuthModel(id=id, email=email, password=password, active=True)
+            result = Auth(**auth.model_dump())
+            db.add(result)
+            
+            user = await AsyncUsers.insert_new_user(
+                id, name, email, profile_image_url, role, oauth=oauth
+            )
+            
+            await db.commit()
+            await db.refresh(result)
+            
+            return user if result and user else None
+
+    async def authenticate_user(
+        self, email: str, verify_password: callable
+    ) -> Optional[UserModel]:
+        log.info(f"authenticate_user: {email}")
+        
+        user = await AsyncUsers.get_user_by_email(email)
+        if not user:
+            return None
+        
+        try:
+            async with get_async_db() as db:
+                result = await db.execute(
+                    select(Auth).where(Auth.id == user.id, Auth.active == True)
+                )
+                auth = result.scalar_one_or_none()
+                if auth:
+                    if verify_password(auth.password):
+                        return user
+                    return None
+                return None
+        except Exception:
+            return None
+
+    async def authenticate_user_by_api_key(self, api_key: str) -> Optional[UserModel]:
+        log.info(f"authenticate_user_by_api_key: {api_key}")
+        if not api_key:
+            return None
+        
+        try:
+            user = await AsyncUsers.get_user_by_api_key(api_key)
+            return user if user else None
+        except Exception:
+            return None
+
+    async def authenticate_user_by_email(self, email: str) -> Optional[UserModel]:
+        log.info(f"authenticate_user_by_email: {email}")
+        try:
+            async with get_async_db() as db:
+                result = await db.execute(
+                    select(Auth).where(Auth.email == email, Auth.active == True)
+                )
+                auth = result.scalar_one_or_none()
+                if auth:
+                    user = await AsyncUsers.get_user_by_id(auth.id)
+                    return user
+        except Exception:
+            return None
+
+    async def update_user_password_by_id(self, id: str, new_password: str) -> bool:
+        try:
+            async with get_async_db() as db:
+                result = await db.execute(
+                    update(Auth).where(Auth.id == id).values(password=new_password)
+                )
+                await db.commit()
+                return result.rowcount == 1
+        except Exception:
+            return False
+
+    async def update_email_by_id(self, id: str, email: str) -> bool:
+        try:
+            async with get_async_db() as db:
+                result = await db.execute(
+                    update(Auth).where(Auth.id == id).values(email=email)
+                )
+                await db.commit()
+                return result.rowcount == 1
+        except Exception:
+            return False
+
+    async def delete_auth_by_id(self, id: str) -> bool:
+        try:
+            # Delete User first
+            result = await AsyncUsers.delete_user_by_id(id)
+            
+            if result:
+                async with get_async_db() as db:
+                    await db.execute(delete(Auth).where(Auth.id == id))
+                    await db.commit()
+                return True
+            return False
+        except Exception:
+            return False
+
+
+# Async instance
+AsyncAuths = AsyncAuthsTable()
+
+

@@ -2417,7 +2417,7 @@ class DeleteForm(BaseModel):
 
 
 @router.post("/delete")
-def delete_entries_from_collection(form_data: DeleteForm, user=Depends(get_admin_user)):
+async def delete_entries_from_collection(form_data: DeleteForm, user=Depends(get_admin_user)):
     try:
         if VECTOR_DB_CLIENT.has_collection(collection_name=form_data.collection_name):
             file = Files.get_file_by_id(form_data.file_id)
@@ -2436,13 +2436,13 @@ def delete_entries_from_collection(form_data: DeleteForm, user=Depends(get_admin
 
 
 @router.post("/reset/db")
-def reset_vector_db(user=Depends(get_admin_user)):
+async def reset_vector_db(user=Depends(get_admin_user)):
     VECTOR_DB_CLIENT.reset()
     Knowledges.delete_all_knowledge()
 
 
 @router.post("/reset/uploads")
-def reset_upload_dir(user=Depends(get_admin_user)) -> bool:
+async def reset_upload_dir(user=Depends(get_admin_user)) -> bool:
     folder = f"{UPLOAD_DIR}"
     try:
         # Check if the directory exists

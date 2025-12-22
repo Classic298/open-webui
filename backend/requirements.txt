@@ -23,6 +23,8 @@ starsessions[redis]==2.2.1
 python-mimeparse==2.0.0
 
 sqlalchemy==2.0.45
+asyncpg>=0.29.0
+aiosqlite>=0.20.0
 alembic==1.17.2
 peewee==3.18.3
 peewee-migrate==1.14.3

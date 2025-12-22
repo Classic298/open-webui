@@ -1,13 +1,13 @@
+import asyncio
 import logging
 import time
 import uuid
 from typing import Optional
 
-from open_webui.internal.db import Base, get_db
-
+from open_webui.internal.db import Base, get_db, get_async_db
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import BigInteger, Column, String, JSON, PrimaryKeyConstraint, Index
+from sqlalchemy import BigInteger, Column, String, JSON, PrimaryKeyConstraint, Index, select, delete
 
 log = logging.getLogger(__name__)
 
@@ -110,3 +110,78 @@ class TagTable:
 
 
 Tags = TagTable()
+
+
+# =============================================================================
+# ASYNC TAG TABLE (Phase 2: Proof of Concept)
+# =============================================================================
+
+
+class AsyncTagsTable:
+    """Native async version of TagsTable for non-blocking database operations.
+    
+    This is the Phase 2 proof of concept demonstrating the async pattern.
+    """
+    
+    async def insert_new_tag(self, name: str, user_id: str) -> Optional[TagModel]:
+        async with get_async_db() as db:
+            id = name.replace(" ", "_").lower()
+            tag = TagModel(id=id, user_id=user_id, name=name)
+            try:
+                result = Tag(**tag.model_dump())
+                db.add(result)
+                await db.commit()
+                await db.refresh(result)
+                return TagModel.model_validate(result) if result else None
+            except Exception as e:
+                log.exception(f"Error inserting a new tag: {e}")
+                return None
+
+    async def get_tag_by_name_and_user_id(
+        self, name: str, user_id: str
+    ) -> Optional[TagModel]:
+        try:
+            id = name.replace(" ", "_").lower()
+            async with get_async_db() as db:
+                result = await db.execute(
+                    select(Tag).where(Tag.id == id, Tag.user_id == user_id)
+                )
+                tag = result.scalar_one_or_none()
+                return TagModel.model_validate(tag) if tag else None
+        except Exception:
+            return None
+
+    async def get_tags_by_user_id(self, user_id: str) -> list[TagModel]:
+        async with get_async_db() as db:
+            result = await db.execute(select(Tag).where(Tag.user_id == user_id))
+            tags = result.scalars().all()
+            return [TagModel.model_validate(tag) for tag in tags]
+
+    async def get_tags_by_ids_and_user_id(
+        self, ids: list[str], user_id: str
+    ) -> list[TagModel]:
+        async with get_async_db() as db:
+            result = await db.execute(
+                select(Tag).where(Tag.id.in_(ids), Tag.user_id == user_id)
+            )
+            tags = result.scalars().all()
+            return [TagModel.model_validate(tag) for tag in tags]
+
+    async def delete_tag_by_name_and_user_id(self, name: str, user_id: str) -> bool:
+        try:
+            async with get_async_db() as db:
+                id = name.replace(" ", "_").lower()
+                await db.execute(
+                    delete(Tag).where(Tag.id == id, Tag.user_id == user_id)
+                )
+                await db.commit()
+                return True
+        except Exception as e:
+            log.error(f"delete_tag: {e}")
+            return False
+
+
+# Async instance
+AsyncTags = AsyncTagsTable()
+
+

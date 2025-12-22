@@ -76,3 +76,30 @@ class Vector:
 
 
 VECTOR_DB_CLIENT = Vector.get_vector(VECTOR_DB)
+
+
+# =============================================================================
+# ASYNC VECTOR DATABASE FACTORY (Phase 4)
+# =============================================================================
+
+
+class AsyncVector:
+    """Factory for async vector database clients."""
+    
+    @staticmethod
+    def get_vector(vector_type: str):
+        """
+        Get async vector database client for the given type.
+        
+        Returns an AsyncVectorDBWrapper that wraps the sync client,
+        using asyncio.to_thread for non-blocking operations.
+        """
+        from open_webui.retrieval.vector.async_wrapper import AsyncVectorDBWrapper
+        
+        # Get the sync client and wrap it
+        sync_client = Vector.get_vector(vector_type)
+        return AsyncVectorDBWrapper(sync_client)
+
+
+# Global async vector database client
+ASYNC_VECTOR_DB_CLIENT = AsyncVector.get_vector(VECTOR_DB)
