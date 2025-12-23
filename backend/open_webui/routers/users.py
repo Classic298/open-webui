@@ -9,11 +9,11 @@ from fastapi.responses import Response, StreamingResponse, FileResponse
 from pydantic import BaseModel, ConfigDict
 
 
-from open_webui.models.auths import Auths, AsyncAuths
-from open_webui.models.oauth_sessions import OAuthSessions, AsyncOAuthSessions
+from open_webui.models.auths import Auths, Auths
+from open_webui.models.oauth_sessions import OAuthSessions, OAuthSessions
 
-from open_webui.models.groups import Groups, AsyncGroups
-from open_webui.models.chats import Chats, AsyncChats
+from open_webui.models.groups import Groups
+from open_webui.models.chats import Chats
 from open_webui.models.users import (
     UserModel,
     UserGroupIdsModel,
@@ -23,7 +23,7 @@ from open_webui.models.users import (
     UserRoleUpdateForm,
     UserStatus,
     Users,
-    AsyncUsers,
+    Users,
     UserSettings,
     UserUpdateForm,
 )
@@ -75,7 +75,7 @@ async def get_users(
     if direction:
         filter["direction"] = direction
 
-    result = await AsyncUsers.get_users(filter=filter, skip=skip, limit=limit)
+    result = await Users.get_users(filter=filter, skip=skip, limit=limit)
 
     users = result["users"]
     total = result["total"]
@@ -87,7 +87,7 @@ async def get_users(
                     **user.model_dump(),
                     "group_ids": [
                         group.id
-                        for group in await AsyncGroups.get_groups_by_member_id(user.id)
+                        for group in await Groups.get_groups_by_member_id(user.id)
                     ],
                 }
             )
@@ -101,7 +101,7 @@ async def get_users(
 async def get_all_users(
     user=Depends(get_admin_user),
 ):
-    return await AsyncUsers.get_users()
+    return await Users.get_users()
 
 
 @router.get("/search", response_model=UserInfoListResponse)
@@ -129,7 +129,7 @@ async def search_users(
     if direction:
         filter["direction"] = direction
 
-    return await AsyncUsers.get_users(filter=filter, skip=skip, limit=limit)
+    return await Users.get_users(filter=filter, skip=skip, limit=limit)
 
 
 ############################
@@ -139,7 +139,7 @@ async def search_users(
 
 @router.get("/groups")
 async def get_user_groups(user=Depends(get_verified_user)):
-    return await AsyncGroups.get_groups_by_member_id(user.id)
+    return await Groups.get_groups_by_member_id(user.id)
 
 
 ############################
@@ -259,8 +259,8 @@ async def update_default_user_permissions(
 
 @router.get("/user/settings", response_model=Optional[UserSettings])
 async def get_user_settings_by_session_user(user=Depends(get_verified_user)):
-    # ASYNC: Use AsyncUsers for non-blocking get
-    user = await AsyncUsers.get_user_by_id(user.id)
+    # ASYNC: Use Users for non-blocking get
+    user = await Users.get_user_by_id(user.id)
     if user:
         return user.settings
     else:
@@ -292,7 +292,7 @@ async def update_user_settings_by_session_user(
         # If the user is not an admin and does not have permission to use tool servers, remove the key
         updated_user_settings["ui"].pop("toolServers", None)
 
-    user = await AsyncUsers.update_user_settings_by_id(user.id, updated_user_settings)
+    user = await Users.update_user_settings_by_id(user.id, updated_user_settings)
     if user:
         return user.settings
     else:
@@ -309,8 +309,8 @@ async def update_user_settings_by_session_user(
 
 @router.get("/user/status")
 async def get_user_status_by_session_user(user=Depends(get_verified_user)):
-    # ASYNC: Use AsyncUsers for non-blocking get
-    user = await AsyncUsers.get_user_by_id(user.id)
+    # ASYNC: Use Users for non-blocking get
+    user = await Users.get_user_by_id(user.id)
     if user:
         return user
     else:
@@ -329,9 +329,9 @@ async def get_user_status_by_session_user(user=Depends(get_verified_user)):
 async def update_user_status_by_session_user(
     form_data: UserStatus, user=Depends(get_verified_user)
 ):
-    user = await AsyncUsers.get_user_by_id(user.id)
+    user = await Users.get_user_by_id(user.id)
     if user:
-        user = await AsyncUsers.update_user_status_by_id(user.id, form_data)
+        user = await Users.update_user_status_by_id(user.id, form_data)
         return user
     else:
         raise HTTPException(
@@ -347,8 +347,8 @@ async def update_user_status_by_session_user(
 
 @router.get("/user/info", response_model=Optional[dict])
 async def get_user_info_by_session_user(user=Depends(get_verified_user)):
-    # ASYNC: Use AsyncUsers for non-blocking get
-    user = await AsyncUsers.get_user_by_id(user.id)
+    # ASYNC: Use Users for non-blocking get
+    user = await Users.get_user_by_id(user.id)
     if user:
         return user.info
     else:
@@ -367,12 +367,12 @@ async def get_user_info_by_session_user(user=Depends(get_verified_user)):
 async def update_user_info_by_session_user(
     form_data: dict, user=Depends(get_verified_user)
 ):
-    user = await AsyncUsers.get_user_by_id(user.id)
+    user = await Users.get_user_by_id(user.id)
     if user:
         if user.info is None:
             user.info = {}
 
-        user = await AsyncUsers.update_user_by_id(user.id, {"info": {**user.info, **form_data}})
+        user = await Users.update_user_by_id(user.id, {"info": {**user.info, **form_data}})
         if user:
             return user.info
         else:
@@ -407,7 +407,7 @@ async def get_user_by_id(user_id: str, user=Depends(get_verified_user)):
     # If it is, get the user_id from the chat
     if user_id.startswith("shared-"):
         chat_id = user_id.replace("shared-", "")
-        chat = await AsyncChats.get_chat_by_id(chat_id)
+        chat = await Chats.get_chat_by_id(chat_id)
         if chat:
             user_id = chat.user_id
         else:
@@ -416,14 +416,14 @@ async def get_user_by_id(user_id: str, user=Depends(get_verified_user)):
                 detail=ERROR_MESSAGES.USER_NOT_FOUND,
             )
 
-    user = await AsyncUsers.get_user_by_id(user_id)
+    user = await Users.get_user_by_id(user_id)
     if user:
-        groups = await AsyncGroups.get_groups_by_member_id(user_id)
+        groups = await Groups.get_groups_by_member_id(user_id)
         return UserActiveResponse(
             **{
                 **user.model_dump(),
                 "groups": [{"id": group.id, "name": group.name} for group in groups],
-                "is_active": await AsyncUsers.is_user_active(user_id),
+                "is_active": await Users.is_user_active(user_id),
             }
         )
     else:
@@ -435,7 +435,7 @@ async def get_user_by_id(user_id: str, user=Depends(get_verified_user)):
 
 @router.get("/{user_id}/oauth/sessions")
 async def get_user_oauth_sessions_by_id(user_id: str, user=Depends(get_admin_user)):
-    sessions = await AsyncOAuthSessions.get_sessions_by_user_id(user_id)
+    sessions = await OAuthSessions.get_sessions_by_user_id(user_id)
     if sessions and len(sessions) > 0:
         return sessions
     else:
@@ -452,7 +452,7 @@ async def get_user_oauth_sessions_by_id(user_id: str, user=Depends(get_admin_use
 
 @router.get("/{user_id}/profile/image")
 async def get_user_profile_image_by_id(user_id: str, user=Depends(get_verified_user)):
-    user = await AsyncUsers.get_user_by_id(user_id)
+    user = await Users.get_user_by_id(user_id)
     if user:
         if user.profile_image_url:
             # check if it's url or base64
@@ -490,7 +490,7 @@ async def get_user_profile_image_by_id(user_id: str, user=Depends(get_verified_u
 @router.get("/{user_id}/active", response_model=dict)
 async def get_user_active_status_by_id(user_id: str, user=Depends(get_verified_user)):
     return {
-        "active": await AsyncUsers.is_user_active(user_id),
+        "active": await Users.is_user_active(user_id),
     }
 
 
@@ -507,7 +507,7 @@ async def update_user_by_id(
 ):
     # Prevent modification of the primary admin user by other admins
     try:
-        first_user = await AsyncUsers.get_first_user()
+        first_user = await Users.get_first_user()
         if first_user:
             if user_id == first_user.id:
                 if session_user.id != user_id:
@@ -531,11 +531,11 @@ async def update_user_by_id(
             detail="Could not verify primary admin status.",
         )
 
-    user = await AsyncUsers.get_user_by_id(user_id)
+    user = await Users.get_user_by_id(user_id)
 
     if user:
         if form_data.email.lower() != user.email:
-            email_user = await AsyncUsers.get_user_by_email(form_data.email.lower())
+            email_user = await Users.get_user_by_email(form_data.email.lower())
             if email_user:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -549,10 +549,10 @@ async def update_user_by_id(
                 raise HTTPException(400, detail=str(e))
 
             hashed = get_password_hash(form_data.password)
-            await AsyncAuths.update_user_password_by_id(user_id, hashed)
+            await Auths.update_user_password_by_id(user_id, hashed)
 
-        await AsyncAuths.update_email_by_id(user_id, form_data.email.lower())
-        updated_user = await AsyncUsers.update_user_by_id(
+        await Auths.update_email_by_id(user_id, form_data.email.lower())
+        updated_user = await Users.update_user_by_id(
             user_id,
             {
                 "role": form_data.role,
@@ -585,7 +585,7 @@ async def update_user_by_id(
 async def delete_user_by_id(user_id: str, user=Depends(get_admin_user)):
     # Prevent deletion of the primary admin user
     try:
-        first_user = await AsyncUsers.get_first_user()
+        first_user = await Users.get_first_user()
         if first_user and user_id == first_user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -599,7 +599,7 @@ async def delete_user_by_id(user_id: str, user=Depends(get_admin_user)):
         )
 
     if user.id != user_id:
-        result = await AsyncAuths.delete_auth_by_id(user_id)
+        result = await Auths.delete_auth_by_id(user_id)
 
         if result:
             return True
@@ -623,4 +623,4 @@ async def delete_user_by_id(user_id: str, user=Depends(get_admin_user)):
 
 @router.get("/{user_id}/groups")
 async def get_user_groups_by_id(user_id: str, user=Depends(get_admin_user)):
-    return await AsyncGroups.get_groups_by_member_id(user_id)
+    return await Groups.get_groups_by_member_id(user_id)

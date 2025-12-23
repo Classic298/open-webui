@@ -14,11 +14,11 @@ from open_webui.models.folders import (
     FolderModel,
     FolderNameIdResponse,
     Folders,
-    AsyncFolders,
+    Folders,
 )
-from open_webui.models.chats import Chats, AsyncChats
-from open_webui.models.files import Files, AsyncFiles
-from open_webui.models.knowledge import Knowledges, AsyncKnowledges
+from open_webui.models.chats import Chats
+from open_webui.models.files import Files
+from open_webui.models.knowledge import Knowledges, Knowledges
 
 
 from open_webui.config import UPLOAD_DIR
@@ -62,15 +62,15 @@ async def get_folders(request: Request, user=Depends(get_verified_user)):
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    folders = await AsyncFolders.get_folders_by_user_id(user.id)
+    folders = await Folders.get_folders_by_user_id(user.id)
 
     # Verify folder data integrity
     folder_list = []
     for folder in folders:
-        if folder.parent_id and not await AsyncFolders.get_folder_by_id_and_user_id(
+        if folder.parent_id and not await Folders.get_folder_by_id_and_user_id(
             folder.parent_id, user.id
         ):
-            folder = await AsyncFolders.update_folder_parent_id_by_id_and_user_id(
+            folder = await Folders.update_folder_parent_id_by_id_and_user_id(
                 folder.id, user.id, None
             )
 
@@ -80,12 +80,12 @@ async def get_folders(request: Request, user=Depends(get_verified_user)):
                 for file in folder.data["files"]:
 
                     if file.get("type") == "file":
-                        if await AsyncFiles.check_access_by_user_id(
+                        if await Files.check_access_by_user_id(
                             file.get("id"), user.id, "read"
                         ):
                             valid_files.append(file)
                     elif file.get("type") == "collection":
-                        if await AsyncKnowledges.check_access_by_user_id(
+                        if await Knowledges.check_access_by_user_id(
                             file.get("id"), user.id, "read"
                         ):
                             valid_files.append(file)
@@ -93,7 +93,7 @@ async def get_folders(request: Request, user=Depends(get_verified_user)):
                         valid_files.append(file)
 
                 folder.data["files"] = valid_files
-                await AsyncFolders.update_folder_by_id_and_user_id(
+                await Folders.update_folder_by_id_and_user_id(
                     folder.id, user.id, FolderUpdateForm(data=folder.data)
                 )
 
@@ -109,7 +109,7 @@ async def get_folders(request: Request, user=Depends(get_verified_user)):
 
 @router.post("/")
 async def create_folder(form_data: FolderForm, user=Depends(get_verified_user)):
-    folder = await AsyncFolders.get_folder_by_parent_id_and_user_id_and_name(
+    folder = await Folders.get_folder_by_parent_id_and_user_id_and_name(
         None, user.id, form_data.name
     )
 
@@ -120,7 +120,7 @@ async def create_folder(form_data: FolderForm, user=Depends(get_verified_user)):
         )
 
     try:
-        folder = await AsyncFolders.insert_new_folder(user.id, form_data)
+        folder = await Folders.insert_new_folder(user.id, form_data)
         return folder
     except Exception as e:
         log.exception(e)
@@ -138,7 +138,7 @@ async def create_folder(form_data: FolderForm, user=Depends(get_verified_user)):
 
 @router.get("/{id}", response_model=Optional[FolderModel])
 async def get_folder_by_id(id: str, user=Depends(get_verified_user)):
-    folder = await AsyncFolders.get_folder_by_id_and_user_id(id, user.id)
+    folder = await Folders.get_folder_by_id_and_user_id(id, user.id)
     if folder:
         return folder
     else:
@@ -157,12 +157,12 @@ async def get_folder_by_id(id: str, user=Depends(get_verified_user)):
 async def update_folder_name_by_id(
     id: str, form_data: FolderUpdateForm, user=Depends(get_verified_user)
 ):
-    folder = await AsyncFolders.get_folder_by_id_and_user_id(id, user.id)
+    folder = await Folders.get_folder_by_id_and_user_id(id, user.id)
     if folder:
 
         if form_data.name is not None:
             # Check if folder with same name exists
-            existing_folder = await AsyncFolders.get_folder_by_parent_id_and_user_id_and_name(
+            existing_folder = await Folders.get_folder_by_parent_id_and_user_id_and_name(
                 folder.parent_id, user.id, form_data.name
             )
             if existing_folder and existing_folder.id != id:
@@ -172,7 +172,7 @@ async def update_folder_name_by_id(
                 )
 
         try:
-            folder = await AsyncFolders.update_folder_by_id_and_user_id(id, user.id, form_data)
+            folder = await Folders.update_folder_by_id_and_user_id(id, user.id, form_data)
             return folder
         except Exception as e:
             log.exception(e)
@@ -201,9 +201,9 @@ class FolderParentIdForm(BaseModel):
 async def update_folder_parent_id_by_id(
     id: str, form_data: FolderParentIdForm, user=Depends(get_verified_user)
 ):
-    folder = await AsyncFolders.get_folder_by_id_and_user_id(id, user.id)
+    folder = await Folders.get_folder_by_id_and_user_id(id, user.id)
     if folder:
-        existing_folder = await AsyncFolders.get_folder_by_parent_id_and_user_id_and_name(
+        existing_folder = await Folders.get_folder_by_parent_id_and_user_id_and_name(
             form_data.parent_id, user.id, folder.name
         )
 
@@ -214,7 +214,7 @@ async def update_folder_parent_id_by_id(
             )
 
         try:
-            folder = await AsyncFolders.update_folder_parent_id_by_id_and_user_id(
+            folder = await Folders.update_folder_parent_id_by_id_and_user_id(
                 id, user.id, form_data.parent_id
             )
             return folder
@@ -245,10 +245,10 @@ class FolderIsExpandedForm(BaseModel):
 async def update_folder_is_expanded_by_id(
     id: str, form_data: FolderIsExpandedForm, user=Depends(get_verified_user)
 ):
-    folder = await AsyncFolders.get_folder_by_id_and_user_id(id, user.id)
+    folder = await Folders.get_folder_by_id_and_user_id(id, user.id)
     if folder:
         try:
-            folder = await AsyncFolders.update_folder_is_expanded_by_id_and_user_id(
+            folder = await Folders.update_folder_is_expanded_by_id_and_user_id(
                 id, user.id, form_data.is_expanded
             )
             return folder
@@ -278,7 +278,7 @@ async def delete_folder_by_id(
     delete_contents: Optional[bool] = True,
     user=Depends(get_verified_user),
 ):
-    if await AsyncChats.count_chats_by_folder_id_and_user_id(id, user.id):
+    if await Chats.count_chats_by_folder_id_and_user_id(id, user.id):
         chat_delete_permission = has_permission(
             user.id, "chat.delete", request.app.state.config.USER_PERMISSIONS
         )
@@ -289,18 +289,18 @@ async def delete_folder_by_id(
             )
 
     folders = []
-    folders.append(await AsyncFolders.get_folder_by_id_and_user_id(id, user.id))
+    folders.append(await Folders.get_folder_by_id_and_user_id(id, user.id))
     while folders:
         folder = folders.pop()
         if folder:
             try:
-                folder_ids = await AsyncFolders.delete_folder_by_id_and_user_id(id, user.id)
+                folder_ids = await Folders.delete_folder_by_id_and_user_id(id, user.id)
 
                 for folder_id in folder_ids:
                     if delete_contents:
-                        await AsyncChats.delete_chats_by_user_id_and_folder_id(user.id, folder_id)
+                        await Chats.delete_chats_by_user_id_and_folder_id(user.id, folder_id)
                     else:
-                        await AsyncChats.move_chats_by_user_id_and_folder_id(
+                        await Chats.move_chats_by_user_id_and_folder_id(
                             user.id, folder_id, None
                         )
 
@@ -314,7 +314,7 @@ async def delete_folder_by_id(
                 )
             finally:
                 # Get all subfolders
-                subfolders = await AsyncFolders.get_folders_by_parent_id_and_user_id(
+                subfolders = await Folders.get_folders_by_parent_id_and_user_id(
                     folder.id, user.id
                 )
                 folders.extend(subfolders)

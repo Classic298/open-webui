@@ -3,7 +3,7 @@ import time
 import uuid
 from typing import Optional
 
-from open_webui.internal.db import Base, get_db, get_async_db
+from open_webui.internal.db import Base, get_db
 from open_webui.models.users import User, UserResponse
 
 from pydantic import BaseModel, ConfigDict
@@ -118,244 +118,13 @@ class FeedbackListResponse(BaseModel):
     items: list[FeedbackUserResponse]
     total: int
 
-
 class FeedbackTable:
-    def insert_new_feedback(
-        self, user_id: str, form_data: FeedbackForm
-    ) -> Optional[FeedbackModel]:
-        with get_db() as db:
-            id = str(uuid.uuid4())
-            feedback = FeedbackModel(
-                **{
-                    "id": id,
-                    "user_id": user_id,
-                    "version": 0,
-                    **form_data.model_dump(),
-                    "created_at": int(time.time()),
-                    "updated_at": int(time.time()),
-                }
-            )
-            try:
-                result = Feedback(**feedback.model_dump())
-                db.add(result)
-                db.commit()
-                db.refresh(result)
-                if result:
-                    return FeedbackModel.model_validate(result)
-                else:
-                    return None
-            except Exception as e:
-                log.exception(f"Error creating a new feedback: {e}")
-                return None
-
-    def get_feedback_by_id(self, id: str) -> Optional[FeedbackModel]:
-        try:
-            with get_db() as db:
-                feedback = db.query(Feedback).filter_by(id=id).first()
-                if not feedback:
-                    return None
-                return FeedbackModel.model_validate(feedback)
-        except Exception:
-            return None
-
-    def get_feedback_by_id_and_user_id(
-        self, id: str, user_id: str
-    ) -> Optional[FeedbackModel]:
-        try:
-            with get_db() as db:
-                feedback = db.query(Feedback).filter_by(id=id, user_id=user_id).first()
-                if not feedback:
-                    return None
-                return FeedbackModel.model_validate(feedback)
-        except Exception:
-            return None
-
-    def get_feedback_items(
-        self, filter: dict = {}, skip: int = 0, limit: int = 30
-    ) -> FeedbackListResponse:
-        with get_db() as db:
-            query = db.query(Feedback, User).join(User, Feedback.user_id == User.id)
-
-            if filter:
-                order_by = filter.get("order_by")
-                direction = filter.get("direction")
-
-                if order_by == "username":
-                    if direction == "asc":
-                        query = query.order_by(User.name.asc())
-                    else:
-                        query = query.order_by(User.name.desc())
-                elif order_by == "model_id":
-                    # it's stored in feedback.data['model_id']
-                    if direction == "asc":
-                        query = query.order_by(
-                            Feedback.data["model_id"].as_string().asc()
-                        )
-                    else:
-                        query = query.order_by(
-                            Feedback.data["model_id"].as_string().desc()
-                        )
-                elif order_by == "rating":
-                    # it's stored in feedback.data['rating']
-                    if direction == "asc":
-                        query = query.order_by(
-                            Feedback.data["rating"].as_string().asc()
-                        )
-                    else:
-                        query = query.order_by(
-                            Feedback.data["rating"].as_string().desc()
-                        )
-                elif order_by == "updated_at":
-                    if direction == "asc":
-                        query = query.order_by(Feedback.updated_at.asc())
-                    else:
-                        query = query.order_by(Feedback.updated_at.desc())
-
-            else:
-                query = query.order_by(Feedback.created_at.desc())
-
-            # Count BEFORE pagination
-            total = query.count()
-
-            if skip:
-                query = query.offset(skip)
-            if limit:
-                query = query.limit(limit)
-
-            items = query.all()
-
-            feedbacks = []
-            for feedback, user in items:
-                feedback_model = FeedbackModel.model_validate(feedback)
-                user_model = UserResponse.model_validate(user)
-                feedbacks.append(
-                    FeedbackUserResponse(**feedback_model.model_dump(), user=user_model)
-                )
-
-            return FeedbackListResponse(items=feedbacks, total=total)
-
-    def get_all_feedbacks(self) -> list[FeedbackModel]:
-        with get_db() as db:
-            return [
-                FeedbackModel.model_validate(feedback)
-                for feedback in db.query(Feedback)
-                .order_by(Feedback.updated_at.desc())
-                .all()
-            ]
-
-    def get_feedbacks_by_type(self, type: str) -> list[FeedbackModel]:
-        with get_db() as db:
-            return [
-                FeedbackModel.model_validate(feedback)
-                for feedback in db.query(Feedback)
-                .filter_by(type=type)
-                .order_by(Feedback.updated_at.desc())
-                .all()
-            ]
-
-    def get_feedbacks_by_user_id(self, user_id: str) -> list[FeedbackModel]:
-        with get_db() as db:
-            return [
-                FeedbackModel.model_validate(feedback)
-                for feedback in db.query(Feedback)
-                .filter_by(user_id=user_id)
-                .order_by(Feedback.updated_at.desc())
-                .all()
-            ]
-
-    def update_feedback_by_id(
-        self, id: str, form_data: FeedbackForm
-    ) -> Optional[FeedbackModel]:
-        with get_db() as db:
-            feedback = db.query(Feedback).filter_by(id=id).first()
-            if not feedback:
-                return None
-
-            if form_data.data:
-                feedback.data = form_data.data.model_dump()
-            if form_data.meta:
-                feedback.meta = form_data.meta
-            if form_data.snapshot:
-                feedback.snapshot = form_data.snapshot.model_dump()
-
-            feedback.updated_at = int(time.time())
-
-            db.commit()
-            return FeedbackModel.model_validate(feedback)
-
-    def update_feedback_by_id_and_user_id(
-        self, id: str, user_id: str, form_data: FeedbackForm
-    ) -> Optional[FeedbackModel]:
-        with get_db() as db:
-            feedback = db.query(Feedback).filter_by(id=id, user_id=user_id).first()
-            if not feedback:
-                return None
-
-            if form_data.data:
-                feedback.data = form_data.data.model_dump()
-            if form_data.meta:
-                feedback.meta = form_data.meta
-            if form_data.snapshot:
-                feedback.snapshot = form_data.snapshot.model_dump()
-
-            feedback.updated_at = int(time.time())
-
-            db.commit()
-            return FeedbackModel.model_validate(feedback)
-
-    def delete_feedback_by_id(self, id: str) -> bool:
-        with get_db() as db:
-            feedback = db.query(Feedback).filter_by(id=id).first()
-            if not feedback:
-                return False
-            db.delete(feedback)
-            db.commit()
-            return True
-
-    def delete_feedback_by_id_and_user_id(self, id: str, user_id: str) -> bool:
-        with get_db() as db:
-            feedback = db.query(Feedback).filter_by(id=id, user_id=user_id).first()
-            if not feedback:
-                return False
-            db.delete(feedback)
-            db.commit()
-            return True
-
-    def delete_feedbacks_by_user_id(self, user_id: str) -> bool:
-        with get_db() as db:
-            feedbacks = db.query(Feedback).filter_by(user_id=user_id).all()
-            if not feedbacks:
-                return False
-            for feedback in feedbacks:
-                db.delete(feedback)
-            db.commit()
-            return True
-
-    def delete_all_feedbacks(self) -> bool:
-        with get_db() as db:
-            feedbacks = db.query(Feedback).all()
-            if not feedbacks:
-                return False
-            for feedback in feedbacks:
-                db.delete(feedback)
-            db.commit()
-            return True
-
-
-Feedbacks = FeedbackTable()
-
-# =============================================================================
-# ASYNC FEEDBACKTABLE (Phase 3: Core Model Conversion)
-# =============================================================================
-
-
-class AsyncFeedbackTable:
     """Async version of FeedbackTable for non-blocking operations."""
     
     async def get_feedback_by_id(self, id: str):
         """Get feedback by ID asynchronously."""
         try:
-            async with get_async_db() as db:
+            async with get_db() as db:
                 result = await db.get(Feedback, id)
                 return FeedbackModel.model_validate(result) if result else None
         except Exception:
@@ -364,7 +133,7 @@ class AsyncFeedbackTable:
     async def delete_feedback_by_id(self, id: str) -> bool:
         """Delete feedback by ID asynchronously."""
         try:
-            async with get_async_db() as db:
+            async with get_db() as db:
                 await db.execute(delete(Feedback).where(Feedback.id == id))
                 await db.commit()
                 return True
@@ -383,7 +152,7 @@ class AsyncFeedbackTable:
             updated_at=int(time.time()),
         )
         try:
-            async with get_async_db() as db:
+            async with get_db() as db:
                 result = Feedback(**feedback.model_dump())
                 db.add(result)
                 await db.commit()
@@ -397,7 +166,7 @@ class AsyncFeedbackTable:
         self, id: str, user_id: str
     ) -> Optional[FeedbackModel]:
         try:
-            async with get_async_db() as db:
+            async with get_db() as db:
                 result = await db.execute(
                     select(Feedback).where(Feedback.id == id, Feedback.user_id == user_id)
                 )
@@ -409,7 +178,7 @@ class AsyncFeedbackTable:
     async def get_feedback_items(
         self, filter: dict = {}, skip: int = 0, limit: int = 30
     ) -> FeedbackListResponse:
-        async with get_async_db() as db:
+        async with get_db() as db:
             query = select(Feedback, User).join(User, Feedback.user_id == User.id)
 
             if filter:
@@ -473,13 +242,13 @@ class AsyncFeedbackTable:
             return FeedbackListResponse(items=feedbacks, total=total)
 
     async def get_all_feedbacks(self) -> list[FeedbackModel]:
-        async with get_async_db() as db:
+        async with get_db() as db:
             result = await db.execute(select(Feedback).order_by(Feedback.updated_at.desc()))
             feedbacks = result.scalars().all()
             return [FeedbackModel.model_validate(f) for f in feedbacks]
 
     async def get_feedbacks_by_type(self, type: str) -> list[FeedbackModel]:
-        async with get_async_db() as db:
+        async with get_db() as db:
             result = await db.execute(
                 select(Feedback)
                 .where(Feedback.type == type)
@@ -489,7 +258,7 @@ class AsyncFeedbackTable:
             return [FeedbackModel.model_validate(f) for f in feedbacks]
 
     async def get_feedbacks_by_user_id(self, user_id: str) -> list[FeedbackModel]:
-        async with get_async_db() as db:
+        async with get_db() as db:
             result = await db.execute(
                 select(Feedback)
                 .where(Feedback.user_id == user_id)
@@ -501,7 +270,7 @@ class AsyncFeedbackTable:
     async def update_feedback_by_id(
         self, id: str, form_data: FeedbackForm
     ) -> Optional[FeedbackModel]:
-        async with get_async_db() as db:
+        async with get_db() as db:
             feedback = await db.get(Feedback, id)
             if not feedback:
                 return None
@@ -520,7 +289,7 @@ class AsyncFeedbackTable:
     async def update_feedback_by_id_and_user_id(
         self, id: str, user_id: str, form_data: FeedbackForm
     ) -> Optional[FeedbackModel]:
-        async with get_async_db() as db:
+        async with get_db() as db:
             result = await db.execute(
                 select(Feedback).where(Feedback.id == id, Feedback.user_id == user_id)
             )
@@ -540,7 +309,7 @@ class AsyncFeedbackTable:
             return FeedbackModel.model_validate(feedback)
 
     async def delete_feedback_by_id_and_user_id(self, id: str, user_id: str) -> bool:
-        async with get_async_db() as db:
+        async with get_db() as db:
             try:
                 await db.execute(
                      delete(Feedback).where(Feedback.id == id, Feedback.user_id == user_id)
@@ -551,7 +320,7 @@ class AsyncFeedbackTable:
                 return False
 
     async def delete_feedbacks_by_user_id(self, user_id: str) -> bool:
-        async with get_async_db() as db:
+        async with get_db() as db:
             try:
                 await db.execute(delete(Feedback).where(Feedback.user_id == user_id))
                 await db.commit()
@@ -560,7 +329,7 @@ class AsyncFeedbackTable:
                 return False
 
     async def delete_all_feedbacks(self) -> bool:
-        async with get_async_db() as db:
+        async with get_db() as db:
             try:
                 await db.execute(delete(Feedback))
                 await db.commit()
@@ -569,6 +338,6 @@ class AsyncFeedbackTable:
                 return False
 
 
-# Async instance
-AsyncFeedbacks = AsyncFeedbackTable()
+# Module instance
+Feedbacks = AsyncFeedbackTable()
 

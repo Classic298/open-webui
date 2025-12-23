@@ -2,9 +2,9 @@ import asyncio
 import time
 from typing import Optional
 
-from open_webui.internal.db import Base, get_db, get_async_db
-from open_webui.models.groups import Groups, AsyncGroups
-from open_webui.models.users import Users, UserResponse, AsyncUsers
+from open_webui.internal.db import Base, get_db
+from open_webui.models.groups import Groups
+from open_webui.models.users import Users, UserResponse, Users
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Column, String, Text, JSON, select, delete
@@ -69,111 +69,8 @@ class PromptForm(BaseModel):
     content: str
     access_control: Optional[dict] = None
 
-
 class PromptsTable:
-    def insert_new_prompt(
-        self, user_id: str, form_data: PromptForm
-    ) -> Optional[PromptModel]:
-        prompt = PromptModel(
-            **{
-                "user_id": user_id,
-                **form_data.model_dump(),
-                "timestamp": int(time.time()),
-            }
-        )
-
-        try:
-            with get_db() as db:
-                result = Prompt(**prompt.model_dump())
-                db.add(result)
-                db.commit()
-                db.refresh(result)
-                if result:
-                    return PromptModel.model_validate(result)
-                else:
-                    return None
-        except Exception:
-            return None
-
-    def get_prompt_by_command(self, command: str) -> Optional[PromptModel]:
-        try:
-            with get_db() as db:
-                prompt = db.query(Prompt).filter_by(command=command).first()
-                return PromptModel.model_validate(prompt)
-        except Exception:
-            return None
-
-    def get_prompts(self) -> list[PromptUserResponse]:
-        with get_db() as db:
-            all_prompts = db.query(Prompt).order_by(Prompt.timestamp.desc()).all()
-
-            user_ids = list(set(prompt.user_id for prompt in all_prompts))
-
-            users = Users.get_users_by_user_ids(user_ids) if user_ids else []
-            users_dict = {user.id: user for user in users}
-
-            prompts = []
-            for prompt in all_prompts:
-                user = users_dict.get(prompt.user_id)
-                prompts.append(
-                    PromptUserResponse.model_validate(
-                        {
-                            **PromptModel.model_validate(prompt).model_dump(),
-                            "user": user.model_dump() if user else None,
-                        }
-                    )
-                )
-
-            return prompts
-
-    def get_prompts_by_user_id(
-        self, user_id: str, permission: str = "write"
-    ) -> list[PromptUserResponse]:
-        prompts = self.get_prompts()
-        user_group_ids = {group.id for group in Groups.get_groups_by_member_id(user_id)}
-
-        return [
-            prompt
-            for prompt in prompts
-            if prompt.user_id == user_id
-            or has_access(user_id, permission, prompt.access_control, user_group_ids)
-        ]
-
-    def update_prompt_by_command(
-        self, command: str, form_data: PromptForm
-    ) -> Optional[PromptModel]:
-        try:
-            with get_db() as db:
-                prompt = db.query(Prompt).filter_by(command=command).first()
-                prompt.title = form_data.title
-                prompt.content = form_data.content
-                prompt.access_control = form_data.access_control
-                prompt.timestamp = int(time.time())
-                db.commit()
-                return PromptModel.model_validate(prompt)
-        except Exception:
-            return None
-
-    def delete_prompt_by_command(self, command: str) -> bool:
-        try:
-            with get_db() as db:
-                db.query(Prompt).filter_by(command=command).delete()
-                db.commit()
-
-                return True
-        except Exception:
-            return False
-
-
-Prompts = PromptsTable()
-
-# =============================================================================
-# ASYNC PROMPTSTABLE (Phase 3: Core Model Conversion)
-# =============================================================================
-
-
-class AsyncPromptsTable:
-    """Native async version of PromptsTable for non-blocking database operations."""
+    """Table class for database operations."""
     
     async def insert_new_prompt(
         self, user_id: str, form_data: PromptForm
@@ -185,7 +82,7 @@ class AsyncPromptsTable:
         )
         
         try:
-            async with get_async_db() as db:
+            async with get_db() as db:
                 result = Prompt(**prompt.model_dump())
                 db.add(result)
                 await db.commit()
@@ -196,7 +93,7 @@ class AsyncPromptsTable:
 
     async def get_prompt_by_command(self, command: str) -> Optional[PromptModel]:
         try:
-            async with get_async_db() as db:
+            async with get_db() as db:
                 result = await db.execute(select(Prompt).where(Prompt.command == command))
                 prompt = result.scalar_one_or_none()
                 return PromptModel.model_validate(prompt) if prompt else None
@@ -204,12 +101,12 @@ class AsyncPromptsTable:
             return None
 
     async def get_prompts(self) -> list[PromptUserResponse]:
-        async with get_async_db() as db:
+        async with get_db() as db:
             result = await db.execute(select(Prompt).order_by(Prompt.timestamp.desc()))
             all_prompts = result.scalars().all()
             
             user_ids = list(set(prompt.user_id for prompt in all_prompts))
-            users = await AsyncUsers.get_users_by_user_ids(user_ids) if user_ids else []
+            users = await Users.get_users_by_user_ids(user_ids) if user_ids else []
             users_dict = {user.id: user for user in users}
             
             prompts = []
@@ -227,7 +124,7 @@ class AsyncPromptsTable:
         self, user_id: str, permission: str = "write"
     ) -> list[PromptUserResponse]:
         prompts = await self.get_prompts()
-        groups = await AsyncGroups.get_groups_by_member_id(user_id)
+        groups = await Groups.get_groups_by_member_id(user_id)
         user_group_ids = {group.id for group in groups}
         
         return [
@@ -241,7 +138,7 @@ class AsyncPromptsTable:
         self, command: str, form_data: PromptForm
     ) -> Optional[PromptModel]:
         try:
-            async with get_async_db() as db:
+            async with get_db() as db:
                 result = await db.execute(select(Prompt).where(Prompt.command == command))
                 prompt = result.scalar_one_or_none()
                 if not prompt:
@@ -258,7 +155,7 @@ class AsyncPromptsTable:
 
     async def delete_prompt_by_command(self, command: str) -> bool:
         try:
-            async with get_async_db() as db:
+            async with get_db() as db:
                 await db.execute(delete(Prompt).where(Prompt.command == command))
                 await db.commit()
                 return True
@@ -266,7 +163,7 @@ class AsyncPromptsTable:
             return False
 
 
-# Async instance
-AsyncPrompts = AsyncPromptsTable()
+# Module instance
+Prompts = PromptsTable()
 
 

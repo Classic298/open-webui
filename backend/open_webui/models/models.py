@@ -3,10 +3,10 @@ import logging
 import time
 from typing import Optional
 
-from open_webui.internal.db import Base, JSONField, get_db, get_async_db
+from open_webui.internal.db import Base, JSONField, get_db
 
-from open_webui.models.groups import Groups, AsyncGroups
-from open_webui.models.users import User, UserModel, Users, UserResponse, AsyncUsers
+from open_webui.models.groups import Groups
+from open_webui.models.users import User, UserModel, Users, UserResponse, Users
 
 
 from pydantic import BaseModel, ConfigDict
@@ -148,331 +148,8 @@ class ModelForm(BaseModel):
     access_control: Optional[dict] = None
     is_active: bool = True
 
-
 class ModelsTable:
-    def insert_new_model(
-        self, form_data: ModelForm, user_id: str
-    ) -> Optional[ModelModel]:
-        model = ModelModel(
-            **{
-                **form_data.model_dump(),
-                "user_id": user_id,
-                "created_at": int(time.time()),
-                "updated_at": int(time.time()),
-            }
-        )
-        try:
-            with get_db() as db:
-                result = Model(**model.model_dump())
-                db.add(result)
-                db.commit()
-                db.refresh(result)
-
-                if result:
-                    return ModelModel.model_validate(result)
-                else:
-                    return None
-        except Exception as e:
-            log.exception(f"Failed to insert a new model: {e}")
-            return None
-
-    def get_all_models(self) -> list[ModelModel]:
-        with get_db() as db:
-            return [ModelModel.model_validate(model) for model in db.query(Model).all()]
-
-    def get_models(self) -> list[ModelUserResponse]:
-        with get_db() as db:
-            all_models = db.query(Model).filter(Model.base_model_id != None).all()
-
-            user_ids = list(set(model.user_id for model in all_models))
-
-            users = Users.get_users_by_user_ids(user_ids) if user_ids else []
-            users_dict = {user.id: user for user in users}
-
-            models = []
-            for model in all_models:
-                user = users_dict.get(model.user_id)
-                models.append(
-                    ModelUserResponse.model_validate(
-                        {
-                            **ModelModel.model_validate(model).model_dump(),
-                            "user": user.model_dump() if user else None,
-                        }
-                    )
-                )
-            return models
-
-    def get_base_models(self) -> list[ModelModel]:
-        with get_db() as db:
-            return [
-                ModelModel.model_validate(model)
-                for model in db.query(Model).filter(Model.base_model_id == None).all()
-            ]
-
-    def get_models_by_user_id(
-        self, user_id: str, permission: str = "write"
-    ) -> list[ModelUserResponse]:
-        models = self.get_models()
-        user_group_ids = {group.id for group in Groups.get_groups_by_member_id(user_id)}
-        return [
-            model
-            for model in models
-            if model.user_id == user_id
-            or has_access(user_id, permission, model.access_control, user_group_ids)
-        ]
-
-    def _has_permission(self, db, query, filter: dict, permission: str = "read"):
-        group_ids = filter.get("group_ids", [])
-        user_id = filter.get("user_id")
-
-        dialect_name = db.bind.dialect.name
-
-        # Public access
-        conditions = []
-        if group_ids or user_id:
-            conditions.extend(
-                [
-                    Model.access_control.is_(None),
-                    cast(Model.access_control, String) == "null",
-                ]
-            )
-
-        # User-level permission
-        if user_id:
-            conditions.append(Model.user_id == user_id)
-
-        # Group-level permission
-        if group_ids:
-            group_conditions = []
-            for gid in group_ids:
-                if dialect_name == "sqlite":
-                    group_conditions.append(
-                        Model.access_control[permission]["group_ids"].contains([gid])
-                    )
-                elif dialect_name == "postgresql":
-                    group_conditions.append(
-                        cast(
-                            Model.access_control[permission]["group_ids"],
-                            JSONB,
-                        ).contains([gid])
-                    )
-            conditions.append(or_(*group_conditions))
-
-        if conditions:
-            query = query.filter(or_(*conditions))
-
-        return query
-
-    def search_models(
-        self, user_id: str, filter: dict = {}, skip: int = 0, limit: int = 30
-    ) -> ModelListResponse:
-        with get_db() as db:
-            # Join GroupMember so we can order by group_id when requested
-            query = db.query(Model, User).outerjoin(User, User.id == Model.user_id)
-            query = query.filter(Model.base_model_id != None)
-
-            if filter:
-                query_key = filter.get("query")
-                if query_key:
-                    query = query.filter(
-                        or_(
-                            Model.name.ilike(f"%{query_key}%"),
-                            Model.base_model_id.ilike(f"%{query_key}%"),
-                        )
-                    )
-
-                view_option = filter.get("view_option")
-                if view_option == "created":
-                    query = query.filter(Model.user_id == user_id)
-                elif view_option == "shared":
-                    query = query.filter(Model.user_id != user_id)
-
-                # Apply access control filtering
-                query = self._has_permission(
-                    db,
-                    query,
-                    filter,
-                    permission="write",
-                )
-
-                tag = filter.get("tag")
-                if tag:
-                    # TODO: This is a simple implementation and should be improved for performance
-                    like_pattern = f'%"{tag.lower()}"%'  # `"tag"` inside JSON array
-                    meta_text = func.lower(cast(Model.meta, String))
-
-                    query = query.filter(meta_text.like(like_pattern))
-
-                order_by = filter.get("order_by")
-                direction = filter.get("direction")
-
-                if order_by == "name":
-                    if direction == "asc":
-                        query = query.order_by(Model.name.asc())
-                    else:
-                        query = query.order_by(Model.name.desc())
-                elif order_by == "created_at":
-                    if direction == "asc":
-                        query = query.order_by(Model.created_at.asc())
-                    else:
-                        query = query.order_by(Model.created_at.desc())
-                elif order_by == "updated_at":
-                    if direction == "asc":
-                        query = query.order_by(Model.updated_at.asc())
-                    else:
-                        query = query.order_by(Model.updated_at.desc())
-
-            else:
-                query = query.order_by(Model.created_at.desc())
-
-            # Count BEFORE pagination
-            total = query.count()
-
-            if skip:
-                query = query.offset(skip)
-            if limit:
-                query = query.limit(limit)
-
-            items = query.all()
-
-            models = []
-            for model, user in items:
-                models.append(
-                    ModelUserResponse(
-                        **ModelModel.model_validate(model).model_dump(),
-                        user=(
-                            UserResponse(**UserModel.model_validate(user).model_dump())
-                            if user
-                            else None
-                        ),
-                    )
-                )
-
-            return ModelListResponse(items=models, total=total)
-
-    def get_model_by_id(self, id: str) -> Optional[ModelModel]:
-        try:
-            with get_db() as db:
-                model = db.get(Model, id)
-                return ModelModel.model_validate(model)
-        except Exception:
-            return None
-
-    def get_models_by_ids(self, ids: list[str]) -> list[ModelModel]:
-        try:
-            with get_db() as db:
-                models = db.query(Model).filter(Model.id.in_(ids)).all()
-                return [ModelModel.model_validate(model) for model in models]
-        except Exception:
-            return []
-
-    def toggle_model_by_id(self, id: str) -> Optional[ModelModel]:
-        with get_db() as db:
-            try:
-                is_active = db.query(Model).filter_by(id=id).first().is_active
-
-                db.query(Model).filter_by(id=id).update(
-                    {
-                        "is_active": not is_active,
-                        "updated_at": int(time.time()),
-                    }
-                )
-                db.commit()
-
-                return self.get_model_by_id(id)
-            except Exception:
-                return None
-
-    def update_model_by_id(self, id: str, model: ModelForm) -> Optional[ModelModel]:
-        try:
-            with get_db() as db:
-                # update only the fields that are present in the model
-                data = model.model_dump(exclude={"id"})
-                result = db.query(Model).filter_by(id=id).update(data)
-
-                db.commit()
-
-                model = db.get(Model, id)
-                db.refresh(model)
-                return ModelModel.model_validate(model)
-        except Exception as e:
-            log.exception(f"Failed to update the model by id {id}: {e}")
-            return None
-
-    def delete_model_by_id(self, id: str) -> bool:
-        try:
-            with get_db() as db:
-                db.query(Model).filter_by(id=id).delete()
-                db.commit()
-
-                return True
-        except Exception:
-            return False
-
-    def delete_all_models(self) -> bool:
-        try:
-            with get_db() as db:
-                db.query(Model).delete()
-                db.commit()
-
-                return True
-        except Exception:
-            return False
-
-    def sync_models(self, user_id: str, models: list[ModelModel]) -> list[ModelModel]:
-        try:
-            with get_db() as db:
-                # Get existing models
-                existing_models = db.query(Model).all()
-                existing_ids = {model.id for model in existing_models}
-
-                # Prepare a set of new model IDs
-                new_model_ids = {model.id for model in models}
-
-                # Update or insert models
-                for model in models:
-                    if model.id in existing_ids:
-                        db.query(Model).filter_by(id=model.id).update(
-                            {
-                                **model.model_dump(),
-                                "user_id": user_id,
-                                "updated_at": int(time.time()),
-                            }
-                        )
-                    else:
-                        new_model = Model(
-                            **{
-                                **model.model_dump(),
-                                "user_id": user_id,
-                                "updated_at": int(time.time()),
-                            }
-                        )
-                        db.add(new_model)
-
-                # Remove models that are no longer present
-                for model in existing_models:
-                    if model.id not in new_model_ids:
-                        db.delete(model)
-
-                db.commit()
-
-                return [
-                    ModelModel.model_validate(model) for model in db.query(Model).all()
-                ]
-        except Exception as e:
-            log.exception(f"Error syncing models for user {user_id}: {e}")
-            return []
-
-
-Models = ModelsTable()
-
-# =============================================================================
-# ASYNC MODELSTABLE (Phase 3: Core Model Conversion)
-# =============================================================================
-
-
-class AsyncModelsTable:
-    """Native async version of ModelsTable for non-blocking database operations."""
+    """Table class for database operations."""
     
     async def insert_new_model(
         self, form_data: ModelForm, user_id: str
@@ -484,7 +161,7 @@ class AsyncModelsTable:
             updated_at=int(time.time()),
         )
         try:
-            async with get_async_db() as db:
+            async with get_db() as db:
                 result = Model(**model.model_dump())
                 db.add(result)
                 await db.commit()
@@ -495,20 +172,20 @@ class AsyncModelsTable:
             return None
 
     async def get_all_models(self) -> list[ModelModel]:
-        async with get_async_db() as db:
+        async with get_db() as db:
             result = await db.execute(select(Model))
             models = result.scalars().all()
             return [ModelModel.model_validate(m) for m in models]
 
     async def get_models(self) -> list[ModelUserResponse]:
-        async with get_async_db() as db:
+        async with get_db() as db:
             result = await db.execute(
                 select(Model).where(Model.base_model_id != None)
             )
             all_models = result.scalars().all()
             
             user_ids = list(set(model.user_id for model in all_models))
-            users = await AsyncUsers.get_users_by_user_ids(user_ids) if user_ids else []
+            users = await Users.get_users_by_user_ids(user_ids) if user_ids else []
             users_dict = {user.id: user for user in users}
             
             models = []
@@ -523,7 +200,7 @@ class AsyncModelsTable:
             return models
 
     async def get_base_models(self) -> list[ModelModel]:
-        async with get_async_db() as db:
+        async with get_db() as db:
             result = await db.execute(
                 select(Model).where(Model.base_model_id == None)
             )
@@ -534,7 +211,7 @@ class AsyncModelsTable:
         self, user_id: str, permission: str = "write"
     ) -> list[ModelUserResponse]:
         models = await self.get_models()
-        groups = await AsyncGroups.get_groups_by_member_id(user_id)
+        groups = await Groups.get_groups_by_member_id(user_id)
         user_group_ids = {group.id for group in groups}
         
         return [
@@ -587,7 +264,7 @@ class AsyncModelsTable:
     async def search_models(
         self, user_id: str, filter: dict = {}, skip: int = 0, limit: int = 30
     ) -> ModelListResponse:
-        async with get_async_db() as db:
+        async with get_db() as db:
             dialect_name = db.bind.dialect.name
             query = select(Model, User).outerjoin(User, User.id == Model.user_id)
             query = query.where(Model.base_model_id != None)
@@ -670,7 +347,7 @@ class AsyncModelsTable:
 
     async def get_model_by_id(self, id: str) -> Optional[ModelModel]:
         try:
-            async with get_async_db() as db:
+            async with get_db() as db:
                 model = await db.get(Model, id)
                 return ModelModel.model_validate(model) if model else None
         except Exception:
@@ -678,7 +355,7 @@ class AsyncModelsTable:
 
     async def get_models_by_ids(self, ids: list[str]) -> list[ModelModel]:
         try:
-            async with get_async_db() as db:
+            async with get_db() as db:
                 result = await db.execute(select(Model).where(Model.id.in_(ids)))
                 models = result.scalars().all()
                 return [ModelModel.model_validate(m) for m in models]
@@ -686,7 +363,7 @@ class AsyncModelsTable:
             return []
 
     async def toggle_model_by_id(self, id: str) -> Optional[ModelModel]:
-        async with get_async_db() as db:
+        async with get_db() as db:
             try:
                 result = await db.execute(select(Model).where(Model.id == id))
                 model = result.scalar_one_or_none()
@@ -707,7 +384,7 @@ class AsyncModelsTable:
 
     async def update_model_by_id(self, id: str, model_form: ModelForm) -> Optional[ModelModel]:
         try:
-            async with get_async_db() as db:
+            async with get_db() as db:
                 from sqlalchemy import update
                 data = model_form.model_dump(exclude={"id"})
                 await db.execute(
@@ -724,7 +401,7 @@ class AsyncModelsTable:
 
     async def delete_model_by_id(self, id: str) -> bool:
         try:
-            async with get_async_db() as db:
+            async with get_db() as db:
                 await db.execute(delete(Model).where(Model.id == id))
                 await db.commit()
                 return True
@@ -733,7 +410,7 @@ class AsyncModelsTable:
 
     async def delete_all_models(self) -> bool:
         try:
-            async with get_async_db() as db:
+            async with get_db() as db:
                 await db.execute(delete(Model))
                 await db.commit()
                 return True
@@ -742,7 +419,7 @@ class AsyncModelsTable:
 
     async def sync_models(self, user_id: str, models: list[ModelModel]) -> list[ModelModel]:
         try:
-            async with get_async_db() as db:
+            async with get_db() as db:
                 # Get existing models
                 result = await db.execute(select(Model))
                 existing_models = result.scalars().all()
@@ -789,7 +466,7 @@ class AsyncModelsTable:
             return []
 
 
-# Async instance
-AsyncModels = AsyncModelsTable()
+# Module instance
+Models = ModelsTable()
 
 

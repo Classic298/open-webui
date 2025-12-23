@@ -33,7 +33,7 @@ from open_webui.models.files import (
     FileModel,
     FileModelResponse,
     Files,
-    AsyncFiles,
+    Files,
 )
 from open_webui.models.chats import Chats
 from open_webui.models.knowledge import Knowledges
@@ -65,7 +65,7 @@ router = APIRouter()
 async def has_access_to_file(
     file_id: Optional[str], access_type: str, user=Depends(get_verified_user)
 ) -> bool:
-    file = await AsyncFiles.get_file_by_id(file_id)
+    file = await Files.get_file_by_id(file_id)
     log.debug(f"Checking if user has {access_type} access to file")
     if not file:
         raise HTTPException(
@@ -74,8 +74,8 @@ async def has_access_to_file(
         )
 
     # Check if the file is associated with any knowledge bases the user has access to
-    knowledge_bases = await AsyncKnowledges.get_knowledges_by_file_id(file_id)
-    user_group_ids = {group.id for group in await AsyncGroups.get_groups_by_member_id(user.id)}
+    knowledge_bases = await Knowledges.get_knowledges_by_file_id(file_id)
+    user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id)}
     for knowledge_base in knowledge_bases:
         if knowledge_base.user_id == user.id or has_access(
             user.id, access_type, knowledge_base.access_control, user_group_ids
@@ -84,7 +84,7 @@ async def has_access_to_file(
 
     knowledge_base_id = file.meta.get("collection_name") if file.meta else None
     if knowledge_base_id:
-        knowledge_bases = await AsyncKnowledges.get_knowledge_bases_by_user_id(
+        knowledge_bases = await Knowledges.get_knowledge_bases_by_user_id(
             user.id, access_type
         )
         for knowledge_base in knowledge_bases:
@@ -92,13 +92,13 @@ async def has_access_to_file(
                 return True
 
     # Check if the file is associated with any channels the user has access to
-    channels = await AsyncChannels.get_channels_by_file_id_and_user_id(file_id, user.id)
+    channels = await Channels.get_channels_by_file_id_and_user_id(file_id, user.id)
     if access_type == "read" and channels:
         return True
 
     # Check if the file is associated with any chats the user has access to
     # TODO: Granular access control for chats
-    chats = await AsyncChats.get_shared_chats_by_file_id(file_id)
+    chats = await Chats.get_shared_chats_by_file_id(file_id)
     if chats:
         return True
 
@@ -144,7 +144,7 @@ async def process_uploaded_file(request, file, file_path, file_item, file_metada
 
     except Exception as e:
         log.error(f"Error processing file: {file_item.id}")
-        await AsyncFiles.update_file_data_by_id(
+        await Files.update_file_data_by_id(
             file_item.id,
             {
                 "status": "failed",
@@ -231,7 +231,7 @@ async def upload_file_handler(
             },
         )
 
-        file_item = await AsyncFiles.insert_new_file(
+        file_item = await Files.insert_new_file(
             user.id,
             FileForm(
                 **{
@@ -252,11 +252,11 @@ async def upload_file_handler(
         )
 
         if "channel_id" in file_metadata:
-            channel = await AsyncChannels.get_channel_by_id_and_user_id(
+            channel = await Channels.get_channel_by_id_and_user_id(
                 file_metadata["channel_id"], user.id
             )
             if channel:
-                await AsyncChannels.add_file_to_channel_by_id(channel.id, file_item.id, user.id)
+                await Channels.add_file_to_channel_by_id(channel.id, file_item.id, user.id)
 
         if process:
             if background_tasks and process_in_background:
@@ -305,9 +305,9 @@ async def upload_file_handler(
 @router.get("/", response_model=list[FileModelResponse])
 async def list_files(user=Depends(get_verified_user), content: bool = Query(True)):
     if user.role == "admin":
-        files = await AsyncFiles.get_files()
+        files = await Files.get_files()
     else:
-        files = await AsyncFiles.get_files_by_user_id(user.id)
+        files = await Files.get_files_by_user_id(user.id)
 
     if not content:
         for file in files:
@@ -336,9 +336,9 @@ async def search_files(
     """
     # Get files according to user role
     if user.role == "admin":
-        files = await AsyncFiles.get_files()
+        files = await Files.get_files()
     else:
-        files = await AsyncFiles.get_files_by_user_id(user.id)
+        files = await Files.get_files_by_user_id(user.id)
 
     # Get matching files
     matching_files = [
@@ -366,7 +366,7 @@ async def search_files(
 
 @router.delete("/all")
 async def delete_all_files(user=Depends(get_admin_user)):
-    result = await AsyncFiles.delete_all_files()
+    result = await Files.delete_all_files()
     if result:
         try:
             Storage.delete_all_files()
@@ -393,7 +393,7 @@ async def delete_all_files(user=Depends(get_admin_user)):
 
 @router.get("/{id}", response_model=Optional[FileModel])
 async def get_file_by_id(id: str, user=Depends(get_verified_user)):
-    file = await AsyncFiles.get_file_by_id(id)
+    file = await Files.get_file_by_id(id)
 
     if not file:
         raise HTTPException(
@@ -418,7 +418,7 @@ async def get_file_by_id(id: str, user=Depends(get_verified_user)):
 async def get_file_process_status(
     id: str, stream: bool = Query(False), user=Depends(get_verified_user)
 ):
-    file = await AsyncFiles.get_file_by_id(id)
+    file = await Files.get_file_by_id(id)
 
     if not file:
         raise HTTPException(
@@ -437,7 +437,7 @@ async def get_file_process_status(
             async def event_stream(file_item):
                 if file_item:
                     for _ in range(MAX_FILE_PROCESSING_DURATION):
-                        file_item = await AsyncFiles.get_file_by_id(file_item.id)
+                        file_item = await Files.get_file_by_id(file_item.id)
                         if file_item:
                             data = file_item.model_dump().get("data", {})
                             status = data.get("status")
@@ -478,7 +478,7 @@ async def get_file_process_status(
 
 @router.get("/{id}/data/content")
 async def get_file_data_content_by_id(id: str, user=Depends(get_verified_user)):
-    file = await AsyncFiles.get_file_by_id(id)
+    file = await Files.get_file_by_id(id)
 
     if not file:
         raise HTTPException(
@@ -512,7 +512,7 @@ class ContentForm(BaseModel):
 async def update_file_data_content_by_id(
     request: Request, id: str, form_data: ContentForm, user=Depends(get_verified_user)
 ):
-    file = await AsyncFiles.get_file_by_id(id)
+    file = await Files.get_file_by_id(id)
 
     if not file:
         raise HTTPException(
@@ -531,7 +531,7 @@ async def update_file_data_content_by_id(
                 ProcessFileForm(file_id=id, content=form_data.content),
                 user=user,
             )
-            file = await AsyncFiles.get_file_by_id(id=id)
+            file = await Files.get_file_by_id(id=id)
         except Exception as e:
             log.exception(e)
             log.error(f"Error processing file: {file.id}")
@@ -553,7 +553,7 @@ async def update_file_data_content_by_id(
 async def get_file_content_by_id(
     id: str, user=Depends(get_verified_user), attachment: bool = Query(False)
 ):
-    file = await AsyncFiles.get_file_by_id(id)
+    file = await Files.get_file_by_id(id)
 
     if not file:
         raise HTTPException(
@@ -621,7 +621,7 @@ async def get_file_content_by_id(
 
 @router.get("/{id}/content/html")
 async def get_html_file_content_by_id(id: str, user=Depends(get_verified_user)):
-    file = await AsyncFiles.get_file_by_id(id)
+    file = await Files.get_file_by_id(id)
 
     if not file:
         raise HTTPException(
@@ -629,7 +629,7 @@ async def get_html_file_content_by_id(id: str, user=Depends(get_verified_user)):
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    file_user = await AsyncUsers.get_user_by_id(file.user_id)
+    file_user = await Users.get_user_by_id(file.user_id)
     if not file_user.role == "admin":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -670,7 +670,7 @@ async def get_html_file_content_by_id(id: str, user=Depends(get_verified_user)):
 
 @router.get("/{id}/content/{file_name}")
 async def get_file_content_by_id(id: str, user=Depends(get_verified_user)):
-    file = await AsyncFiles.get_file_by_id(id)
+    file = await Files.get_file_by_id(id)
 
     if not file:
         raise HTTPException(
@@ -732,7 +732,7 @@ async def get_file_content_by_id(id: str, user=Depends(get_verified_user)):
 
 @router.delete("/{id}")
 async def delete_file_by_id(id: str, user=Depends(get_verified_user)):
-    file = await AsyncFiles.get_file_by_id(id)
+    file = await Files.get_file_by_id(id)
 
     if not file:
         raise HTTPException(
@@ -746,7 +746,7 @@ async def delete_file_by_id(id: str, user=Depends(get_verified_user)):
         or has_access_to_file(id, "write", user)
     ):
 
-        result = await AsyncFiles.delete_file_by_id(id)
+        result = await Files.delete_file_by_id(id)
         if result:
             try:
                 Storage.delete_file(file.path)

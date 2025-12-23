@@ -1,9 +1,8 @@
-import asyncio
 import time
 import uuid
 from typing import Optional
 
-from open_webui.internal.db import Base, get_db, get_async_db
+from open_webui.internal.db import Base, get_db
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Column, String, Text, select, delete
 
@@ -26,141 +25,26 @@ class MemoryModel(BaseModel):
     id: str
     user_id: str
     content: str
-    updated_at: int  # timestamp in epoch
-    created_at: int  # timestamp in epoch
+    updated_at: int
+    created_at: int
 
     model_config = ConfigDict(from_attributes=True)
 
 
 ####################
-# Forms
+# MemoriesTable
 ####################
 
 
 class MemoriesTable:
-    def insert_new_memory(
-        self,
-        user_id: str,
-        content: str,
-    ) -> Optional[MemoryModel]:
-        with get_db() as db:
-            id = str(uuid.uuid4())
+    """Table class for memory database operations."""
 
-            memory = MemoryModel(
-                **{
-                    "id": id,
-                    "user_id": user_id,
-                    "content": content,
-                    "created_at": int(time.time()),
-                    "updated_at": int(time.time()),
-                }
-            )
-            result = Memory(**memory.model_dump())
-            db.add(result)
-            db.commit()
-            db.refresh(result)
-            if result:
-                return MemoryModel.model_validate(result)
-            else:
-                return None
-
-    def update_memory_by_id_and_user_id(
-        self,
-        id: str,
-        user_id: str,
-        content: str,
-    ) -> Optional[MemoryModel]:
-        with get_db() as db:
-            try:
-                memory = db.get(Memory, id)
-                if not memory or memory.user_id != user_id:
-                    return None
-
-                memory.content = content
-                memory.updated_at = int(time.time())
-
-                db.commit()
-                return self.get_memory_by_id(id)
-            except Exception:
-                return None
-
-    def get_memories(self) -> list[MemoryModel]:
-        with get_db() as db:
-            try:
-                memories = db.query(Memory).all()
-                return [MemoryModel.model_validate(memory) for memory in memories]
-            except Exception:
-                return None
-
-    def get_memories_by_user_id(self, user_id: str) -> list[MemoryModel]:
-        with get_db() as db:
-            try:
-                memories = db.query(Memory).filter_by(user_id=user_id).all()
-                return [MemoryModel.model_validate(memory) for memory in memories]
-            except Exception:
-                return None
-
-    def get_memory_by_id(self, id: str) -> Optional[MemoryModel]:
-        with get_db() as db:
-            try:
-                memory = db.get(Memory, id)
-                return MemoryModel.model_validate(memory)
-            except Exception:
-                return None
-
-    def delete_memory_by_id(self, id: str) -> bool:
-        with get_db() as db:
-            try:
-                db.query(Memory).filter_by(id=id).delete()
-                db.commit()
-
-                return True
-
-            except Exception:
-                return False
-
-    def delete_memories_by_user_id(self, user_id: str) -> bool:
-        with get_db() as db:
-            try:
-                db.query(Memory).filter_by(user_id=user_id).delete()
-                db.commit()
-
-                return True
-            except Exception:
-                return False
-
-    def delete_memory_by_id_and_user_id(self, id: str, user_id: str) -> bool:
-        with get_db() as db:
-            try:
-                memory = db.get(Memory, id)
-                if not memory or memory.user_id != user_id:
-                    return None
-
-                # Delete the memory
-                db.delete(memory)
-                db.commit()
-
-                return True
-            except Exception:
-                return False
-
-
-Memories = MemoriesTable()
-
-# =============================================================================
-# ASYNC MEMORIESTABLE (Phase 3: Core Model Conversion)
-# =============================================================================
-
-
-class AsyncMemoriesTable:
-    """Native async version of MemoriesTable for non-blocking database operations."""
-    
     async def insert_new_memory(
         self,
         user_id: str,
         content: str,
     ) -> Optional[MemoryModel]:
-        async with get_async_db() as db:
+        async with get_db() as db:
             id = str(uuid.uuid4())
             
             memory = MemoryModel(
@@ -182,7 +66,7 @@ class AsyncMemoriesTable:
         user_id: str,
         content: str,
     ) -> Optional[MemoryModel]:
-        async with get_async_db() as db:
+        async with get_db() as db:
             try:
                 memory = await db.get(Memory, id)
                 if not memory or memory.user_id != user_id:
@@ -197,7 +81,7 @@ class AsyncMemoriesTable:
                 return None
 
     async def get_memories(self) -> list[MemoryModel]:
-        async with get_async_db() as db:
+        async with get_db() as db:
             try:
                 result = await db.execute(select(Memory))
                 memories = result.scalars().all()
@@ -206,7 +90,7 @@ class AsyncMemoriesTable:
                 return None
 
     async def get_memories_by_user_id(self, user_id: str) -> list[MemoryModel]:
-        async with get_async_db() as db:
+        async with get_db() as db:
             try:
                 result = await db.execute(select(Memory).where(Memory.user_id == user_id))
                 memories = result.scalars().all()
@@ -215,7 +99,7 @@ class AsyncMemoriesTable:
                 return None
 
     async def get_memory_by_id(self, id: str) -> Optional[MemoryModel]:
-        async with get_async_db() as db:
+        async with get_db() as db:
             try:
                 memory = await db.get(Memory, id)
                 return MemoryModel.model_validate(memory) if memory else None
@@ -223,7 +107,7 @@ class AsyncMemoriesTable:
                 return None
 
     async def delete_memory_by_id(self, id: str) -> bool:
-        async with get_async_db() as db:
+        async with get_db() as db:
             try:
                 await db.execute(delete(Memory).where(Memory.id == id))
                 await db.commit()
@@ -232,7 +116,7 @@ class AsyncMemoriesTable:
                 return False
 
     async def delete_memories_by_user_id(self, user_id: str) -> bool:
-        async with get_async_db() as db:
+        async with get_db() as db:
             try:
                 await db.execute(delete(Memory).where(Memory.user_id == user_id))
                 await db.commit()
@@ -241,7 +125,7 @@ class AsyncMemoriesTable:
                 return False
 
     async def delete_memory_by_id_and_user_id(self, id: str, user_id: str) -> bool:
-        async with get_async_db() as db:
+        async with get_db() as db:
             try:
                 memory = await db.get(Memory, id)
                 if not memory or memory.user_id != user_id:
@@ -254,7 +138,5 @@ class AsyncMemoriesTable:
                 return False
 
 
-# Async instance
-AsyncMemories = AsyncMemoriesTable()
-
-
+# Module instance
+Memories = MemoriesTable()

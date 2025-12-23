@@ -1,8 +1,22 @@
+"""
+Database infrastructure for Open WebUI.
+
+This module provides async-first database access using SQLAlchemy 2.0.
+All database operations should use the async `get_db()` context manager.
+
+Supported databases:
+- PostgreSQL (via asyncpg)
+- SQLite (via aiosqlite)  
+- SQLCipher (via sync fallback with thread pool)
+"""
+
 import os
 import json
 import logging
-from contextlib import contextmanager, asynccontextmanager
-from typing import Any, Optional, AsyncGenerator
+import asyncio
+from contextlib import asynccontextmanager
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Optional, AsyncGenerator, Union
 
 from open_webui.internal.wrappers import register_connection
 from open_webui.env import (
@@ -23,7 +37,7 @@ from sqlalchemy.ext.asyncio import (
     AsyncSession,
     AsyncAttrs,
 )
-from sqlalchemy.orm import DeclarativeBase, scoped_session, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from sqlalchemy.pool import QueuePool, NullPool
 from sqlalchemy.sql.type_api import _T
 from typing_extensions import Self
@@ -31,7 +45,13 @@ from typing_extensions import Self
 log = logging.getLogger(__name__)
 
 
+# =============================================================================
+# CUSTOM TYPES
+# =============================================================================
+
+
 class JSONField(types.TypeDecorator):
+    """Custom JSON field type for SQLAlchemy."""
     impl = types.Text
     cache_ok = True
 
@@ -53,18 +73,24 @@ class JSONField(types.TypeDecorator):
             return json.loads(value)
 
 
-# Workaround to handle the peewee migration
-# This is required to ensure the peewee migration is handled before the alembic migration
-def handle_peewee_migration(DATABASE_URL):
-    # db = None
+# =============================================================================
+# PEEWEE MIGRATION (Legacy support)
+# =============================================================================
+
+
+def _handle_peewee_migration(database_url: str) -> None:
+    """
+    Handle legacy Peewee migrations before Alembic takes over.
+    This is required for backward compatibility with older databases.
+    """
+    db = None
     try:
-        # Replace the postgresql:// with postgres:// to handle the peewee migration
-        db = register_connection(DATABASE_URL.replace("postgresql://", "postgres://"))
+        # Replace postgresql:// with postgres:// for Peewee compatibility
+        db = register_connection(database_url.replace("postgresql://", "postgres://"))
         migrate_dir = OPEN_WEBUI_DIR / "internal" / "migrations"
         router = Router(db, logger=log, migrate_dir=migrate_dir)
         router.run()
         db.close()
-
     except Exception as e:
         log.error(f"Failed to initialize the database connection: {e}")
         log.warning(
@@ -72,121 +98,28 @@ def handle_peewee_migration(DATABASE_URL):
         )
         raise
     finally:
-        # Properly closing the database connection
         if db and not db.is_closed():
             db.close()
-
-        # Assert if db connection has been closed
-        assert db.is_closed(), "Database connection is still open."
-
-
-handle_peewee_migration(DATABASE_URL)
+        if db:
+            assert db.is_closed(), "Database connection is still open."
 
 
-SQLALCHEMY_DATABASE_URL = DATABASE_URL
-
-# Handle SQLCipher URLs
-if SQLALCHEMY_DATABASE_URL.startswith("sqlite+sqlcipher://"):
-    database_password = os.environ.get("DATABASE_PASSWORD")
-    if not database_password or database_password.strip() == "":
-        raise ValueError(
-            "DATABASE_PASSWORD is required when using sqlite+sqlcipher:// URLs"
-        )
-
-    # Extract database path from SQLCipher URL
-    db_path = SQLALCHEMY_DATABASE_URL.replace("sqlite+sqlcipher://", "")
-
-    # Create a custom creator function that uses sqlcipher3
-    def create_sqlcipher_connection():
-        import sqlcipher3
-
-        conn = sqlcipher3.connect(db_path, check_same_thread=False)
-        conn.execute(f"PRAGMA key = '{database_password}'")
-        return conn
-
-    engine = create_engine(
-        "sqlite://",  # Dummy URL since we're using creator
-        creator=create_sqlcipher_connection,
-        echo=False,
-    )
-
-    log.info("Connected to encrypted SQLite database using SQLCipher")
-
-elif "sqlite" in SQLALCHEMY_DATABASE_URL:
-    engine = create_engine(
-        SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
-    )
-
-    def on_connect(dbapi_connection, connection_record):
-        cursor = dbapi_connection.cursor()
-        if DATABASE_ENABLE_SQLITE_WAL:
-            cursor.execute("PRAGMA journal_mode=WAL")
-        else:
-            cursor.execute("PRAGMA journal_mode=DELETE")
-        cursor.close()
-
-    event.listen(engine, "connect", on_connect)
-else:
-    if isinstance(DATABASE_POOL_SIZE, int):
-        if DATABASE_POOL_SIZE > 0:
-            engine = create_engine(
-                SQLALCHEMY_DATABASE_URL,
-                pool_size=DATABASE_POOL_SIZE,
-                max_overflow=DATABASE_POOL_MAX_OVERFLOW,
-                pool_timeout=DATABASE_POOL_TIMEOUT,
-                pool_recycle=DATABASE_POOL_RECYCLE,
-                pool_pre_ping=True,
-                poolclass=QueuePool,
-            )
-        else:
-            engine = create_engine(
-                SQLALCHEMY_DATABASE_URL, pool_pre_ping=True, poolclass=NullPool
-            )
-    else:
-        engine = create_engine(SQLALCHEMY_DATABASE_URL, pool_pre_ping=True)
-
-
-SessionLocal = sessionmaker(
-    autocommit=False, autoflush=False, bind=engine, expire_on_commit=False
-)
-metadata_obj = MetaData(schema=DATABASE_SCHEMA)
-
-
-class Base(AsyncAttrs, DeclarativeBase):
-    """
-    Base class for all SQLAlchemy models with async support.
-    
-    AsyncAttrs enables async-compatible lazy loading via `await obj.awaitable_attrs.relationship`.
-    """
-    metadata = metadata_obj
-
-
-Session = scoped_session(SessionLocal)
-
-
-def get_session():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-get_db = contextmanager(get_session)
+# Run Peewee migrations at module load
+_handle_peewee_migration(DATABASE_URL)
 
 
 # =============================================================================
-# ASYNC DATABASE INFRASTRUCTURE
+# DATABASE URL HANDLING
 # =============================================================================
 
 
-def _get_async_database_url(url: str) -> str:
+def _convert_to_async_url(url: str) -> str:
     """
     Convert a synchronous database URL to an async-compatible URL.
     
     - PostgreSQL: postgresql:// -> postgresql+asyncpg://
     - SQLite: sqlite:/// -> sqlite+aiosqlite:///
-    - SQLCipher: Not supported for async (returns original URL)
+    - SQLCipher: Returns original URL (handled via sync fallback)
     """
     if url.startswith("postgresql://"):
         return url.replace("postgresql://", "postgresql+asyncpg://", 1)
@@ -194,100 +127,305 @@ def _get_async_database_url(url: str) -> str:
         return url.replace("postgres://", "postgresql+asyncpg://", 1)
     elif url.startswith("sqlite:///"):
         return url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
-    # SQLCipher and other URLs are returned as-is (async not supported)
+    # SQLCipher and other URLs returned as-is
     return url
 
 
-ASYNC_DATABASE_URL = _get_async_database_url(SQLALCHEMY_DATABASE_URL)
+DATABASE_URL_ASYNC = _convert_to_async_url(DATABASE_URL)
+USING_SQLCIPHER = DATABASE_URL.startswith("sqlite+sqlcipher://")
 
 
-# Only create async engine for supported database types
-if ASYNC_DATABASE_URL.startswith("sqlite+aiosqlite"):
-    # SQLite async engine
-    async_engine = create_async_engine(
-        ASYNC_DATABASE_URL,
-        connect_args={"check_same_thread": False},
-        pool_pre_ping=True,
-        echo=False,
-    )
-elif ASYNC_DATABASE_URL.startswith("postgresql+asyncpg"):
-    # PostgreSQL async engine with connection pooling
-    if isinstance(DATABASE_POOL_SIZE, int) and DATABASE_POOL_SIZE > 0:
-        async_engine = create_async_engine(
-            ASYNC_DATABASE_URL,
-            pool_size=DATABASE_POOL_SIZE,
-            max_overflow=DATABASE_POOL_MAX_OVERFLOW,
-            pool_timeout=DATABASE_POOL_TIMEOUT,
-            pool_recycle=DATABASE_POOL_RECYCLE,
-            pool_pre_ping=True,
+# =============================================================================
+# DATABASE ENGINES
+# =============================================================================
+
+
+def _create_sync_engine():
+    """Create synchronous engine (for SQLCipher fallback and migrations)."""
+    if DATABASE_URL.startswith("sqlite+sqlcipher://"):
+        # SQLCipher encrypted database
+        database_password = os.environ.get("DATABASE_PASSWORD")
+        if not database_password or database_password.strip() == "":
+            raise ValueError(
+                "DATABASE_PASSWORD is required when using sqlite+sqlcipher:// URLs"
+            )
+        
+        db_path = DATABASE_URL.replace("sqlite+sqlcipher://", "")
+        
+        def create_sqlcipher_connection():
+            import sqlcipher3
+            conn = sqlcipher3.connect(db_path, check_same_thread=False)
+            conn.execute(f"PRAGMA key = '{database_password}'")
+            return conn
+        
+        engine = create_engine(
+            "sqlite://",
+            creator=create_sqlcipher_connection,
             echo=False,
         )
+        log.info("Connected to encrypted SQLite database using SQLCipher")
+        return engine
+    
+    elif "sqlite" in DATABASE_URL:
+        # Regular SQLite
+        engine = create_engine(
+            DATABASE_URL, connect_args={"check_same_thread": False}
+        )
+        
+        def on_connect(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            if DATABASE_ENABLE_SQLITE_WAL:
+                cursor.execute("PRAGMA journal_mode=WAL")
+            else:
+                cursor.execute("PRAGMA journal_mode=DELETE")
+            cursor.close()
+        
+        event.listen(engine, "connect", on_connect)
+        return engine
+    
     else:
-        async_engine = create_async_engine(
-            ASYNC_DATABASE_URL,
+        # PostgreSQL or other databases
+        if isinstance(DATABASE_POOL_SIZE, int):
+            if DATABASE_POOL_SIZE > 0:
+                return create_engine(
+                    DATABASE_URL,
+                    pool_size=DATABASE_POOL_SIZE,
+                    max_overflow=DATABASE_POOL_MAX_OVERFLOW,
+                    pool_timeout=DATABASE_POOL_TIMEOUT,
+                    pool_recycle=DATABASE_POOL_RECYCLE,
+                    pool_pre_ping=True,
+                    poolclass=QueuePool,
+                )
+            else:
+                return create_engine(
+                    DATABASE_URL, pool_pre_ping=True, poolclass=NullPool
+                )
+        return create_engine(DATABASE_URL, pool_pre_ping=True)
+
+
+def _create_async_engine_instance():
+    """Create async engine for supported databases."""
+    if DATABASE_URL_ASYNC.startswith("sqlite+aiosqlite"):
+        return create_async_engine(
+            DATABASE_URL_ASYNC,
+            connect_args={"check_same_thread": False},
             pool_pre_ping=True,
             echo=False,
         )
-else:
-    # Fallback: no async engine for unsupported databases (e.g., SQLCipher)
-    async_engine = None
+    elif DATABASE_URL_ASYNC.startswith("postgresql+asyncpg"):
+        if isinstance(DATABASE_POOL_SIZE, int) and DATABASE_POOL_SIZE > 0:
+            return create_async_engine(
+                DATABASE_URL_ASYNC,
+                pool_size=DATABASE_POOL_SIZE,
+                max_overflow=DATABASE_POOL_MAX_OVERFLOW,
+                pool_timeout=DATABASE_POOL_TIMEOUT,
+                pool_recycle=DATABASE_POOL_RECYCLE,
+                pool_pre_ping=True,
+                echo=False,
+            )
+        return create_async_engine(
+            DATABASE_URL_ASYNC,
+            pool_pre_ping=True,
+            echo=False,
+        )
+    # No async engine for SQLCipher
+    return None
+
+
+# Create engines
+_sync_engine = _create_sync_engine()
+_async_engine = _create_async_engine_instance()
+
+if _async_engine is None and not USING_SQLCIPHER:
     log.warning(
-        f"Async database engine not available for URL scheme: {ASYNC_DATABASE_URL[:20]}..."
+        f"Async database engine not available for URL scheme: {DATABASE_URL_ASYNC[:20]}..."
     )
 
 
-# Async session factory (only if async engine is available)
-if async_engine is not None:
-    AsyncSessionLocal = async_sessionmaker(
-        bind=async_engine,
+# =============================================================================
+# SESSION FACTORIES
+# =============================================================================
+
+
+# Sync session factory (for SQLCipher fallback)
+_SyncSessionLocal = sessionmaker(
+    autocommit=False, autoflush=False, bind=_sync_engine, expire_on_commit=False
+)
+
+# Async session factory (for PostgreSQL and SQLite)
+_AsyncSessionLocal = (
+    async_sessionmaker(
+        bind=_async_engine,
         class_=AsyncSession,
         expire_on_commit=False,
         autocommit=False,
         autoflush=False,
     )
-else:
-    AsyncSessionLocal = None
+    if _async_engine is not None
+    else None
+)
+
+
+# =============================================================================
+# BASE MODEL
+# =============================================================================
+
+
+metadata_obj = MetaData(schema=DATABASE_SCHEMA)
+
+
+class Base(AsyncAttrs, DeclarativeBase):
+    """
+    Base class for all SQLAlchemy models.
+    
+    Uses AsyncAttrs for async-compatible lazy loading.
+    """
+    metadata = metadata_obj
+
+
+# =============================================================================
+# ASYNC SESSION WRAPPER (for SQLCipher)
+# =============================================================================
+
+
+class _SyncSessionWrapper:
+    """
+    Wraps a synchronous SQLAlchemy session to provide an async-compatible interface.
+    Used for SQLCipher databases where native async is not supported.
+    """
+    
+    def __init__(self, session, loop, executor):
+        self._session = session
+        self._loop = loop
+        self._executor = executor
+    
+    async def execute(self, statement, *args, **kwargs):
+        """Execute a statement asynchronously."""
+        return await self._loop.run_in_executor(
+            self._executor,
+            lambda: self._session.execute(statement, *args, **kwargs)
+        )
+    
+    async def scalar(self, statement, *args, **kwargs):
+        """Execute a statement and return a scalar result."""
+        return await self._loop.run_in_executor(
+            self._executor,
+            lambda: self._session.scalar(statement, *args, **kwargs)
+        )
+    
+    async def scalars(self, statement, *args, **kwargs):
+        """Execute a statement and return scalars."""
+        return await self._loop.run_in_executor(
+            self._executor,
+            lambda: self._session.scalars(statement, *args, **kwargs)
+        )
+    
+    def add(self, instance):
+        """Add an instance to the session."""
+        self._session.add(instance)
+    
+    def add_all(self, instances):
+        """Add multiple instances to the session."""
+        self._session.add_all(instances)
+    
+    async def delete(self, instance):
+        """Delete an instance."""
+        await self._loop.run_in_executor(
+            self._executor,
+            lambda: self._session.delete(instance)
+        )
+    
+    async def commit(self):
+        """Commit the transaction."""
+        await self._loop.run_in_executor(self._executor, self._session.commit)
+    
+    async def rollback(self):
+        """Rollback the transaction."""
+        await self._loop.run_in_executor(self._executor, self._session.rollback)
+    
+    async def refresh(self, instance):
+        """Refresh an instance from the database."""
+        await self._loop.run_in_executor(
+            self._executor,
+            lambda: self._session.refresh(instance)
+        )
+    
+    async def get(self, entity, ident):
+        """Get an entity by primary key."""
+        return await self._loop.run_in_executor(
+            self._executor,
+            lambda: self._session.get(entity, ident)
+        )
+    
+    async def close(self):
+        """Close the session."""
+        await self._loop.run_in_executor(self._executor, self._session.close)
+    
+    @property
+    def bind(self):
+        """Access the underlying engine bind."""
+        return self._session.bind
+
+
+# =============================================================================
+# PUBLIC API
+# =============================================================================
 
 
 @asynccontextmanager
-async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
+async def get_db() -> AsyncGenerator[Union[AsyncSession, _SyncSessionWrapper], None]:
     """
     Async database session context manager.
     
+    This is the primary way to access the database. Always use this.
+    
     Usage:
-        async with get_async_db() as db:
+        async with get_db() as db:
             result = await db.execute(select(User))
             users = result.scalars().all()
     
-    Raises:
-        RuntimeError: If async database is not available (e.g., SQLCipher)
+    For SQLCipher databases, operations are automatically run in a thread pool.
     """
-    if AsyncSessionLocal is None:
-        raise RuntimeError(
-            "Async database session not available. "
-            "Async is not supported for SQLCipher databases."
-        )
-    
-    async with AsyncSessionLocal() as session:
+    if _AsyncSessionLocal is not None:
+        # Native async support (PostgreSQL, SQLite)
+        async with _AsyncSessionLocal() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+    else:
+        # SQLCipher fallback: wrap sync session with async interface
+        loop = asyncio.get_event_loop()
+        executor = ThreadPoolExecutor(max_workers=1)
+        session = _SyncSessionLocal()
+        wrapper = _SyncSessionWrapper(session, loop, executor)
         try:
-            yield session
-            await session.commit()
+            yield wrapper
+            await loop.run_in_executor(executor, session.commit)
         except Exception:
-            await session.rollback()
+            await loop.run_in_executor(executor, session.rollback)
             raise
+        finally:
+            await loop.run_in_executor(executor, session.close)
+            executor.shutdown(wait=False)
 
 
-async def async_init_db():
-    """Initialize async database tables (for testing/development)."""
-    if async_engine is not None:
-        async with async_engine.begin() as conn:
+async def init_db() -> None:
+    """Initialize database tables."""
+    if _async_engine is not None:
+        async with _async_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+    else:
+        # SQLCipher fallback
+        Base.metadata.create_all(_sync_engine)
 
 
-async def async_get_db_health() -> bool:
-    """Check async database connectivity."""
+async def get_db_health() -> bool:
+    """Check database connectivity."""
     try:
-        async with get_async_db() as db:
+        async with get_db() as db:
             from sqlalchemy import text
             await db.execute(text("SELECT 1"))
             return True
@@ -295,6 +433,12 @@ async def async_get_db_health() -> bool:
         return False
 
 
-# Alias for backward compatibility
-async_session_factory = AsyncSessionLocal
+# =============================================================================
+# EXPORTS (Backward Compatibility)
+# =============================================================================
 
+# For backward compatibility with code that imports these directly
+Session = _SyncSessionLocal  # Deprecated: use get_db() instead
+SessionLocal = _SyncSessionLocal  # Deprecated: use get_db() instead
+engine = _sync_engine  # Deprecated: internal use only
+async_engine = _async_engine  # Deprecated: internal use only

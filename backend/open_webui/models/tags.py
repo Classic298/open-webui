@@ -1,7 +1,7 @@
 import logging
 from typing import Optional
 
-from open_webui.internal.db import Base, get_async_db
+from open_webui.internal.db import Base, get_db
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import Column, String, JSON, PrimaryKeyConstraint, Index, select, delete
@@ -47,16 +47,16 @@ class TagChatIdForm(BaseModel):
 
 
 ####################
-# TagTable - Async Implementation
+# TagTable
 ####################
 
 
 class TagTable:
-    """Async table class for tag operations."""
+    """Table class for tag database operations."""
 
     async def insert_new_tag(self, name: str, user_id: str) -> Optional[TagModel]:
         """Insert a new tag. Returns the created TagModel or None on failure."""
-        async with get_async_db() as db:
+        async with get_db() as db:
             id = name.replace(" ", "_").lower()
             tag = TagModel(id=id, user_id=user_id, name=name)
             try:
@@ -75,7 +75,7 @@ class TagTable:
         """Get a tag by name and user ID. Returns TagModel or None if not found."""
         try:
             id = name.replace(" ", "_").lower()
-            async with get_async_db() as db:
+            async with get_db() as db:
                 result = await db.execute(
                     select(Tag).where(Tag.id == id, Tag.user_id == user_id)
                 )
@@ -86,7 +86,7 @@ class TagTable:
 
     async def get_tags_by_user_id(self, user_id: str) -> list[TagModel]:
         """Get all tags for a user."""
-        async with get_async_db() as db:
+        async with get_db() as db:
             result = await db.execute(select(Tag).where(Tag.user_id == user_id))
             tags = result.scalars().all()
             return [TagModel.model_validate(tag) for tag in tags]
@@ -95,7 +95,7 @@ class TagTable:
         self, ids: list[str], user_id: str
     ) -> list[TagModel]:
         """Get tags by their IDs for a specific user."""
-        async with get_async_db() as db:
+        async with get_db() as db:
             result = await db.execute(
                 select(Tag).where(Tag.id.in_(ids), Tag.user_id == user_id)
             )
@@ -105,7 +105,7 @@ class TagTable:
     async def delete_tag_by_name_and_user_id(self, name: str, user_id: str) -> bool:
         """Delete a tag by name and user ID. Returns True on success."""
         try:
-            async with get_async_db() as db:
+            async with get_db() as db:
                 id = name.replace(" ", "_").lower()
                 await db.execute(
                     delete(Tag).where(Tag.id == id, Tag.user_id == user_id)

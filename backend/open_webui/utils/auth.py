@@ -23,7 +23,7 @@ from opentelemetry import trace
 
 
 from open_webui.utils.access_control import has_permission
-from open_webui.models.users import Users, AsyncUsers
+from open_webui.models.users import Users
 
 from open_webui.constants import ERROR_MESSAGES
 
@@ -314,8 +314,8 @@ async def get_current_user(
                     detail="Invalid token",
                 )
 
-            # ASYNC: Use AsyncUsers instead of blocking Users.get_user_by_id
-            user = await AsyncUsers.get_user_by_id(data["id"])
+            # ASYNC: Use Users instead of blocking Users.get_user_by_id
+            user = await Users.get_user_by_id(data["id"])
             if user is None:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -343,7 +343,7 @@ async def get_current_user(
                 # ASYNC: Update last active timestamp asynchronously
                 # Using asyncio.create_task to run in background without blocking
                 import asyncio
-                asyncio.create_task(AsyncUsers.update_last_active_by_id(user.id))
+                asyncio.create_task(Users.update_last_active_by_id(user.id))
             return user
         else:
             raise HTTPException(
@@ -366,8 +366,8 @@ async def get_current_user(
 
 
 async def get_current_user_by_api_key(request, api_key: str):
-    # ASYNC: Use AsyncUsers instead of blocking Users.get_user_by_api_key
-    user = await AsyncUsers.get_user_by_api_key(api_key)
+    # ASYNC: Use Users instead of blocking Users.get_user_by_api_key
+    user = await Users.get_user_by_api_key(api_key)
 
     if user is None:
         raise HTTPException(
@@ -397,7 +397,7 @@ async def get_current_user_by_api_key(request, api_key: str):
 
     # ASYNC: Update last active asynchronously
     import asyncio
-    asyncio.create_task(AsyncUsers.update_last_active_by_id(user.id))
+    asyncio.create_task(Users.update_last_active_by_id(user.id))
     return user
 
 

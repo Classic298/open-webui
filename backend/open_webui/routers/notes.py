@@ -8,12 +8,12 @@ from pydantic import BaseModel
 
 from open_webui.socket.main import sio
 
-from open_webui.models.groups import Groups, AsyncGroups
-from open_webui.models.users import Users, AsyncUsers, UserResponse
+from open_webui.models.groups import Groups
+from open_webui.models.users import Users, UserResponse
 from open_webui.models.notes import (
     NoteListResponse,
     Notes,
-    AsyncNotes,
+    Notes,
     NoteModel,
     NoteForm,
     NoteUserResponse,
@@ -70,10 +70,10 @@ async def get_notes(
         NoteUserResponse(
             **{
                 **note.model_dump(),
-                "user": UserResponse(**await AsyncUsers.get_user_by_id(note.user_id).model_dump()),
+                "user": UserResponse(**await Users.get_user_by_id(note.user_id).model_dump()),
             }
         )
-        for note in await AsyncNotes.get_notes_by_user_id(user.id, "read", skip=skip, limit=limit)
+        for note in await Notes.get_notes_by_user_id(user.id, "read", skip=skip, limit=limit)
     ]
     return notes
 
@@ -116,13 +116,13 @@ async def search_notes(
         filter["direction"] = direction
 
     if not user.role == "admin" or not BYPASS_ADMIN_ACCESS_CONTROL:
-        groups = await AsyncGroups.get_groups_by_member_id(user.id)
+        groups = await Groups.get_groups_by_member_id(user.id)
         if groups:
             filter["group_ids"] = [group.id for group in groups]
 
         filter["user_id"] = user.id
 
-    return await AsyncNotes.search_notes(user.id, filter, skip=skip, limit=limit)
+    return await Notes.search_notes(user.id, filter, skip=skip, limit=limit)
 
 
 ############################
@@ -143,7 +143,7 @@ async def create_new_note(
         )
 
     try:
-        note = await AsyncNotes.insert_new_note(form_data, user.id)
+        note = await Notes.insert_new_note(form_data, user.id)
         return note
     except Exception as e:
         log.exception(e)
@@ -171,7 +171,7 @@ async def get_note_by_id(request: Request, id: str, user=Depends(get_verified_us
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
-    note = await AsyncNotes.get_note_by_id(id)
+    note = await Notes.get_note_by_id(id)
     if not note:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND
@@ -213,7 +213,7 @@ async def update_note_by_id(
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
-    note = await AsyncNotes.get_note_by_id(id)
+    note = await Notes.get_note_by_id(id)
     if not note:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND
@@ -240,7 +240,7 @@ async def update_note_by_id(
         form_data.access_control = {}
 
     try:
-        note = await AsyncNotes.update_note_by_id(id, form_data)
+        note = await Notes.update_note_by_id(id, form_data)
         await sio.emit(
             "note-events",
             note.model_dump(),
@@ -270,7 +270,7 @@ async def delete_note_by_id(request: Request, id: str, user=Depends(get_verified
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
-    note = await AsyncNotes.get_note_by_id(id)
+    note = await Notes.get_note_by_id(id)
     if not note:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND
@@ -285,7 +285,7 @@ async def delete_note_by_id(request: Request, id: str, user=Depends(get_verified
         )
 
     try:
-        note = await AsyncNotes.delete_note_by_id(id)
+        note = await Notes.delete_note_by_id(id)
         return True
     except Exception as e:
         log.exception(e)
