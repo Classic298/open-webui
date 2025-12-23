@@ -15,7 +15,7 @@ from open_webui.models.chats import (
     AsyncChats,
     ChatTitleIdResponse,
 )
-from open_webui.models.tags import TagModel, Tags, AsyncTags
+from open_webui.models.tags import TagModel, Tags
 from open_webui.models.folders import Folders
 
 from open_webui.config import ENABLE_ADMIN_CHAT_ACCESS, ENABLE_ADMIN_EXPORT
@@ -316,9 +316,9 @@ async def search_user_chats(
     if page == 1 and len(words) == 1 and words[0].startswith("tag:"):
         tag_id = words[0].replace("tag:", "")
         if len(chat_list) == 0:
-            if await AsyncTags.get_tag_by_name_and_user_id(tag_id, user.id):
+            if await Tags.get_tag_by_name_and_user_id(tag_id, user.id):
                 log.debug(f"deleting tag: {tag_id}")
-                await AsyncTags.delete_tag_by_name_and_user_id(tag_id, user.id)
+                await Tags.delete_tag_by_name_and_user_id(tag_id, user.id)
 
     return chat_list
 
@@ -412,7 +412,7 @@ async def get_user_archived_chats(user=Depends(get_verified_user)):
 @router.get("/all/tags", response_model=list[TagModel])
 async def get_all_user_tags(user=Depends(get_verified_user)):
     try:
-        tags = await AsyncTags.get_tags_by_user_id(user.id)
+        tags = await Tags.get_tags_by_user_id(user.id)
         return tags
     except Exception as e:
         log.exception(e)
@@ -544,7 +544,7 @@ async def get_user_chat_list_by_tag_name(
         user.id, form_data.name, form_data.skip, form_data.limit
     )
     if len(chats) == 0:
-        await AsyncTags.delete_tag_by_name_and_user_id(form_data.name, user.id)
+        await Tags.delete_tag_by_name_and_user_id(form_data.name, user.id)
 
     return chats
 
@@ -701,7 +701,7 @@ async def delete_chat_by_id(request: Request, id: str, user=Depends(get_verified
         chat = await AsyncChats.get_chat_by_id(id)
         for tag in chat.meta.get("tags", []):
             if await AsyncChats.count_chats_by_tag_name_and_user_id(tag, user.id) == 1:
-                await AsyncTags.delete_tag_by_name_and_user_id(tag, user.id)
+                await Tags.delete_tag_by_name_and_user_id(tag, user.id)
 
         result = await AsyncChats.delete_chat_by_id(id)
 
@@ -718,7 +718,7 @@ async def delete_chat_by_id(request: Request, id: str, user=Depends(get_verified
         chat = await AsyncChats.get_chat_by_id(id)
         for tag in chat.meta.get("tags", []):
             if await AsyncChats.count_chats_by_tag_name_and_user_id(tag, user.id) == 1:
-                await AsyncTags.delete_tag_by_name_and_user_id(tag, user.id)
+                await Tags.delete_tag_by_name_and_user_id(tag, user.id)
 
         result = await AsyncChats.delete_chat_by_id_and_user_id(id, user.id)
         return result
@@ -872,13 +872,13 @@ async def archive_chat_by_id(id: str, user=Depends(get_verified_user)):
             for tag_id in chat.meta.get("tags", []):
                 if await AsyncChats.count_chats_by_tag_name_and_user_id(tag_id, user.id) == 0:
                     log.debug(f"deleting tag: {tag_id}")
-                    await AsyncTags.delete_tag_by_name_and_user_id(tag_id, user.id)
+                    await Tags.delete_tag_by_name_and_user_id(tag_id, user.id)
         else:
             for tag_id in chat.meta.get("tags", []):
-                tag = await AsyncTags.get_tag_by_name_and_user_id(tag_id, user.id)
+                tag = await Tags.get_tag_by_name_and_user_id(tag_id, user.id)
                 if tag is None:
                     log.debug(f"inserting tag: {tag_id}")
-                    tag = await AsyncTags.insert_new_tag(tag_id, user.id)
+                    tag = await Tags.insert_new_tag(tag_id, user.id)
 
         return ChatResponse(**chat.model_dump())
     else:
@@ -984,7 +984,7 @@ async def get_chat_tags_by_id(id: str, user=Depends(get_verified_user)):
     chat = await AsyncChats.get_chat_by_id_and_user_id(id, user.id)
     if chat:
         tags = chat.meta.get("tags", [])
-        return await AsyncTags.get_tags_by_ids_and_user_id(tags, user.id)
+        return await Tags.get_tags_by_ids_and_user_id(tags, user.id)
     else:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.NOT_FOUND
@@ -1018,7 +1018,7 @@ async def add_tag_by_id_and_tag_name(
 
         chat = await AsyncChats.get_chat_by_id_and_user_id(id, user.id)
         tags = chat.meta.get("tags", [])
-        return await AsyncTags.get_tags_by_ids_and_user_id(tags, user.id)
+        return await Tags.get_tags_by_ids_and_user_id(tags, user.id)
     else:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.DEFAULT()
@@ -1039,11 +1039,11 @@ async def delete_tag_by_id_and_tag_name(
         await AsyncChats.delete_tag_by_id_and_user_id_and_tag_name(id, user.id, form_data.name)
 
         if await AsyncChats.count_chats_by_tag_name_and_user_id(form_data.name, user.id) == 0:
-            await AsyncTags.delete_tag_by_name_and_user_id(form_data.name, user.id)
+            await Tags.delete_tag_by_name_and_user_id(form_data.name, user.id)
 
         chat = await AsyncChats.get_chat_by_id_and_user_id(id, user.id)
         tags = chat.meta.get("tags", [])
-        return await AsyncTags.get_tags_by_ids_and_user_id(tags, user.id)
+        return await Tags.get_tags_by_ids_and_user_id(tags, user.id)
     else:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.NOT_FOUND
@@ -1063,7 +1063,7 @@ async def delete_all_tags_by_id(id: str, user=Depends(get_verified_user)):
 
         for tag in chat.meta.get("tags", []):
             if await AsyncChats.count_chats_by_tag_name_and_user_id(tag, user.id) == 0:
-                await AsyncTags.delete_tag_by_name_and_user_id(tag, user.id)
+                await Tags.delete_tag_by_name_and_user_id(tag, user.id)
 
         return True
     else:

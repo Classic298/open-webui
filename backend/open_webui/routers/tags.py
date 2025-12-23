@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 from open_webui.models.tags import (
     TagModel,
-    AsyncTags,
+    Tags,
 )
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.utils.auth import get_verified_user
@@ -16,11 +16,11 @@ class TagForm(BaseModel):
 
 @router.get("/", response_model=list[TagModel])
 async def get_tags(user=Depends(get_verified_user)):
-    return await AsyncTags.get_tags_by_user_id(user.id)
+    return await Tags.get_tags_by_user_id(user.id)
 
 @router.post("/add", response_model=Optional[TagModel])
 async def add_tag(form_data: TagForm, user=Depends(get_verified_user)):
-    tag = await AsyncTags.insert_new_tag(form_data.name, user.id)
+    tag = await Tags.insert_new_tag(form_data.name, user.id)
     if tag:
         return tag
     raise HTTPException(
@@ -30,7 +30,7 @@ async def add_tag(form_data: TagForm, user=Depends(get_verified_user)):
 
 @router.post("/delete", response_model=bool)
 async def delete_tag(form_data: TagForm, user=Depends(get_verified_user)):
-    result = await AsyncTags.delete_tag_by_name_and_user_id(form_data.name, user.id)
+    result = await Tags.delete_tag_by_name_and_user_id(form_data.name, user.id)
     if result:
         return True
     raise HTTPException(

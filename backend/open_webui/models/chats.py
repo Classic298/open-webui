@@ -6,7 +6,7 @@ import uuid
 from typing import Optional
 
 from open_webui.internal.db import Base, get_db, get_async_db
-from open_webui.models.tags import TagModel, Tag, Tags, AsyncTags
+from open_webui.models.tags import TagModel, Tag, Tags
 from open_webui.models.folders import Folders
 from open_webui.utils.misc import sanitize_data_for_db, sanitize_text_for_db
 
@@ -1769,9 +1769,9 @@ class AsyncChatsTable:
     async def add_chat_tag_by_id_and_user_id_and_tag_name(
         self, id: str, user_id: str, tag_name: str
     ) -> Optional[ChatModel]:
-        tag = await AsyncTags.get_tag_by_name_and_user_id(tag_name, user_id)
+        tag = await Tags.get_tag_by_name_and_user_id(tag_name, user_id)
         if tag is None:
-            tag = await AsyncTags.insert_new_tag(tag_name, user_id)
+            tag = await Tags.insert_new_tag(tag_name, user_id)
         
         if tag is None:
             return None
