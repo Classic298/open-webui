@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional, Set, Callable, Any
 from sqlalchemy import select, text
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session
 
 log = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ def retry_on_db_lock(func: Callable, max_retries: int = 3, base_delay: float = 0
 try:
     from prune_imports import (
         Users, Chat, Chats, ChatFile, Message, Files, Notes, Prompts, Models,
-        Knowledges, Functions, Tools, Folder, Folders, get_db, CACHE_DIR
+        Knowledges, Functions, Tools, Folder, Folders, get_db, get_db_context, CACHE_DIR
     )
 except ImportError as e:
     log.error(f"Failed to import Open WebUI modules: {e}")
@@ -475,21 +476,30 @@ def get_active_file_ids(knowledge_bases=None, active_user_ids=None) -> Set[str]:
     return active_file_ids
 
 
-def safe_delete_file_by_id(file_id: str, vector_cleaner) -> bool:
+def safe_delete_file_by_id(file_id: str, vector_cleaner, db: Optional[Session] = None) -> bool:
     """
     Safely delete a file record and its associated vector collection.
+
+    Args:
+        file_id: The file ID to delete
+        vector_cleaner: Vector database cleaner instance
+        db: Optional database session to reuse (for efficient bulk operations)
+
+    Returns:
+        True if deletion succeeded, False otherwise
     """
     try:
-        file_record = Files.get_file_by_id(file_id)
-        if not file_record:
+        with get_db_context(db) as session:
+            file_record = Files.get_file_by_id(file_id, db=session)
+            if not file_record:
+                return True
+
+            # Use modular vector database cleaner
+            collection_name = f"file-{file_id}"
+            vector_cleaner.delete_collection(collection_name)
+
+            Files.delete_file_by_id(file_id, db=session)
             return True
-
-        # Use modular vector database cleaner
-        collection_name = f"file-{file_id}"
-        vector_cleaner.delete_collection(collection_name)
-
-        Files.delete_file_by_id(file_id)
-        return True
 
     except Exception as e:
         log.error(f"Error deleting file {file_id}: {e}")
