@@ -437,7 +437,7 @@
 	"Deleted {{name}}": "{{name}} gelöscht",
 	"Deleted User": "Gelöschter Benutzer",
 	"Deployment names are required for Azure OpenAI": "Deployment-Namen sind für Azure OpenAI erforderlich",
-  "Desc": "Absteigend",
+	"Desc": "Absteigend",
 	"Describe your knowledge base and objectives": "Beschreiben Sie Ihren Wissensspeicher und Ziele",
 	"Description": "Beschreibung",
 	"Detect Artifacts Automatically": "Artefakte automatisch erkennen",
