@@ -28,14 +28,16 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-# Now we can import from Open WebUI backend
+# Now we can import from prune modules
 try:
-    from backend.open_webui.routers.prune import (
+    from prune_models import PruneDataForm, PrunePreviewResult
+    from prune_core import (
         PruneLock,
-        JSONFileIDExtractor,
-        collect_file_ids_from_dict,
-        VectorDatabaseCleaner,
         get_vector_database_cleaner,
+        ChromaDatabaseCleaner,
+        PGVectorDatabaseCleaner
+    )
+    from prune_operations import (
         count_inactive_users,
         count_old_chats,
         count_orphaned_records,
@@ -46,25 +48,14 @@ try:
         cleanup_orphaned_uploads,
         delete_inactive_users,
         cleanup_audio_cache,
-        PruneDataForm,
-        PrunePreviewResult,
     )
-    from backend.open_webui.models.users import Users
-    from backend.open_webui.models.chats import Chats
-    from backend.open_webui.models.files import Files
-    from backend.open_webui.models.notes import Notes
-    from backend.open_webui.models.prompts import Prompts
-    from backend.open_webui.models.models import Models
-    from backend.open_webui.models.knowledge import Knowledges
-    from backend.open_webui.models.functions import Functions
-    from backend.open_webui.models.tools import Tools
-    from backend.open_webui.models.folders import Folders
-    from backend.open_webui.internal.db import get_db
-    from backend.open_webui.env import SRC_LOG_LEVELS
+    from prune_imports import (
+        Users, Chats, Files, Notes, Prompts, Models, Knowledges, Functions,
+        Tools, Folders, get_db, SRC_LOG_LEVELS
+    )
     from sqlalchemy import text
     import time
     import sqlite3
-    from backend.open_webui.routers.prune import ChromaDatabaseCleaner, PGVectorDatabaseCleaner
 except ImportError as e:
     print(f"ERROR: Failed to import Open WebUI modules: {e}", file=sys.stderr)
     print("\nThis script must be run with access to Open WebUI's backend modules.", file=sys.stderr)
@@ -537,15 +528,17 @@ def run_prune(form_data: PruneDataForm):
         log.info("Deleting orphaned database records")
 
         deleted_files = 0
-        for file_record in Files.get_files():
-            should_delete = (
-                file_record.id not in active_file_ids
-                or file_record.user_id not in active_user_ids
-            )
+        # Use shared database session for efficient bulk deletion
+        with get_db() as db:
+            for file_record in Files.get_files(db=db):
+                should_delete = (
+                    file_record.id not in active_file_ids
+                    or file_record.user_id not in active_user_ids
+                )
 
-            if should_delete:
-                if safe_delete_file_by_id(file_record.id):
-                    deleted_files += 1
+                if should_delete:
+                    if safe_delete_file_by_id(file_record.id, vector_cleaner, db=db):
+                        deleted_files += 1
 
         if deleted_files > 0:
             log.info(f"Deleted {deleted_files} orphaned files")

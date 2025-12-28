@@ -630,14 +630,16 @@ class InteractivePruneUI:
             # Delete orphaned files
             task = progress.add_task("Deleting orphaned files...", total=None)
             deleted_files = 0
-            for file_record in Files.get_files():
-                should_delete = (
-                    file_record.id not in active_file_ids
-                    or file_record.user_id not in active_user_ids
-                )
-                if should_delete:
-                    if safe_delete_file_by_id(file_record.id, self.vector_cleaner):
-                        deleted_files += 1
+            # Use shared database session for efficient bulk deletion
+            with get_db() as db:
+                for file_record in Files.get_files(db=db):
+                    should_delete = (
+                        file_record.id not in active_file_ids
+                        or file_record.user_id not in active_user_ids
+                    )
+                    if should_delete:
+                        if safe_delete_file_by_id(file_record.id, self.vector_cleaner, db=db):
+                            deleted_files += 1
             progress.update(task, completed=True)
             console.print(f"[green]✓[/green] Deleted {deleted_files} orphaned files")
 
