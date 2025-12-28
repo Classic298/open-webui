@@ -45,6 +45,7 @@ try:
         count_orphaned_uploads,
         count_audio_cache_files,
         get_active_file_ids,
+        get_all_folders,
         safe_delete_file_by_id,
         cleanup_orphaned_uploads,
         delete_inactive_users,
@@ -85,7 +86,6 @@ class InteractivePruneUI:
         Args:
             db: Optional database session to reuse
         """
-        from prune_operations import get_all_folders
         return get_all_folders(db=db)
 
     def run(self):

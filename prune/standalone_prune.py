@@ -44,6 +44,7 @@ try:
         count_orphaned_uploads,
         count_audio_cache_files,
         get_active_file_ids,
+        get_all_folders,
         safe_delete_file_by_id,
         cleanup_orphaned_uploads,
         delete_inactive_users,
@@ -641,7 +642,6 @@ def run_prune(form_data: PruneDataForm):
         if form_data.delete_orphaned_folders:
             folders_deleted = 0
             with get_db() as db:
-                from prune_operations import get_all_folders
                 for folder in get_all_folders(db=db):
                     if folder.user_id not in active_user_ids:
                         Folders.delete_folder_by_id_and_user_id(

@@ -17,6 +17,23 @@ from pathlib import Path
 from typing import Optional, Set
 from abc import ABC, abstractmethod
 
+# Optional database-specific imports
+try:
+    from sqlalchemy import text
+except ImportError:
+    text = None
+
+try:
+    from pymilvus import utility, Collection
+except ImportError:
+    utility = None
+    Collection = None
+
+try:
+    from qdrant_client.models import models as qdrant_models
+except ImportError:
+    qdrant_models = None
+
 log = logging.getLogger(__name__)
 
 
@@ -695,9 +712,6 @@ class PGVectorDatabaseCleaner(VectorDatabaseCleaner):
             return 0
 
         try:
-            # Import here to avoid circular dependency
-            from sqlalchemy import text
-
             orphaned_collections = self._get_orphaned_collections(
                 active_file_ids, active_kb_ids
             )
@@ -728,9 +742,6 @@ class PGVectorDatabaseCleaner(VectorDatabaseCleaner):
             return (0, error_msg)
 
         try:
-            # Import here to avoid circular dependency
-            from sqlalchemy import text
-
             orphaned_collections = self._get_orphaned_collections(
                 active_file_ids, active_kb_ids
             )
@@ -833,9 +844,6 @@ class PGVectorDatabaseCleaner(VectorDatabaseCleaner):
         This is the only "complex" part - discovery. The actual deletion is simple!
         """
         try:
-            # Import here to avoid circular dependency
-            from sqlalchemy import text
-
             expected_collections = self._build_expected_collections(
                 active_file_ids, active_kb_ids
             )
@@ -934,9 +942,6 @@ class MilvusDatabaseCleaner(VectorDatabaseCleaner):
     ) -> tuple[int, Optional[str]]:
         """Actually delete orphaned Milvus collections."""
         try:
-            # Import here to avoid circular dependency
-            from pymilvus import utility
-
             expected_collections = self._build_expected_collections(
                 active_file_ids, active_kb_ids
             )
@@ -980,9 +985,6 @@ class MilvusDatabaseCleaner(VectorDatabaseCleaner):
     def delete_collection(self, collection_name: str) -> bool:
         """Delete a specific Milvus collection by name."""
         try:
-            # Import here to avoid circular dependency
-            from pymilvus import utility
-
             # Convert dashes to underscores (Milvus naming convention)
             collection_name = collection_name.replace("-", "_")
             full_name = f"{self.collection_prefix}_{collection_name}"
@@ -1077,8 +1079,6 @@ class MilvusMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
             count = 0
 
             # Import pymilvus utilities
-            from pymilvus import utility, Collection
-
             for shared_collection_name in self.shared_collections:
                 if not utility.has_collection(shared_collection_name):
                     continue
@@ -1150,8 +1150,6 @@ class MilvusMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
             errors = []
 
             # Import pymilvus utilities
-            from pymilvus import utility, Collection
-
             for shared_collection_name in self.shared_collections:
                 if not utility.has_collection(shared_collection_name):
                     continue
@@ -1235,9 +1233,6 @@ class MilvusMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
         the appropriate shared collection.
         """
         try:
-            # Import here to avoid circular dependency
-            from pymilvus import utility, Collection
-
             # Use the reference implementation's _get_collection_and_resource_id logic
             # to determine which shared collection contains this resource_id
             resource_id = collection_name
@@ -1488,8 +1483,6 @@ class QdrantMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
         Uses Qdrant's scroll() API with pagination for memory efficiency.
         """
         try:
-            from qdrant_client.models import models
-
             expected_tenant_ids = self._build_expected_tenant_ids(
                 active_file_ids, active_kb_ids, active_user_ids or set()
             )
@@ -1560,8 +1553,6 @@ class QdrantMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
         Uses scroll() for memory-safe iteration and batched deletions.
         """
         try:
-            from qdrant_client.models import models
-
             expected_tenant_ids = self._build_expected_tenant_ids(
                 active_file_ids, active_kb_ids, active_user_ids or set()
             )
@@ -1616,12 +1607,12 @@ class QdrantMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
                             # Delete all points with this tenant_id
                             self.client.delete(
                                 collection_name=collection_name,
-                                points_selector=models.FilterSelector(
-                                    filter=models.Filter(
+                                points_selector=qdrant_models.FilterSelector(
+                                    filter=qdrant_models.Filter(
                                         must=[
-                                            models.FieldCondition(
+                                            qdrant_models.FieldCondition(
                                                 key="tenant_id",
-                                                match=models.MatchValue(value=tenant_id)
+                                                match=qdrant_models.MatchValue(value=tenant_id)
                                             )
                                         ]
                                     )
@@ -1651,8 +1642,6 @@ class QdrantMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
     def delete_collection(self, collection_name: str) -> bool:
         """Delete a specific tenant_id from the appropriate shared collection."""
         try:
-            from qdrant_client.models import models
-
             # Determine which shared collection and tenant_id
             tenant_id = collection_name
 
@@ -1674,12 +1663,12 @@ class QdrantMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
             # Delete all points with this tenant_id
             self.client.delete(
                 collection_name=mt_collection,
-                points_selector=models.FilterSelector(
-                    filter=models.Filter(
+                points_selector=qdrant_models.FilterSelector(
+                    filter=qdrant_models.Filter(
                         must=[
-                            models.FieldCondition(
+                            qdrant_models.FieldCondition(
                                 key="tenant_id",
-                                match=models.MatchValue(value=tenant_id)
+                                match=qdrant_models.MatchValue(value=tenant_id)
                             )
                         ]
                     )
