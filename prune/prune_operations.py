@@ -5,6 +5,7 @@ This module contains all the helper functions from backend/open_webui/routers/pr
 that perform the actual pruning operations, counting, and cleanup.
 """
 
+import inspect
 import logging
 import time
 from pathlib import Path
@@ -52,7 +53,8 @@ def retry_on_db_lock(func: Callable, max_retries: int = 3, base_delay: float = 0
 try:
     from prune_imports import (
         Users, Chat, Chats, ChatFile, Message, Files, Notes, Prompts, Models,
-        Knowledges, Functions, Tools, Folder, Folders, get_db, get_db_context, CACHE_DIR
+        Knowledges, Functions, Tools, Folder, Folders, FolderModel,
+        get_db, get_db_context, CACHE_DIR
     )
 except ImportError as e:
     log.error(f"Failed to import Open WebUI modules: {e}")
@@ -64,21 +66,26 @@ from prune_core import collect_file_ids_from_dict
 
 
 # API Compatibility Helpers
-def get_all_folders():
+def get_all_folders(db: Optional[Session] = None):
     """
     Get all folders from database.
     Compatibility helper for newer Folders API that doesn't have get_all_folders().
+
+    Args:
+        db: Optional database session to reuse (for efficient bulk operations)
     """
     try:
-        from prune_imports import Folder as FolderORM, FolderModel, get_db, Folders
-
         # Try new API first - if get_all_folders exists, use it
         if hasattr(Folders, 'get_all_folders'):
-            return Folders.get_all_folders()
+            # Check if the method supports db parameter
+            if 'db' in inspect.signature(Folders.get_all_folders).parameters:
+                return Folders.get_all_folders(db=db)
+            else:
+                return Folders.get_all_folders()
 
         # Otherwise query directly from database
-        with get_db() as db:
-            folders = db.query(FolderORM).all()
+        with get_db_context(db) as session:
+            folders = session.query(Folder).all()
             # Convert to FolderModel instances
             return [FolderModel.model_validate(f) for f in folders]
     except Exception as e:

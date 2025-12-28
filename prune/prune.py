@@ -28,22 +28,35 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+# Import main functions from both modes (may fail if dependencies missing)
+try:
+    from prune_cli_interactive import main as interactive_main
+    INTERACTIVE_AVAILABLE = True
+except ImportError:
+    interactive_main = None
+    INTERACTIVE_AVAILABLE = False
+
+try:
+    from standalone_prune import main as standalone_main
+    STANDALONE_AVAILABLE = True
+except ImportError:
+    standalone_main = None
+    STANDALONE_AVAILABLE = False
+
 
 def main():
     """Main entry point - route to interactive or non-interactive mode."""
     # Quick check for interactive mode
     if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] in ['--interactive', '-i']):
         # No arguments or just --interactive = run interactive mode
-        try:
-            from prune_cli_interactive import main as interactive_main
-            return interactive_main()
-        except ImportError as e:
-            print(f"ERROR: Cannot run interactive mode: {e}")
+        if not INTERACTIVE_AVAILABLE or interactive_main is None:
+            print("ERROR: Cannot run interactive mode - prune_cli_interactive could not be imported")
             print("\nInteractive mode requires the 'rich' library.")
             print("Install it with: pip install rich")
             print("\nOr use non-interactive mode with command-line arguments:")
             print("  python prune.py --help")
             return 1
+        return interactive_main()
 
     # Parse just enough to check if --help is requested
     if '--help' in sys.argv or '-h' in sys.argv:
@@ -51,16 +64,14 @@ def main():
         return 0
 
     # Has arguments = run non-interactive mode
-    try:
-        from standalone_prune import main as standalone_main
-        return standalone_main()
-    except ImportError as e:
-        print(f"ERROR: Cannot run prune script: {e}")
+    if not STANDALONE_AVAILABLE or standalone_main is None:
+        print("ERROR: Cannot run prune script - standalone_prune could not be imported")
         print("\nMake sure:")
         print("  1. You're running from the Open WebUI directory")
         print("  2. Open WebUI dependencies are installed")
         print("  3. PYTHONPATH is set correctly")
         return 1
+    return standalone_main()
 
 
 def show_help():
