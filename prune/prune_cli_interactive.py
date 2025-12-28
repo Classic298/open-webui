@@ -77,13 +77,16 @@ class InteractivePruneUI:
         self.form_data = PruneDataForm()
         self.vector_cleaner = None
 
-    def _get_all_folders_safe(self):
+    def _get_all_folders_safe(self, db=None):
         """
         Safely get all folders using compatibility helper.
         Handles API changes between Open WebUI versions.
+
+        Args:
+            db: Optional database session to reuse
         """
         from prune_operations import get_all_folders
-        return get_all_folders()
+        return get_all_folders(db=db)
 
     def run(self):
         """Main entry point for interactive UI."""
@@ -604,17 +607,18 @@ class InteractivePruneUI:
                 cutoff_time = int(time.time()) - (self.form_data.days * 86400)
                 deleted = 0
 
-                for chat in Chats.get_chats():
-                    if chat.updated_at < cutoff_time:
-                        if self.form_data.exempt_archived_chats and chat.archived:
-                            continue
-                        if self.form_data.exempt_chats_in_folders and (
-                            getattr(chat, "folder_id", None) is not None
-                            or getattr(chat, "pinned", False)
-                        ):
-                            continue
-                        Chats.delete_chat_by_id(chat.id)
-                        deleted += 1
+                with get_db() as db:
+                    for chat in Chats.get_chats(db=db):
+                        if chat.updated_at < cutoff_time:
+                            if self.form_data.exempt_archived_chats and chat.archived:
+                                continue
+                            if self.form_data.exempt_chats_in_folders and (
+                                getattr(chat, "folder_id", None) is not None
+                                or getattr(chat, "pinned", False)
+                            ):
+                                continue
+                            Chats.delete_chat_by_id(chat.id, db=db)
+                            deleted += 1
 
                 progress.update(task, completed=True)
                 console.print(f"[green]✓[/green] Deleted {deleted} old chats")
@@ -643,38 +647,103 @@ class InteractivePruneUI:
             progress.update(task, completed=True)
             console.print(f"[green]✓[/green] Deleted {deleted_files} orphaned files")
 
-            # Delete other orphaned data
-            orphaned_types = [
-                ("knowledge bases", Knowledges.get_knowledge_bases(), lambda kb: kb.user_id not in active_user_ids,
-                 lambda kb: (self.vector_cleaner.delete_collection(kb.id), Knowledges.delete_knowledge_by_id(kb.id)),
-                 self.form_data.delete_orphaned_knowledge_bases),
-                ("chats", Chats.get_chats(), lambda c: c.user_id not in active_user_ids,
-                 lambda c: Chats.delete_chat_by_id(c.id), self.form_data.delete_orphaned_chats),
-                ("tools", Tools.get_tools(), lambda t: t.user_id not in active_user_ids,
-                 lambda t: Tools.delete_tool_by_id(t.id), self.form_data.delete_orphaned_tools),
-                ("functions", Functions.get_functions(), lambda f: f.user_id not in active_user_ids,
-                 lambda f: Functions.delete_function_by_id(f.id), self.form_data.delete_orphaned_functions),
-                ("prompts", Prompts.get_prompts(), lambda p: p.user_id not in active_user_ids,
-                 lambda p: Prompts.delete_prompt_by_command(p.command), self.form_data.delete_orphaned_prompts),
-                ("models", Models.get_all_models(), lambda m: m.user_id not in active_user_ids,
-                 lambda m: Models.delete_model_by_id(m.id), self.form_data.delete_orphaned_models),
-                ("notes", Notes.get_notes(), lambda n: n.user_id not in active_user_ids,
-                 lambda n: Notes.delete_note_by_id(n.id), self.form_data.delete_orphaned_notes),
-                ("folders", self._get_all_folders_safe(), lambda f: f.user_id not in active_user_ids,
-                 lambda f: Folders.delete_folder_by_id_and_user_id(f.id, f.user_id),
-                 self.form_data.delete_orphaned_folders),
-            ]
-
-            for name, items, check_fn, delete_fn, enabled in orphaned_types:
-                if enabled:
-                    task = progress.add_task(f"Deleting orphaned {name}...", total=None)
-                    deleted = 0
-                    for item in items:
-                        if check_fn(item):
-                            delete_fn(item)
+            # Delete other orphaned data - use shared session for each type
+            # Knowledge bases
+            if self.form_data.delete_orphaned_knowledge_bases:
+                task = progress.add_task("Deleting orphaned knowledge bases...", total=None)
+                deleted = 0
+                with get_db() as db:
+                    for kb in Knowledges.get_knowledge_bases(db=db):
+                        if kb.user_id not in active_user_ids:
+                            self.vector_cleaner.delete_collection(kb.id)
+                            Knowledges.delete_knowledge_by_id(kb.id, db=db)
                             deleted += 1
-                    progress.update(task, completed=True)
-                    console.print(f"[green]✓[/green] Deleted {deleted} orphaned {name}")
+                progress.update(task, completed=True)
+                console.print(f"[green]✓[/green] Deleted {deleted} orphaned knowledge bases")
+
+            # Chats
+            if self.form_data.delete_orphaned_chats:
+                task = progress.add_task("Deleting orphaned chats...", total=None)
+                deleted = 0
+                with get_db() as db:
+                    for chat in Chats.get_chats(db=db):
+                        if chat.user_id not in active_user_ids:
+                            Chats.delete_chat_by_id(chat.id, db=db)
+                            deleted += 1
+                progress.update(task, completed=True)
+                console.print(f"[green]✓[/green] Deleted {deleted} orphaned chats")
+
+            # Tools
+            if self.form_data.delete_orphaned_tools:
+                task = progress.add_task("Deleting orphaned tools...", total=None)
+                deleted = 0
+                with get_db() as db:
+                    for tool in Tools.get_tools(db=db):
+                        if tool.user_id not in active_user_ids:
+                            Tools.delete_tool_by_id(tool.id, db=db)
+                            deleted += 1
+                progress.update(task, completed=True)
+                console.print(f"[green]✓[/green] Deleted {deleted} orphaned tools")
+
+            # Functions
+            if self.form_data.delete_orphaned_functions:
+                task = progress.add_task("Deleting orphaned functions...", total=None)
+                deleted = 0
+                with get_db() as db:
+                    for function in Functions.get_functions(db=db):
+                        if function.user_id not in active_user_ids:
+                            Functions.delete_function_by_id(function.id, db=db)
+                            deleted += 1
+                progress.update(task, completed=True)
+                console.print(f"[green]✓[/green] Deleted {deleted} orphaned functions")
+
+            # Prompts
+            if self.form_data.delete_orphaned_prompts:
+                task = progress.add_task("Deleting orphaned prompts...", total=None)
+                deleted = 0
+                with get_db() as db:
+                    for prompt in Prompts.get_prompts(db=db):
+                        if prompt.user_id not in active_user_ids:
+                            Prompts.delete_prompt_by_command(prompt.command, db=db)
+                            deleted += 1
+                progress.update(task, completed=True)
+                console.print(f"[green]✓[/green] Deleted {deleted} orphaned prompts")
+
+            # Models
+            if self.form_data.delete_orphaned_models:
+                task = progress.add_task("Deleting orphaned models...", total=None)
+                deleted = 0
+                with get_db() as db:
+                    for model in Models.get_all_models(db=db):
+                        if model.user_id not in active_user_ids:
+                            Models.delete_model_by_id(model.id, db=db)
+                            deleted += 1
+                progress.update(task, completed=True)
+                console.print(f"[green]✓[/green] Deleted {deleted} orphaned models")
+
+            # Notes
+            if self.form_data.delete_orphaned_notes:
+                task = progress.add_task("Deleting orphaned notes...", total=None)
+                deleted = 0
+                with get_db() as db:
+                    for note in Notes.get_notes(db=db):
+                        if note.user_id not in active_user_ids:
+                            Notes.delete_note_by_id(note.id, db=db)
+                            deleted += 1
+                progress.update(task, completed=True)
+                console.print(f"[green]✓[/green] Deleted {deleted} orphaned notes")
+
+            # Folders
+            if self.form_data.delete_orphaned_folders:
+                task = progress.add_task("Deleting orphaned folders...", total=None)
+                deleted = 0
+                with get_db() as db:
+                    for folder in self._get_all_folders_safe(db=db):
+                        if folder.user_id not in active_user_ids:
+                            Folders.delete_folder_by_id_and_user_id(folder.id, folder.user_id, db=db)
+                            deleted += 1
+                progress.update(task, completed=True)
+                console.print(f"[green]✓[/green] Deleted {deleted} orphaned folders")
 
             # Stage 4: Cleanup physical files
             task = progress.add_task("Cleaning up orphaned uploads...", total=None)

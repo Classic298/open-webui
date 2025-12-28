@@ -485,25 +485,26 @@ def run_prune(form_data: PruneDataForm):
             cutoff_time = int(time.time()) - (form_data.days * 86400)
             chats_to_delete = []
 
-            for chat in Chats.get_chats():
-                if chat.updated_at < cutoff_time:
-                    if form_data.exempt_archived_chats and chat.archived:
-                        continue
-                    if form_data.exempt_chats_in_folders and (
-                        getattr(chat, "folder_id", None) is not None
-                        or getattr(chat, "pinned", False)
-                    ):
-                        continue
-                    chats_to_delete.append(chat)
+            with get_db() as db:
+                for chat in Chats.get_chats(db=db):
+                    if chat.updated_at < cutoff_time:
+                        if form_data.exempt_archived_chats and chat.archived:
+                            continue
+                        if form_data.exempt_chats_in_folders and (
+                            getattr(chat, "folder_id", None) is not None
+                            or getattr(chat, "pinned", False)
+                        ):
+                            continue
+                        chats_to_delete.append(chat)
 
-            if chats_to_delete:
-                log.info(
-                    f"Deleting {len(chats_to_delete)} old chats (older than {form_data.days} days)"
-                )
-                for chat in chats_to_delete:
-                    Chats.delete_chat_by_id(chat.id)
-            else:
-                log.info(f"No chats found older than {form_data.days} days")
+                if chats_to_delete:
+                    log.info(
+                        f"Deleting {len(chats_to_delete)} old chats (older than {form_data.days} days)"
+                    )
+                    for chat in chats_to_delete:
+                        Chats.delete_chat_by_id(chat.id, db=db)
+                else:
+                    log.info(f"No chats found older than {form_data.days} days")
         else:
             log.info("Skipping chat deletion (days parameter is None)")
 
@@ -545,11 +546,12 @@ def run_prune(form_data: PruneDataForm):
 
         deleted_kbs = 0
         if form_data.delete_orphaned_knowledge_bases:
-            for kb in knowledge_bases:
-                if kb.user_id not in active_user_ids:
-                    if vector_cleaner.delete_collection(kb.id):
-                        Knowledges.delete_knowledge_by_id(kb.id)
-                        deleted_kbs += 1
+            with get_db() as db:
+                for kb in Knowledges.get_knowledge_bases(db=db):
+                    if kb.user_id not in active_user_ids:
+                        if vector_cleaner.delete_collection(kb.id):
+                            Knowledges.delete_knowledge_by_id(kb.id, db=db)
+                            deleted_kbs += 1
 
             if deleted_kbs > 0:
                 log.info(f"Deleted {deleted_kbs} orphaned knowledge bases")
@@ -560,11 +562,12 @@ def run_prune(form_data: PruneDataForm):
 
         if form_data.delete_orphaned_chats:
             chats_deleted = 0
-            for chat in Chats.get_chats():
-                if chat.user_id not in active_user_ids:
-                    Chats.delete_chat_by_id(chat.id)
-                    chats_deleted += 1
-                    deleted_others += 1
+            with get_db() as db:
+                for chat in Chats.get_chats(db=db):
+                    if chat.user_id not in active_user_ids:
+                        Chats.delete_chat_by_id(chat.id, db=db)
+                        chats_deleted += 1
+                        deleted_others += 1
             if chats_deleted > 0:
                 log.info(f"Deleted {chats_deleted} orphaned chats")
         else:
@@ -572,11 +575,12 @@ def run_prune(form_data: PruneDataForm):
 
         if form_data.delete_orphaned_tools:
             tools_deleted = 0
-            for tool in Tools.get_tools():
-                if tool.user_id not in active_user_ids:
-                    Tools.delete_tool_by_id(tool.id)
-                    tools_deleted += 1
-                    deleted_others += 1
+            with get_db() as db:
+                for tool in Tools.get_tools(db=db):
+                    if tool.user_id not in active_user_ids:
+                        Tools.delete_tool_by_id(tool.id, db=db)
+                        tools_deleted += 1
+                        deleted_others += 1
             if tools_deleted > 0:
                 log.info(f"Deleted {tools_deleted} orphaned tools")
         else:
@@ -584,11 +588,12 @@ def run_prune(form_data: PruneDataForm):
 
         if form_data.delete_orphaned_functions:
             functions_deleted = 0
-            for function in Functions.get_functions():
-                if function.user_id not in active_user_ids:
-                    Functions.delete_function_by_id(function.id)
-                    functions_deleted += 1
-                    deleted_others += 1
+            with get_db() as db:
+                for function in Functions.get_functions(db=db):
+                    if function.user_id not in active_user_ids:
+                        Functions.delete_function_by_id(function.id, db=db)
+                        functions_deleted += 1
+                        deleted_others += 1
             if functions_deleted > 0:
                 log.info(f"Deleted {functions_deleted} orphaned functions")
         else:
@@ -596,11 +601,12 @@ def run_prune(form_data: PruneDataForm):
 
         if form_data.delete_orphaned_notes:
             notes_deleted = 0
-            for note in Notes.get_notes():
-                if note.user_id not in active_user_ids:
-                    Notes.delete_note_by_id(note.id)
-                    notes_deleted += 1
-                    deleted_others += 1
+            with get_db() as db:
+                for note in Notes.get_notes(db=db):
+                    if note.user_id not in active_user_ids:
+                        Notes.delete_note_by_id(note.id, db=db)
+                        notes_deleted += 1
+                        deleted_others += 1
             if notes_deleted > 0:
                 log.info(f"Deleted {notes_deleted} orphaned notes")
         else:
@@ -608,11 +614,12 @@ def run_prune(form_data: PruneDataForm):
 
         if form_data.delete_orphaned_prompts:
             prompts_deleted = 0
-            for prompt in Prompts.get_prompts():
-                if prompt.user_id not in active_user_ids:
-                    Prompts.delete_prompt_by_command(prompt.command)
-                    prompts_deleted += 1
-                    deleted_others += 1
+            with get_db() as db:
+                for prompt in Prompts.get_prompts(db=db):
+                    if prompt.user_id not in active_user_ids:
+                        Prompts.delete_prompt_by_command(prompt.command, db=db)
+                        prompts_deleted += 1
+                        deleted_others += 1
             if prompts_deleted > 0:
                 log.info(f"Deleted {prompts_deleted} orphaned prompts")
         else:
@@ -620,11 +627,12 @@ def run_prune(form_data: PruneDataForm):
 
         if form_data.delete_orphaned_models:
             models_deleted = 0
-            for model in Models.get_all_models():
-                if model.user_id not in active_user_ids:
-                    Models.delete_model_by_id(model.id)
-                    models_deleted += 1
-                    deleted_others += 1
+            with get_db() as db:
+                for model in Models.get_all_models(db=db):
+                    if model.user_id not in active_user_ids:
+                        Models.delete_model_by_id(model.id, db=db)
+                        models_deleted += 1
+                        deleted_others += 1
             if models_deleted > 0:
                 log.info(f"Deleted {models_deleted} orphaned models")
         else:
@@ -632,13 +640,15 @@ def run_prune(form_data: PruneDataForm):
 
         if form_data.delete_orphaned_folders:
             folders_deleted = 0
-            for folder in Folders.get_all_folders():
-                if folder.user_id not in active_user_ids:
-                    Folders.delete_folder_by_id_and_user_id(
-                        folder.id, folder.user_id
-                    )
-                    folders_deleted += 1
-                    deleted_others += 1
+            with get_db() as db:
+                from prune_operations import get_all_folders
+                for folder in get_all_folders(db=db):
+                    if folder.user_id not in active_user_ids:
+                        Folders.delete_folder_by_id_and_user_id(
+                            folder.id, folder.user_id, db=db
+                        )
+                        folders_deleted += 1
+                        deleted_others += 1
             if folders_deleted > 0:
                 log.info(f"Deleted {folders_deleted} orphaned folders")
         else:
