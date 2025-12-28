@@ -1487,6 +1487,10 @@ class QdrantMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
                 active_file_ids, active_kb_ids, active_user_ids or set()
             )
 
+            log.info(f"Qdrant multitenancy: {len(active_kb_ids)} active KBs, {len(active_file_ids)} active files, {len(active_user_ids or set())} active users")
+            log.info(f"Qdrant multitenancy: Built {len(expected_tenant_ids)} expected tenant_ids")
+            log.debug(f"Expected tenant_ids sample: {list(expected_tenant_ids)[:10]}")
+
             orphaned_count = 0
 
             for collection_name in self.shared_collections:
@@ -1528,9 +1532,14 @@ class QdrantMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
                     log.debug(f"Found {len(all_tenant_ids)} tenant_ids in {collection_name}")
 
                     # Count orphaned tenant_ids
+                    orphaned_in_this_collection = []
                     for tenant_id in all_tenant_ids:
                         if tenant_id not in expected_tenant_ids:
                             orphaned_count += 1
+                            orphaned_in_this_collection.append(tenant_id)
+
+                    if orphaned_in_this_collection:
+                        log.warning(f"Found {len(orphaned_in_this_collection)} orphaned tenant_ids in {collection_name}: {orphaned_in_this_collection}")
 
                 except Exception as e:
                     log.error(f"Error scanning Qdrant collection {collection_name}: {e}")
@@ -1556,6 +1565,9 @@ class QdrantMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
             expected_tenant_ids = self._build_expected_tenant_ids(
                 active_file_ids, active_kb_ids, active_user_ids or set()
             )
+
+            log.info(f"Qdrant multitenancy cleanup: {len(active_kb_ids)} active KBs, {len(active_file_ids)} active files, {len(active_user_ids or set())} active users")
+            log.info(f"Qdrant multitenancy cleanup: Built {len(expected_tenant_ids)} expected tenant_ids")
 
             deleted_count = 0
             errors = []
@@ -1600,7 +1612,10 @@ class QdrantMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
                         tid for tid in all_tenant_ids if tid not in expected_tenant_ids
                     ]
 
-                    log.info(f"Found {len(orphaned_tenant_ids)} orphaned tenant_ids in {collection_name}")
+                    if orphaned_tenant_ids:
+                        log.warning(f"Found {len(orphaned_tenant_ids)} orphaned tenant_ids in {collection_name}: {orphaned_tenant_ids}")
+                    else:
+                        log.info(f"No orphaned tenant_ids found in {collection_name}")
 
                     for tenant_id in orphaned_tenant_ids:
                         try:
@@ -1696,16 +1711,29 @@ class QdrantMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
         expected_tenant_ids = set()
 
         # File tenant_ids: file-{id}
+        file_tenant_ids_count = 0
         for file_id in active_file_ids:
             expected_tenant_ids.add(f"file-{file_id}")
+            file_tenant_ids_count += 1
 
         # Knowledge base tenant_ids: {kb_id}
+        kb_tenant_ids_count = 0
+        kb_ids_sample = []
         for kb_id in active_kb_ids:
             expected_tenant_ids.add(kb_id)
+            kb_tenant_ids_count += 1
+            if kb_tenant_ids_count <= 5:  # Sample first 5 for logging
+                kb_ids_sample.append(kb_id)
 
         # User memory tenant_ids: user-memory-{user_id}
+        memory_tenant_ids_count = 0
         for user_id in active_user_ids:
             expected_tenant_ids.add(f"user-memory-{user_id}")
+            memory_tenant_ids_count += 1
+
+        log.debug(f"Built expected tenant_ids: {file_tenant_ids_count} files, {kb_tenant_ids_count} KBs, {memory_tenant_ids_count} memories")
+        if kb_ids_sample:
+            log.debug(f"Sample KB IDs added as tenant_ids: {kb_ids_sample}")
 
         # Note: web-search-* and hash-based are ephemeral/temporary
         # They are NOT added to expected set, so they will be cleaned up
