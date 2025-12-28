@@ -52,7 +52,7 @@ try:
     )
     from prune_imports import (
         Users, Chats, Files, Notes, Prompts, Models, Knowledges, Functions,
-        Tools, Folders, get_db, SRC_LOG_LEVELS
+        Tools, Folders, get_db, VECTOR_DB, VECTOR_DB_CLIENT, CACHE_DIR
     )
     from sqlalchemy import text
     import time
@@ -408,7 +408,7 @@ def run_prune(form_data: PruneDataForm):
 
     try:
         # Get vector database cleaner based on configuration
-        vector_cleaner = get_vector_database_cleaner()
+        vector_cleaner = get_vector_database_cleaner(VECTOR_DB, VECTOR_DB_CLIENT, Path(CACHE_DIR))
 
         if form_data.dry_run:
             log.info("Starting data pruning preview (dry run)")
