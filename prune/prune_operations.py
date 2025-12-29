@@ -595,17 +595,18 @@ def delete_inactive_users(
             if user.last_active_at < cutoff_time:
                 users_to_delete.append(user)
 
-        # Delete inactive users
-        for user in users_to_delete:
-            try:
-                # Delete the user - this will cascade to all their data
-                Users.delete_user_by_id(user.id)
-                deleted_count += 1
-                log.info(
-                    f"Deleted inactive user: {user.email} (last active: {user.last_active_at})"
-                )
-            except Exception as e:
-                log.error(f"Failed to delete user {user.id}: {e}")
+        # Delete inactive users with shared database session
+        with get_db() as db:
+            for user in users_to_delete:
+                try:
+                    # Delete the user - this will cascade to all their data
+                    Users.delete_user_by_id(user.id, db=db)
+                    deleted_count += 1
+                    log.info(
+                        f"Deleted inactive user: {user.email} (last active: {user.last_active_at})"
+                    )
+                except Exception as e:
+                    log.error(f"Failed to delete user {user.id}: {e}")
 
     except Exception as e:
         log.error(f"Error during inactive user deletion: {e}")
