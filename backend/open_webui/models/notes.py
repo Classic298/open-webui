@@ -244,9 +244,14 @@ class NoteTable:
             return [NoteModel.model_validate(note) for note in notes]
 
     def search_notes(
-        self, user_id: str, filter: dict = {}, skip: int = 0, limit: int = 30
+        self,
+        user_id: str,
+        filter: dict = {},
+        skip: int = 0,
+        limit: int = 30,
+        db: Optional[Session] = None,
     ) -> NoteListResponse:
-        with get_db() as db:
+        with get_db_context(db) as db:
             query = db.query(Note, User).outerjoin(User, User.id == Note.user_id)
             if filter:
                 query_key = filter.get("query")
@@ -338,7 +343,7 @@ class NoteTable:
     ) -> list[NoteModel]:
         with get_db_context(db) as db:
             user_group_ids = [
-                group.id for group in Groups.get_groups_by_member_id(user_id)
+                group.id for group in Groups.get_groups_by_member_id(user_id, db=db)
             ]
 
             query = db.query(Note).order_by(Note.updated_at.desc())
