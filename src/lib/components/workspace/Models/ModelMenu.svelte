@@ -13,8 +13,10 @@
 	import DocumentDuplicate from '$lib/components/icons/DocumentDuplicate.svelte';
 	import Download from '$lib/components/icons/Download.svelte';
 	import ArrowUpCircle from '$lib/components/icons/ArrowUpCircle.svelte';
+	import Pin from '$lib/components/icons/Pin.svelte';
+	import PinSlash from '$lib/components/icons/PinSlash.svelte';
 
-	import { config, user as currentUser } from '$lib/stores';
+	import { config, user as currentUser, settings } from '$lib/stores';
 	import Link from '$lib/components/icons/Link.svelte';
 
 	const i18n = getContext('i18n');
@@ -29,6 +31,7 @@
 	export let copyLinkHandler: Function;
 
 	export let hideHandler: Function;
+	export let pinModelHandler: Function;
 	export let deleteHandler: Function;
 	export let onClose: Function;
 
@@ -125,6 +128,27 @@
 			</DropdownMenu.Item>
 
 			<DropdownMenu.Item
+				class="flex  gap-2  items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+				on:click={() => {
+					pinModelHandler(model?.id);
+				}}
+			>
+				{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
+					<PinSlash />
+				{:else}
+					<Pin />
+				{/if}
+
+				<div class="flex items-center">
+					{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
+						{$i18n.t('Hide from Sidebar')}
+					{:else}
+						{$i18n.t('Keep in Sidebar')}
+					{/if}
+				</div>
+			</DropdownMenu.Item>
+
+			<DropdownMenu.Item
 				class="flex gap-2 items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
 				on:click={() => {
 					cloneHandler();
@@ -135,7 +159,7 @@
 				<div class="flex items-center">{$i18n.t('Clone')}</div>
 			</DropdownMenu.Item>
 
-			<hr class="border-gray-50 dark:border-gray-800 my-1" />
+			<hr class="border-gray-50/30 dark:border-gray-800/30 my-1" />
 
 			<DropdownMenu.Item
 				class="flex gap-2 items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
@@ -173,7 +197,7 @@
 				</DropdownMenu.Item>
 			{/if}
 
-			<hr class="border-gray-50 dark:border-gray-800 my-1" />
+			<hr class="border-gray-50/30 dark:border-gray-800/30 my-1" />
 
 			<DropdownMenu.Item
 				class="flex  gap-2  items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"

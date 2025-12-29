@@ -76,21 +76,88 @@ python prune/prune.py          # Launch interactive mode
 
 ### Method 2: Docker Installation
 
-**Option A: Run inside container**
+**Step 1: Download the prune folder** (one-time setup)
 ```bash
-# Find your container
-docker ps | grep open-webui
-
-# Enter container
-docker exec -it <container-name> bash
-
-# Run prune script
-python /app/backend/prune/prune.py
+# Clone only the prune folder using sparse checkout
+git clone --filter=blob:none --no-checkout https://github.com/Classic298/open-webui.git
+cd open-webui
+git sparse-checkout init --cone
+git sparse-checkout set prune
+git checkout claude/analyze-prune-router-01C8wACN95WDtT67c8ULXdkr
 ```
 
-**Option B: Direct execution**
+**Step 2: Copy files into your Docker container** (one-time setup)
 ```bash
-docker exec <container-name> python /app/backend/prune/prune.py --days 90 --execute
+# Find your Open WebUI container name
+docker ps | grep open-webui
+
+# Copy the prune folder into the container
+docker cp prune <container-name>:/app/
+```
+
+**Step 3: Run the prune script**
+
+**Option A: Run interactively inside container**
+```bash
+docker exec -it <container-name> bash
+cd /app
+python prune/prune.py
+```
+
+**Option B: Direct execution from host**
+```bash
+docker exec <container-name> python /app/prune/prune.py --days 90 --execute
+```
+
+**Option C: Preview mode from host**
+```bash
+docker exec <container-name> python /app/prune/prune.py --days 90 --dry-run
+```
+
+**Important Notes:**
+- Environment variables are automatically inherited from the container **if properly configured**
+- No additional dependencies needed (already in container)
+- Data persists in your Docker volumes
+
+**Required Environment Variables:**
+
+⚠️ **IMPORTANT:** The prune script requires a **properly configured** Open WebUI container to function. If you get "*Required environment variable not found*" error, your Open WebUI container is not configured correctly.
+
+**Required variables:**
+- `WEBUI_SECRET_KEY` - Secret key for Open WebUI (required)
+- `DATABASE_URL` - Database connection string (required)
+- `DATA_DIR` - Data directory path (optional, default: `/app/backend/data`)
+- `VECTOR_DB` - Vector database type if using RAG (optional)
+
+**How to properly configure your Open WebUI container:**
+
+Using docker-compose.yml (recommended):
+```yaml
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    volumes:
+      - open-webui:/app/backend/data
+      - ./prune:/app/prune
+    environment:
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
+      - DATABASE_URL=sqlite:////app/backend/data/webui.db
+      - DATA_DIR=/app/backend/data
+    ports:
+      - "3000:8080"
+```
+
+Or using docker run:
+```bash
+docker run -d \
+  -e WEBUI_SECRET_KEY="your-secret-key" \
+  -e DATABASE_URL="sqlite:////app/backend/data/webui.db" \
+  -e DATA_DIR="/app/backend/data" \
+  -v open-webui:/app/backend/data \
+  -v ./prune:/app/prune \
+  -p 3000:8080 \
+  --name open-webui \
+  ghcr.io/open-webui/open-webui:main
 ```
 
 ### Method 3: Pip Installation
@@ -428,8 +495,7 @@ For issues or questions:
 - Review this README
 - Check logs: `tail -f /var/log/openwebui-prune.log`
 - Test in staging environment
-- Open an issue on [Open WebUI GitHub](https://github.com/open-webui/open-webui)
-- Join [Open WebUI Discord](https://discord.gg/5rJgQTnV4s)
+- Open an issue
 
 ---
 

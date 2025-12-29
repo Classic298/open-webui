@@ -104,7 +104,7 @@ if _import_strategy is None:
 if _import_strategy == "pip" or _import_strategy == "backend_path":
     # Import from open_webui.* (pip or backend in path)
     from open_webui.models.users import Users
-    from open_webui.models.chats import Chat, Chats
+    from open_webui.models.chats import Chat, Chats, ChatFile
     from open_webui.models.messages import Message
     from open_webui.models.files import Files
     from open_webui.models.notes import Notes
@@ -114,9 +114,8 @@ if _import_strategy == "pip" or _import_strategy == "backend_path":
     from open_webui.models.functions import Functions
     from open_webui.models.tools import Tools
     from open_webui.models.folders import Folder, Folders, FolderModel
-    from open_webui.internal.db import get_db
+    from open_webui.internal.db import get_db, get_db_context
     from open_webui.config import CACHE_DIR
-    from open_webui.env import SRC_LOG_LEVELS
 
     try:
         from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT, VECTOR_DB
@@ -127,7 +126,7 @@ if _import_strategy == "pip" or _import_strategy == "backend_path":
 elif _import_strategy == "git":
     # Import from backend.open_webui.* (git installation)
     from backend.open_webui.models.users import Users
-    from backend.open_webui.models.chats import Chat, Chats
+    from backend.open_webui.models.chats import Chat, Chats, ChatFile
     from backend.open_webui.models.messages import Message
     from backend.open_webui.models.files import Files
     from backend.open_webui.models.notes import Notes
@@ -137,9 +136,8 @@ elif _import_strategy == "git":
     from backend.open_webui.models.functions import Functions
     from backend.open_webui.models.tools import Tools
     from backend.open_webui.models.folders import Folder, Folders, FolderModel
-    from backend.open_webui.internal.db import get_db
+    from backend.open_webui.internal.db import get_db, get_db_context
     from backend.open_webui.config import CACHE_DIR
-    from backend.open_webui.env import SRC_LOG_LEVELS
 
     try:
         from backend.open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT, VECTOR_DB
@@ -153,6 +151,7 @@ __all__ = [
     'Users',
     'Chat',
     'Chats',
+    'ChatFile',
     'Message',
     'Files',
     'Notes',
@@ -165,8 +164,8 @@ __all__ = [
     'Folders',
     'FolderModel',
     'get_db',
+    'get_db_context',
     'CACHE_DIR',
-    'SRC_LOG_LEVELS',
     'VECTOR_DB_CLIENT',
     'VECTOR_DB',
     '_import_strategy',

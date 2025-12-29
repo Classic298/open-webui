@@ -28,43 +28,35 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-# Now we can import from Open WebUI backend
+# Now we can import from prune modules
 try:
-    from backend.open_webui.routers.prune import (
+    from prune_models import PruneDataForm, PrunePreviewResult
+    from prune_core import (
         PruneLock,
-        JSONFileIDExtractor,
-        collect_file_ids_from_dict,
-        VectorDatabaseCleaner,
         get_vector_database_cleaner,
+        ChromaDatabaseCleaner,
+        PGVectorDatabaseCleaner
+    )
+    from prune_operations import (
         count_inactive_users,
         count_old_chats,
         count_orphaned_records,
         count_orphaned_uploads,
         count_audio_cache_files,
         get_active_file_ids,
+        get_all_folders,
         safe_delete_file_by_id,
         cleanup_orphaned_uploads,
         delete_inactive_users,
         cleanup_audio_cache,
-        PruneDataForm,
-        PrunePreviewResult,
     )
-    from backend.open_webui.models.users import Users
-    from backend.open_webui.models.chats import Chats
-    from backend.open_webui.models.files import Files
-    from backend.open_webui.models.notes import Notes
-    from backend.open_webui.models.prompts import Prompts
-    from backend.open_webui.models.models import Models
-    from backend.open_webui.models.knowledge import Knowledges
-    from backend.open_webui.models.functions import Functions
-    from backend.open_webui.models.tools import Tools
-    from backend.open_webui.models.folders import Folders
-    from backend.open_webui.internal.db import get_db
-    from backend.open_webui.env import SRC_LOG_LEVELS
+    from prune_imports import (
+        Users, Chats, Files, Notes, Prompts, Models, Knowledges, Functions,
+        Tools, Folders, get_db, VECTOR_DB, VECTOR_DB_CLIENT, CACHE_DIR
+    )
     from sqlalchemy import text
     import time
     import sqlite3
-    from backend.open_webui.routers.prune import ChromaDatabaseCleaner, PGVectorDatabaseCleaner
 except ImportError as e:
     print(f"ERROR: Failed to import Open WebUI modules: {e}", file=sys.stderr)
     print("\nThis script must be run with access to Open WebUI's backend modules.", file=sys.stderr)
@@ -416,7 +408,7 @@ def run_prune(form_data: PruneDataForm):
 
     try:
         # Get vector database cleaner based on configuration
-        vector_cleaner = get_vector_database_cleaner()
+        vector_cleaner = get_vector_database_cleaner(VECTOR_DB, VECTOR_DB_CLIENT, Path(CACHE_DIR))
 
         if form_data.dry_run:
             log.info("Starting data pruning preview (dry run)")
@@ -430,7 +422,7 @@ def run_prune(form_data: PruneDataForm):
                 for kb in knowledge_bases
                 if kb.user_id in active_user_ids
             }
-            active_file_ids = get_active_file_ids(knowledge_bases)
+            active_file_ids = get_active_file_ids(knowledge_bases, active_user_ids)
 
             orphaned_counts = count_orphaned_records(form_data, active_file_ids, active_user_ids)
 
@@ -494,25 +486,26 @@ def run_prune(form_data: PruneDataForm):
             cutoff_time = int(time.time()) - (form_data.days * 86400)
             chats_to_delete = []
 
-            for chat in Chats.get_chats():
-                if chat.updated_at < cutoff_time:
-                    if form_data.exempt_archived_chats and chat.archived:
-                        continue
-                    if form_data.exempt_chats_in_folders and (
-                        getattr(chat, "folder_id", None) is not None
-                        or getattr(chat, "pinned", False)
-                    ):
-                        continue
-                    chats_to_delete.append(chat)
+            with get_db() as db:
+                for chat in Chats.get_chats(db=db):
+                    if chat.updated_at < cutoff_time:
+                        if form_data.exempt_archived_chats and chat.archived:
+                            continue
+                        if form_data.exempt_chats_in_folders and (
+                            getattr(chat, "folder_id", None) is not None
+                            or getattr(chat, "pinned", False)
+                        ):
+                            continue
+                        chats_to_delete.append(chat)
 
-            if chats_to_delete:
-                log.info(
-                    f"Deleting {len(chats_to_delete)} old chats (older than {form_data.days} days)"
-                )
-                for chat in chats_to_delete:
-                    Chats.delete_chat_by_id(chat.id)
-            else:
-                log.info(f"No chats found older than {form_data.days} days")
+                if chats_to_delete:
+                    log.info(
+                        f"Deleting {len(chats_to_delete)} old chats (older than {form_data.days} days)"
+                    )
+                    for chat in chats_to_delete:
+                        Chats.delete_chat_by_id(chat.id, db=db)
+                else:
+                    log.info(f"No chats found older than {form_data.days} days")
         else:
             log.info("Skipping chat deletion (days parameter is None)")
 
@@ -531,32 +524,35 @@ def run_prune(form_data: PruneDataForm):
 
         log.info(f"Found {len(active_kb_ids)} active knowledge bases")
 
-        active_file_ids = get_active_file_ids(knowledge_bases)
+        active_file_ids = get_active_file_ids(knowledge_bases, active_user_ids)
 
         # Stage 3: Delete orphaned database records
         log.info("Deleting orphaned database records")
 
         deleted_files = 0
-        for file_record in Files.get_files():
-            should_delete = (
-                file_record.id not in active_file_ids
-                or file_record.user_id not in active_user_ids
-            )
+        # Use shared database session for efficient bulk deletion
+        with get_db() as db:
+            for file_record in Files.get_files(db=db):
+                should_delete = (
+                    file_record.id not in active_file_ids
+                    or file_record.user_id not in active_user_ids
+                )
 
-            if should_delete:
-                if safe_delete_file_by_id(file_record.id):
-                    deleted_files += 1
+                if should_delete:
+                    if safe_delete_file_by_id(file_record.id, vector_cleaner, db=db):
+                        deleted_files += 1
 
         if deleted_files > 0:
             log.info(f"Deleted {deleted_files} orphaned files")
 
         deleted_kbs = 0
         if form_data.delete_orphaned_knowledge_bases:
-            for kb in knowledge_bases:
-                if kb.user_id not in active_user_ids:
-                    if vector_cleaner.delete_collection(kb.id):
-                        Knowledges.delete_knowledge_by_id(kb.id)
-                        deleted_kbs += 1
+            with get_db() as db:
+                for kb in Knowledges.get_knowledge_bases(db=db):
+                    if kb.user_id not in active_user_ids:
+                        if vector_cleaner.delete_collection(kb.id):
+                            Knowledges.delete_knowledge_by_id(kb.id, db=db)
+                            deleted_kbs += 1
 
             if deleted_kbs > 0:
                 log.info(f"Deleted {deleted_kbs} orphaned knowledge bases")
@@ -567,11 +563,12 @@ def run_prune(form_data: PruneDataForm):
 
         if form_data.delete_orphaned_chats:
             chats_deleted = 0
-            for chat in Chats.get_chats():
-                if chat.user_id not in active_user_ids:
-                    Chats.delete_chat_by_id(chat.id)
-                    chats_deleted += 1
-                    deleted_others += 1
+            with get_db() as db:
+                for chat in Chats.get_chats(db=db):
+                    if chat.user_id not in active_user_ids:
+                        Chats.delete_chat_by_id(chat.id, db=db)
+                        chats_deleted += 1
+                        deleted_others += 1
             if chats_deleted > 0:
                 log.info(f"Deleted {chats_deleted} orphaned chats")
         else:
@@ -579,11 +576,12 @@ def run_prune(form_data: PruneDataForm):
 
         if form_data.delete_orphaned_tools:
             tools_deleted = 0
-            for tool in Tools.get_tools():
-                if tool.user_id not in active_user_ids:
-                    Tools.delete_tool_by_id(tool.id)
-                    tools_deleted += 1
-                    deleted_others += 1
+            with get_db() as db:
+                for tool in Tools.get_tools(db=db):
+                    if tool.user_id not in active_user_ids:
+                        Tools.delete_tool_by_id(tool.id, db=db)
+                        tools_deleted += 1
+                        deleted_others += 1
             if tools_deleted > 0:
                 log.info(f"Deleted {tools_deleted} orphaned tools")
         else:
@@ -591,11 +589,12 @@ def run_prune(form_data: PruneDataForm):
 
         if form_data.delete_orphaned_functions:
             functions_deleted = 0
-            for function in Functions.get_functions():
-                if function.user_id not in active_user_ids:
-                    Functions.delete_function_by_id(function.id)
-                    functions_deleted += 1
-                    deleted_others += 1
+            with get_db() as db:
+                for function in Functions.get_functions(db=db):
+                    if function.user_id not in active_user_ids:
+                        Functions.delete_function_by_id(function.id, db=db)
+                        functions_deleted += 1
+                        deleted_others += 1
             if functions_deleted > 0:
                 log.info(f"Deleted {functions_deleted} orphaned functions")
         else:
@@ -603,11 +602,12 @@ def run_prune(form_data: PruneDataForm):
 
         if form_data.delete_orphaned_notes:
             notes_deleted = 0
-            for note in Notes.get_notes():
-                if note.user_id not in active_user_ids:
-                    Notes.delete_note_by_id(note.id)
-                    notes_deleted += 1
-                    deleted_others += 1
+            with get_db() as db:
+                for note in Notes.get_notes(db=db):
+                    if note.user_id not in active_user_ids:
+                        Notes.delete_note_by_id(note.id, db=db)
+                        notes_deleted += 1
+                        deleted_others += 1
             if notes_deleted > 0:
                 log.info(f"Deleted {notes_deleted} orphaned notes")
         else:
@@ -615,11 +615,12 @@ def run_prune(form_data: PruneDataForm):
 
         if form_data.delete_orphaned_prompts:
             prompts_deleted = 0
-            for prompt in Prompts.get_prompts():
-                if prompt.user_id not in active_user_ids:
-                    Prompts.delete_prompt_by_command(prompt.command)
-                    prompts_deleted += 1
-                    deleted_others += 1
+            with get_db() as db:
+                for prompt in Prompts.get_prompts(db=db):
+                    if prompt.user_id not in active_user_ids:
+                        Prompts.delete_prompt_by_command(prompt.command, db=db)
+                        prompts_deleted += 1
+                        deleted_others += 1
             if prompts_deleted > 0:
                 log.info(f"Deleted {prompts_deleted} orphaned prompts")
         else:
@@ -627,11 +628,12 @@ def run_prune(form_data: PruneDataForm):
 
         if form_data.delete_orphaned_models:
             models_deleted = 0
-            for model in Models.get_all_models():
-                if model.user_id not in active_user_ids:
-                    Models.delete_model_by_id(model.id)
-                    models_deleted += 1
-                    deleted_others += 1
+            with get_db() as db:
+                for model in Models.get_all_models(db=db):
+                    if model.user_id not in active_user_ids:
+                        Models.delete_model_by_id(model.id, db=db)
+                        models_deleted += 1
+                        deleted_others += 1
             if models_deleted > 0:
                 log.info(f"Deleted {models_deleted} orphaned models")
         else:
@@ -639,13 +641,14 @@ def run_prune(form_data: PruneDataForm):
 
         if form_data.delete_orphaned_folders:
             folders_deleted = 0
-            for folder in Folders.get_all_folders():
-                if folder.user_id not in active_user_ids:
-                    Folders.delete_folder_by_id_and_user_id(
-                        folder.id, folder.user_id
-                    )
-                    folders_deleted += 1
-                    deleted_others += 1
+            with get_db() as db:
+                for folder in get_all_folders(db=db):
+                    if folder.user_id not in active_user_ids:
+                        Folders.delete_folder_by_id_and_user_id(
+                            folder.id, folder.user_id, db=db
+                        )
+                        folders_deleted += 1
+                        deleted_others += 1
             if folders_deleted > 0:
                 log.info(f"Deleted {folders_deleted} orphaned folders")
         else:
@@ -657,9 +660,10 @@ def run_prune(form_data: PruneDataForm):
         # Stage 4: Clean up orphaned physical files
         log.info("Cleaning up orphaned physical files")
 
-        final_active_file_ids = get_active_file_ids()
-        final_active_kb_ids = {kb.id for kb in Knowledges.get_knowledge_bases()}
         final_active_user_ids = {user.id for user in Users.get_users()["users"]}
+        final_knowledge_bases = Knowledges.get_knowledge_bases()
+        final_active_kb_ids = {kb.id for kb in final_knowledge_bases if kb.user_id in final_active_user_ids}
+        final_active_file_ids = get_active_file_ids(final_knowledge_bases, final_active_user_ids)
 
         deleted_uploads = cleanup_orphaned_uploads(final_active_file_ids)
         if deleted_uploads > 0:
@@ -685,8 +689,25 @@ def run_prune(form_data: PruneDataForm):
 
             try:
                 with get_db() as db:
-                    db.execute(text("VACUUM"))
-                    log.info("Vacuumed main database")
+                    engine = db.get_bind()
+                    db_url = str(engine.url)
+
+                    if 'postgresql' in db_url:
+                        # PostgreSQL: VACUUM requires autocommit mode (no transaction)
+                        raw_connection = engine.raw_connection()
+                        try:
+                            raw_connection.set_isolation_level(0)  # AUTOCOMMIT mode
+                            cursor = raw_connection.cursor()
+                            cursor.execute("VACUUM ANALYZE")
+                            cursor.close()
+                            raw_connection.commit()
+                            log.info("Vacuumed PostgreSQL main database")
+                        finally:
+                            raw_connection.close()
+                    else:
+                        # SQLite: Can run in transaction
+                        db.execute(text("VACUUM"))
+                        log.info("Vacuumed main database")
             except Exception as e:
                 log.error(f"Failed to vacuum main database: {e}")
 
@@ -703,9 +724,17 @@ def run_prune(form_data: PruneDataForm):
                 and vector_cleaner.session
             ):
                 try:
-                    vector_cleaner.session.execute(text("VACUUM ANALYZE"))
-                    vector_cleaner.session.commit()
-                    log.info("Executed VACUUM ANALYZE on PostgreSQL database")
+                    engine = vector_cleaner.session.get_bind()
+                    raw_connection = engine.raw_connection()
+                    try:
+                        raw_connection.set_isolation_level(0)  # AUTOCOMMIT mode
+                        cursor = raw_connection.cursor()
+                        cursor.execute("VACUUM ANALYZE")
+                        cursor.close()
+                        raw_connection.commit()
+                        log.info("Executed VACUUM ANALYZE on PostgreSQL database")
+                    finally:
+                        raw_connection.close()
                 except Exception as e:
                     log.error(f"Failed to vacuum PostgreSQL database: {e}")
         else:

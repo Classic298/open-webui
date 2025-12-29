@@ -5,19 +5,56 @@ This module contains all the helper functions from backend/open_webui/routers/pr
 that perform the actual pruning operations, counting, and cleanup.
 """
 
+import inspect
 import logging
 import time
 from pathlib import Path
-from typing import Optional, Set
+from typing import Optional, Set, Callable, Any
 from sqlalchemy import select, text
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session
 
 log = logging.getLogger(__name__)
+
+
+def retry_on_db_lock(func: Callable, max_retries: int = 3, base_delay: float = 0.5) -> Any:
+    """
+    Retry a database operation if it fails due to database lock.
+    Uses exponential backoff: 0.5s, 1s, 2s
+
+    Args:
+        func: Function to retry
+        max_retries: Maximum number of retry attempts
+        base_delay: Base delay in seconds (doubles each retry)
+
+    Returns:
+        Result from the function
+
+    Raises:
+        Last exception if all retries fail
+    """
+    last_exception = None
+    for attempt in range(max_retries + 1):
+        try:
+            return func()
+        except OperationalError as e:
+            last_exception = e
+            if 'database is locked' in str(e).lower() and attempt < max_retries:
+                delay = base_delay * (2 ** attempt)
+                log.warning(f"Database locked, retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(delay)
+            else:
+                raise
+
+    # This should never be reached, but just in case
+    raise last_exception
 
 # Import Open WebUI modules using compatibility layer (handles pip/docker/git installs)
 try:
     from prune_imports import (
-        Users, Chat, Chats, Message, Files, Notes, Prompts, Models,
-        Knowledges, Functions, Tools, Folder, Folders, get_db, CACHE_DIR
+        Users, Chat, Chats, ChatFile, Message, Files, Notes, Prompts, Models,
+        Knowledges, Functions, Tools, Folder, Folders, FolderModel,
+        get_db, get_db_context, CACHE_DIR
     )
 except ImportError as e:
     log.error(f"Failed to import Open WebUI modules: {e}")
@@ -29,21 +66,26 @@ from prune_core import collect_file_ids_from_dict
 
 
 # API Compatibility Helpers
-def get_all_folders():
+def get_all_folders(db: Optional[Session] = None):
     """
     Get all folders from database.
     Compatibility helper for newer Folders API that doesn't have get_all_folders().
+
+    Args:
+        db: Optional database session to reuse (for efficient bulk operations)
     """
     try:
-        from prune_imports import Folder as FolderORM, FolderModel, get_db, Folders
-
         # Try new API first - if get_all_folders exists, use it
         if hasattr(Folders, 'get_all_folders'):
-            return Folders.get_all_folders()
+            # Check if the method supports db parameter
+            if 'db' in inspect.signature(Folders.get_all_folders).parameters:
+                return Folders.get_all_folders(db=db)
+            else:
+                return Folders.get_all_folders()
 
         # Otherwise query directly from database
-        with get_db() as db:
-            folders = db.query(FolderORM).all()
+        with get_db_context(db) as session:
+            folders = session.query(Folder).all()
             # Convert to FolderModel instances
             return [FolderModel.model_validate(f) for f in folders]
     except Exception as e:
@@ -251,82 +293,122 @@ def count_audio_cache_files(max_age_days: Optional[int]) -> int:
     return count
 
 
-def get_active_file_ids(knowledge_bases=None) -> Set[str]:
+def get_active_file_ids(knowledge_bases=None, active_user_ids=None) -> Set[str]:
     """
     Get all file IDs that are actively referenced by knowledge bases, chats, folders, and messages.
 
     Args:
         knowledge_bases: Optional pre-fetched list of knowledge bases to avoid duplicate queries
+        active_user_ids: Optional set of active user IDs to filter knowledge bases
     """
     active_file_ids = set()
 
     try:
         # Preload all valid file IDs to avoid N database queries during validation
         # This is O(1) set lookup instead of O(n) DB queries
-        all_file_ids = {f.id for f in Files.get_files()}
+        # Use retry logic in case database is locked
+        all_file_ids = retry_on_db_lock(lambda: {f.id for f in Files.get_files()})
         log.debug(f"Preloaded {len(all_file_ids)} file IDs for validation")
 
         # Scan knowledge bases for file references
+        # Note: Since v0.6.41, knowledge.data column was removed and replaced with
+        # knowledge_file table. We now use the existing API to query files per KB.
         if knowledge_bases is None:
             knowledge_bases = Knowledges.get_knowledge_bases()
         log.debug(f"Found {len(knowledge_bases)} knowledge bases")
 
+        # Memory-safe processing: iterate through KBs and extract file IDs incrementally
+        # We don't keep file objects in memory, just collect IDs
         for kb in knowledge_bases:
-            if not kb.data:
+            # CRITICAL FIX: Skip KBs owned by inactive/deleted users to maintain
+            # consistency with active_kb_ids filtering. This prevents false positives
+            # where files are considered "active" but their KB is marked as orphaned,
+            # leading to incorrectly deleted vector collections.
+            if active_user_ids is not None and kb.user_id not in active_user_ids:
+                log.debug(f"Skipping KB {kb.id} - owner {kb.user_id} not in active users")
                 continue
 
-            file_ids = []
+            try:
+                # Use existing API method that queries knowledge_file table
+                # get_files_by_id() performs:
+                # SELECT * FROM file JOIN knowledge_file WHERE knowledge_id = kb.id
+                kb_files = Knowledges.get_files_by_id(kb.id)
 
-            if isinstance(kb.data, dict) and "file_ids" in kb.data:
-                if isinstance(kb.data["file_ids"], list):
-                    file_ids.extend(kb.data["file_ids"])
+                # Extract file IDs only (memory efficient - don't keep full objects)
+                for file in kb_files:
+                    if file.id and file.id in all_file_ids:
+                        active_file_ids.add(file.id)
 
-            if isinstance(kb.data, dict) and "files" in kb.data:
-                if isinstance(kb.data["files"], list):
-                    for file_ref in kb.data["files"]:
-                        if isinstance(file_ref, dict) and "id" in file_ref:
-                            file_ids.append(file_ref["id"])
-                        elif isinstance(file_ref, str):
-                            file_ids.append(file_ref)
+                # Help GC by clearing the list immediately after processing
+                del kb_files
 
-            for file_id in file_ids:
-                if isinstance(file_id, str) and file_id.strip():
-                    stripped_id = file_id.strip()
-                    # Validate against preloaded set (O(1) lookup)
-                    if stripped_id in all_file_ids:
-                        active_file_ids.add(stripped_id)
+            except Exception as e:
+                log.debug(f"Error scanning files for knowledge base {kb.id}: {e}")
 
         # Scan chats for file references
         # Stream chats using Core SELECT to avoid ORM overhead
-        chat_count = 0
-        with get_db() as db:
-            stmt = select(Chat.id, Chat.chat)
-            # SQLAlchemy 2.0+ compatibility: execution_options moved to statement
-            try:
-                result = db.execute(stmt.execution_options(stream_results=True))
-            except AttributeError:
-                # Fallback for older SQLAlchemy versions
-                result = db.execution_options(stream_results=True).execute(stmt)
+        # Wrap in retry logic in case of database lock
+        def scan_chats():
+            chat_count = 0
+            with get_db() as db:
+                stmt = select(Chat.id, Chat.chat)
+                # SQLAlchemy 2.0+ compatibility: execution_options moved to statement
+                try:
+                    result = db.execute(stmt.execution_options(stream_results=True))
+                except AttributeError:
+                    # Fallback for older SQLAlchemy versions
+                    result = db.execution_options(stream_results=True).execute(stmt)
 
-            while True:
-                rows = result.fetchmany(1000)
-                if not rows:
-                    break
+                while True:
+                    rows = result.fetchmany(1000)
+                    if not rows:
+                        break
 
-                for chat_id, chat_dict in rows:
-                    chat_count += 1
+                    for chat_id, chat_dict in rows:
+                        chat_count += 1
 
-                    # Skip if no chat data or not a dict
-                    if not chat_dict or not isinstance(chat_dict, dict):
-                        continue
+                        # Skip if no chat data or not a dict
+                        if not chat_dict or not isinstance(chat_dict, dict):
+                            continue
 
-                    try:
-                        # Direct dict traversal (no json.dumps needed)
-                        collect_file_ids_from_dict(chat_dict, active_file_ids, all_file_ids)
-                    except Exception as e:
-                        log.debug(f"Error processing chat {chat_id} for file references: {e}")
+                        try:
+                            # Direct dict traversal (no json.dumps needed)
+                            collect_file_ids_from_dict(chat_dict, active_file_ids, all_file_ids)
+                        except Exception as e:
+                            log.debug(f"Error processing chat {chat_id} for file references: {e}")
 
+            return chat_count
+
+        chat_count = retry_on_db_lock(scan_chats)
         log.debug(f"Scanned {chat_count} chats for file references")
+
+        # Scan chat_file table for file references
+        # Note: Since v0.6.41+, chat files are stored in dedicated chat_file junction table.
+        # We scan both the chat.chat JSON (legacy) and chat_file table (new) to ensure completeness.
+        try:
+            with get_db() as db:
+                stmt = select(ChatFile.file_id)
+                # SQLAlchemy 2.0+ compatibility
+                try:
+                    result = db.execute(stmt.execution_options(stream_results=True))
+                except AttributeError:
+                    result = db.execution_options(stream_results=True).execute(stmt)
+
+                chat_file_count = 0
+                while True:
+                    rows = result.fetchmany(1000)
+                    if not rows:
+                        break
+
+                    for (file_id,) in rows:
+                        chat_file_count += 1
+                        if file_id and file_id in all_file_ids:
+                            active_file_ids.add(file_id)
+
+                log.debug(f"Scanned {chat_file_count} chat_file entries for file references")
+        except Exception as e:
+            # chat_file table might not exist in older database versions
+            log.debug(f"Error scanning chat_file table (table may not exist yet): {e}")
 
         # Scan folders for file references
         # Stream folders using Core SELECT to avoid ORM overhead
@@ -401,21 +483,30 @@ def get_active_file_ids(knowledge_bases=None) -> Set[str]:
     return active_file_ids
 
 
-def safe_delete_file_by_id(file_id: str, vector_cleaner) -> bool:
+def safe_delete_file_by_id(file_id: str, vector_cleaner, db: Optional[Session] = None) -> bool:
     """
     Safely delete a file record and its associated vector collection.
+
+    Args:
+        file_id: The file ID to delete
+        vector_cleaner: Vector database cleaner instance
+        db: Optional database session to reuse (for efficient bulk operations)
+
+    Returns:
+        True if deletion succeeded, False otherwise
     """
     try:
-        file_record = Files.get_file_by_id(file_id)
-        if not file_record:
+        with get_db_context(db) as session:
+            file_record = Files.get_file_by_id(file_id, db=session)
+            if not file_record:
+                return True
+
+            # Use modular vector database cleaner
+            collection_name = f"file-{file_id}"
+            vector_cleaner.delete_collection(collection_name)
+
+            Files.delete_file_by_id(file_id, db=session)
             return True
-
-        # Use modular vector database cleaner
-        collection_name = f"file-{file_id}"
-        vector_cleaner.delete_collection(collection_name)
-
-        Files.delete_file_by_id(file_id)
-        return True
 
     except Exception as e:
         log.error(f"Error deleting file {file_id}: {e}")
@@ -504,17 +595,18 @@ def delete_inactive_users(
             if user.last_active_at < cutoff_time:
                 users_to_delete.append(user)
 
-        # Delete inactive users
-        for user in users_to_delete:
-            try:
-                # Delete the user - this will cascade to all their data
-                Users.delete_user_by_id(user.id)
-                deleted_count += 1
-                log.info(
-                    f"Deleted inactive user: {user.email} (last active: {user.last_active_at})"
-                )
-            except Exception as e:
-                log.error(f"Failed to delete user {user.id}: {e}")
+        # Delete inactive users with shared database session
+        with get_db() as db:
+            for user in users_to_delete:
+                try:
+                    # Delete the user - this will cascade to all their data
+                    Users.delete_user_by_id(user.id, db=db)
+                    deleted_count += 1
+                    log.info(
+                        f"Deleted inactive user: {user.email} (last active: {user.last_active_at})"
+                    )
+                except Exception as e:
+                    log.error(f"Failed to delete user {user.id}: {e}")
 
     except Exception as e:
         log.error(f"Error during inactive user deletion: {e}")

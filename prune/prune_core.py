@@ -17,6 +17,23 @@ from pathlib import Path
 from typing import Optional, Set
 from abc import ABC, abstractmethod
 
+# Optional database-specific imports
+try:
+    from sqlalchemy import text
+except ImportError:
+    text = None
+
+try:
+    from pymilvus import utility, Collection
+except ImportError:
+    utility = None
+    Collection = None
+
+try:
+    from qdrant_client.models import models as qdrant_models
+except ImportError:
+    qdrant_models = None
+
 log = logging.getLogger(__name__)
 
 
@@ -695,9 +712,6 @@ class PGVectorDatabaseCleaner(VectorDatabaseCleaner):
             return 0
 
         try:
-            # Import here to avoid circular dependency
-            from sqlalchemy import text
-
             orphaned_collections = self._get_orphaned_collections(
                 active_file_ids, active_kb_ids
             )
@@ -728,9 +742,6 @@ class PGVectorDatabaseCleaner(VectorDatabaseCleaner):
             return (0, error_msg)
 
         try:
-            # Import here to avoid circular dependency
-            from sqlalchemy import text
-
             orphaned_collections = self._get_orphaned_collections(
                 active_file_ids, active_kb_ids
             )
@@ -760,6 +771,30 @@ class PGVectorDatabaseCleaner(VectorDatabaseCleaner):
                     # Continue with other collections even if one fails
                     continue
 
+            # CRITICAL: Clean up orphaned chunks within active KB collections
+            # KB collections may contain chunks referencing deleted files
+            # This handles the case where a file is deleted but the KB collection remains active
+            orphaned_chunks_deleted = 0
+            try:
+                if self.session:
+                    log.debug("Cleaning orphaned chunks from active KB collections")
+                    result = self.session.execute(text("""
+                        DELETE FROM document_chunk dc
+                        WHERE dc.vmetadata ? 'file_id'
+                          AND NOT EXISTS (
+                            SELECT 1 FROM file f
+                            WHERE f.id = (dc.vmetadata->>'file_id')
+                          )
+                    """))
+                    orphaned_chunks_deleted = result.rowcount
+                    self.session.commit()
+                    if orphaned_chunks_deleted > 0:
+                        log.info(f"Deleted {orphaned_chunks_deleted} orphaned chunks from active collections")
+            except Exception as e:
+                log.error(f"Failed to clean orphaned chunks: {e}")
+                if self.session:
+                    self.session.rollback()
+
             # PostgreSQL-specific optimization (if we have access to session)
             try:
                 if self.session:
@@ -769,9 +804,10 @@ class PGVectorDatabaseCleaner(VectorDatabaseCleaner):
             except Exception as e:
                 log.warning(f"Failed to VACUUM PGVector table: {e}")
 
-            if deleted_count > 0:
+            total_deleted = deleted_count + orphaned_chunks_deleted
+            if total_deleted > 0:
                 log.info(
-                    f"Successfully deleted {deleted_count} orphaned PGVector collections"
+                    f"Successfully deleted {deleted_count} orphaned collections and {orphaned_chunks_deleted} orphaned chunks"
                 )
 
             return (deleted_count, None)
@@ -808,9 +844,6 @@ class PGVectorDatabaseCleaner(VectorDatabaseCleaner):
         This is the only "complex" part - discovery. The actual deletion is simple!
         """
         try:
-            # Import here to avoid circular dependency
-            from sqlalchemy import text
-
             expected_collections = self._build_expected_collections(
                 active_file_ids, active_kb_ids
             )
@@ -909,9 +942,6 @@ class MilvusDatabaseCleaner(VectorDatabaseCleaner):
     ) -> tuple[int, Optional[str]]:
         """Actually delete orphaned Milvus collections."""
         try:
-            # Import here to avoid circular dependency
-            from pymilvus import utility
-
             expected_collections = self._build_expected_collections(
                 active_file_ids, active_kb_ids
             )
@@ -955,9 +985,6 @@ class MilvusDatabaseCleaner(VectorDatabaseCleaner):
     def delete_collection(self, collection_name: str) -> bool:
         """Delete a specific Milvus collection by name."""
         try:
-            # Import here to avoid circular dependency
-            from pymilvus import utility
-
             # Convert dashes to underscores (Milvus naming convention)
             collection_name = collection_name.replace("-", "_")
             full_name = f"{self.collection_prefix}_{collection_name}"
@@ -1052,8 +1079,6 @@ class MilvusMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
             count = 0
 
             # Import pymilvus utilities
-            from pymilvus import utility, Collection
-
             for shared_collection_name in self.shared_collections:
                 if not utility.has_collection(shared_collection_name):
                     continue
@@ -1125,8 +1150,6 @@ class MilvusMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
             errors = []
 
             # Import pymilvus utilities
-            from pymilvus import utility, Collection
-
             for shared_collection_name in self.shared_collections:
                 if not utility.has_collection(shared_collection_name):
                     continue
@@ -1210,9 +1233,6 @@ class MilvusMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
         the appropriate shared collection.
         """
         try:
-            # Import here to avoid circular dependency
-            from pymilvus import utility, Collection
-
             # Use the reference implementation's _get_collection_and_resource_id logic
             # to determine which shared collection contains this resource_id
             resource_id = collection_name
@@ -1463,11 +1483,13 @@ class QdrantMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
         Uses Qdrant's scroll() API with pagination for memory efficiency.
         """
         try:
-            from qdrant_client.models import models
-
             expected_tenant_ids = self._build_expected_tenant_ids(
                 active_file_ids, active_kb_ids, active_user_ids or set()
             )
+
+            log.info(f"Qdrant multitenancy: {len(active_kb_ids)} active KBs, {len(active_file_ids)} active files, {len(active_user_ids or set())} active users")
+            log.info(f"Qdrant multitenancy: Built {len(expected_tenant_ids)} expected tenant_ids")
+            log.debug(f"Expected tenant_ids sample: {list(expected_tenant_ids)[:10]}")
 
             orphaned_count = 0
 
@@ -1510,9 +1532,14 @@ class QdrantMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
                     log.debug(f"Found {len(all_tenant_ids)} tenant_ids in {collection_name}")
 
                     # Count orphaned tenant_ids
+                    orphaned_in_this_collection = []
                     for tenant_id in all_tenant_ids:
                         if tenant_id not in expected_tenant_ids:
                             orphaned_count += 1
+                            orphaned_in_this_collection.append(tenant_id)
+
+                    if orphaned_in_this_collection:
+                        log.warning(f"Found {len(orphaned_in_this_collection)} orphaned tenant_ids in {collection_name}: {orphaned_in_this_collection}")
 
                 except Exception as e:
                     log.error(f"Error scanning Qdrant collection {collection_name}: {e}")
@@ -1535,11 +1562,12 @@ class QdrantMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
         Uses scroll() for memory-safe iteration and batched deletions.
         """
         try:
-            from qdrant_client.models import models
-
             expected_tenant_ids = self._build_expected_tenant_ids(
                 active_file_ids, active_kb_ids, active_user_ids or set()
             )
+
+            log.info(f"Qdrant multitenancy cleanup: {len(active_kb_ids)} active KBs, {len(active_file_ids)} active files, {len(active_user_ids or set())} active users")
+            log.info(f"Qdrant multitenancy cleanup: Built {len(expected_tenant_ids)} expected tenant_ids")
 
             deleted_count = 0
             errors = []
@@ -1584,19 +1612,22 @@ class QdrantMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
                         tid for tid in all_tenant_ids if tid not in expected_tenant_ids
                     ]
 
-                    log.info(f"Found {len(orphaned_tenant_ids)} orphaned tenant_ids in {collection_name}")
+                    if orphaned_tenant_ids:
+                        log.warning(f"Found {len(orphaned_tenant_ids)} orphaned tenant_ids in {collection_name}: {orphaned_tenant_ids}")
+                    else:
+                        log.info(f"No orphaned tenant_ids found in {collection_name}")
 
                     for tenant_id in orphaned_tenant_ids:
                         try:
                             # Delete all points with this tenant_id
                             self.client.delete(
                                 collection_name=collection_name,
-                                points_selector=models.FilterSelector(
-                                    filter=models.Filter(
+                                points_selector=qdrant_models.FilterSelector(
+                                    filter=qdrant_models.Filter(
                                         must=[
-                                            models.FieldCondition(
+                                            qdrant_models.FieldCondition(
                                                 key="tenant_id",
-                                                match=models.MatchValue(value=tenant_id)
+                                                match=qdrant_models.MatchValue(value=tenant_id)
                                             )
                                         ]
                                     )
@@ -1626,8 +1657,6 @@ class QdrantMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
     def delete_collection(self, collection_name: str) -> bool:
         """Delete a specific tenant_id from the appropriate shared collection."""
         try:
-            from qdrant_client.models import models
-
             # Determine which shared collection and tenant_id
             tenant_id = collection_name
 
@@ -1649,12 +1678,12 @@ class QdrantMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
             # Delete all points with this tenant_id
             self.client.delete(
                 collection_name=mt_collection,
-                points_selector=models.FilterSelector(
-                    filter=models.Filter(
+                points_selector=qdrant_models.FilterSelector(
+                    filter=qdrant_models.Filter(
                         must=[
-                            models.FieldCondition(
+                            qdrant_models.FieldCondition(
                                 key="tenant_id",
-                                match=models.MatchValue(value=tenant_id)
+                                match=qdrant_models.MatchValue(value=tenant_id)
                             )
                         ]
                     )
@@ -1682,16 +1711,29 @@ class QdrantMultitenancyDatabaseCleaner(VectorDatabaseCleaner):
         expected_tenant_ids = set()
 
         # File tenant_ids: file-{id}
+        file_tenant_ids_count = 0
         for file_id in active_file_ids:
             expected_tenant_ids.add(f"file-{file_id}")
+            file_tenant_ids_count += 1
 
         # Knowledge base tenant_ids: {kb_id}
+        kb_tenant_ids_count = 0
+        kb_ids_sample = []
         for kb_id in active_kb_ids:
             expected_tenant_ids.add(kb_id)
+            kb_tenant_ids_count += 1
+            if kb_tenant_ids_count <= 5:  # Sample first 5 for logging
+                kb_ids_sample.append(kb_id)
 
         # User memory tenant_ids: user-memory-{user_id}
+        memory_tenant_ids_count = 0
         for user_id in active_user_ids:
             expected_tenant_ids.add(f"user-memory-{user_id}")
+            memory_tenant_ids_count += 1
+
+        log.debug(f"Built expected tenant_ids: {file_tenant_ids_count} files, {kb_tenant_ids_count} KBs, {memory_tenant_ids_count} memories")
+        if kb_ids_sample:
+            log.debug(f"Sample KB IDs added as tenant_ids: {kb_ids_sample}")
 
         # Note: web-search-* and hash-based are ephemeral/temporary
         # They are NOT added to expected set, so they will be cleaned up
