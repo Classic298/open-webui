@@ -482,11 +482,6 @@ def add_file_to_knowledge_by_id(
         Knowledges.add_file_to_knowledge_by_id(
             knowledge_id=id, file_id=form_data.file_id, user_id=user.id, db=db
         )
-
-        # Add file to knowledge base
-        Knowledges.add_file_to_knowledge_by_id(
-            knowledge_id=id, file_id=form_data.file_id, user_id=user.id
-        )
     except Exception as e:
         log.debug(e)
         raise HTTPException(
