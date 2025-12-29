@@ -1132,7 +1132,7 @@ class OAuthManager:
 
         return role
 
-    def update_user_groups(self, user, user_data, default_permissions):
+    def update_user_groups(self, user, user_data, default_permissions, db=None):
         log.debug("Running OAUTH Group management")
         oauth_claim = auth_manager_config.OAUTH_GROUPS_CLAIM
 
@@ -1161,8 +1161,8 @@ class OAuthManager:
             else:
                 user_oauth_groups = []
 
-        user_current_groups: list[GroupModel] = Groups.get_groups_by_member_id(user.id)
-        all_available_groups: list[GroupModel] = Groups.get_all_groups()
+        user_current_groups: list[GroupModel] = Groups.get_groups_by_member_id(user.id, db=db)
+        all_available_groups: list[GroupModel] = Groups.get_all_groups(db=db)
 
         # Create groups if they don't exist and creation is enabled
         if auth_manager_config.ENABLE_OAUTH_GROUP_CREATION:
@@ -1188,7 +1188,7 @@ class OAuthManager:
                         )
                         # Use determined creator ID (admin or fallback to current user)
                         created_group = Groups.insert_new_group(
-                            creator_id, new_group_form
+                            creator_id, new_group_form, db=db
                         )
                         if created_group:
                             log.info(
@@ -1206,7 +1206,7 @@ class OAuthManager:
 
             # Refresh the list of all available groups if any were created
             if groups_created:
-                all_available_groups = Groups.get_all_groups()
+                all_available_groups = Groups.get_all_groups(db=db)
                 log.debug("Refreshed list of all available groups after creation.")
 
         log.debug(f"Oauth Groups claim: {oauth_claim}")
@@ -1227,7 +1227,7 @@ class OAuthManager:
                 log.debug(
                     f"Removing user from group {group_model.name} as it is no longer in their oauth groups"
                 )
-                Groups.remove_users_from_group(group_model.id, [user.id])
+                Groups.remove_users_from_group(group_model.id, [user.id], db=db)
 
                 # In case a group is created, but perms are never assigned to the group by hitting "save"
                 group_permissions = group_model.permissions
@@ -1242,6 +1242,7 @@ class OAuthManager:
                         permissions=group_permissions,
                     ),
                     overwrite=False,
+                    db=db,
                 )
 
         # Add user to new groups
@@ -1257,7 +1258,7 @@ class OAuthManager:
                     f"Adding user to group {group_model.name} as it was found in their oauth groups"
                 )
 
-                Groups.add_users_to_group(group_model.id, [user.id])
+                Groups.add_users_to_group(group_model.id, [user.id], db=db)
 
                 # In case a group is created, but perms are never assigned to the group by hitting "save"
                 group_permissions = group_model.permissions
@@ -1272,6 +1273,7 @@ class OAuthManager:
                         permissions=group_permissions,
                     ),
                     overwrite=False,
+                    db=db,
                 )
 
     async def _process_picture_url(
@@ -1336,7 +1338,7 @@ class OAuthManager:
 
         return await client.authorize_redirect(request, redirect_uri, **kwargs)
 
-    async def handle_callback(self, request, provider, response):
+    async def handle_callback(self, request, provider, response, db=None):
         if provider not in OAUTH_PROVIDERS:
             raise HTTPException(404)
 
@@ -1461,20 +1463,20 @@ class OAuthManager:
                 raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
 
             # Check if the user exists
-            user = Users.get_user_by_oauth_sub(provider, sub)
+            user = Users.get_user_by_oauth_sub(provider, sub, db=db)
             if not user:
                 # If the user does not exist, check if merging is enabled
                 if auth_manager_config.OAUTH_MERGE_ACCOUNTS_BY_EMAIL:
                     # Check if the user exists by email
-                    user = Users.get_user_by_email(email)
+                    user = Users.get_user_by_email(email, db=db)
                     if user:
                         # Update the user with the new oauth sub
-                        Users.update_user_oauth_by_id(user.id, provider, sub)
+                        Users.update_user_oauth_by_id(user.id, provider, sub, db=db)
 
             if user:
                 determined_role = self.get_user_role(user, user_data)
                 if user.role != determined_role:
-                    Users.update_user_role_by_id(user.id, determined_role)
+                    Users.update_user_role_by_id(user.id, determined_role, db=db)
                     # Update the user object in memory as well,
                     # to avoid problems with the ENABLE_OAUTH_GROUP_MANAGEMENT check below
                     user.role = determined_role
@@ -1491,14 +1493,14 @@ class OAuthManager:
                         )
                         if processed_picture_url != user.profile_image_url:
                             Users.update_user_profile_image_url_by_id(
-                                user.id, processed_picture_url
+                                user.id, processed_picture_url, db=db
                             )
                             log.debug(f"Updated profile picture for user {user.email}")
             else:
                 # If the user does not exist, check if signups are enabled
                 if auth_manager_config.ENABLE_OAUTH_SIGNUP:
                     # Check if an existing user with the same email already exists
-                    existing_user = Users.get_user_by_email(email)
+                    existing_user = Users.get_user_by_email(email, db=db)
                     if existing_user:
                         raise HTTPException(400, detail=ERROR_MESSAGES.EMAIL_TAKEN)
 
@@ -1529,6 +1531,7 @@ class OAuthManager:
                         profile_image_url=picture_url,
                         role=self.get_user_role(None, user_data),
                         oauth=oauth_data,
+                        db=db,
                     )
 
                     if auth_manager_config.WEBHOOK_URL:
@@ -1544,8 +1547,7 @@ class OAuthManager:
                         )
 
                     apply_default_group_assignment(
-                        request.app.state.config.DEFAULT_GROUP_ID,
-                        user.id,
+                        request.app.state.config.DEFAULT_GROUP_ID, user.id, db=db
                     )
 
                 else:
@@ -1566,6 +1568,7 @@ class OAuthManager:
                     user=user,
                     user_data=user_data,
                     default_permissions=request.app.state.config.USER_PERMISSIONS,
+                    db=db,
                 )
 
         except Exception as e:
@@ -1616,15 +1619,16 @@ class OAuthManager:
                 token["expires_at"] = datetime.now().timestamp() + token["expires_in"]
 
             # Clean up any existing sessions for this user/provider first
-            sessions = OAuthSessions.get_sessions_by_user_id(user.id)
+            sessions = OAuthSessions.get_sessions_by_user_id(user.id, db=db)
             for session in sessions:
                 if session.provider == provider:
-                    OAuthSessions.delete_session_by_id(session.id)
+                    OAuthSessions.delete_session_by_id(session.id, db=db)
 
             session = OAuthSessions.create_session(
                 user_id=user.id,
                 provider=provider,
                 token=token,
+                db=db,
             )
 
             response.set_cookie(
