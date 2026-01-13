@@ -782,7 +782,7 @@ class PGVectorDatabaseCleaner(VectorDatabaseCleaner):
                         DELETE FROM document_chunk dc
                         WHERE dc.vmetadata ? 'file_id'
                           AND NOT EXISTS (
-                            SELECT 1 FROM file f
+                            SELECT 1 FROM files f
                             WHERE f.id = (dc.vmetadata->>'file_id')
                           )
                     """))
@@ -796,11 +796,20 @@ class PGVectorDatabaseCleaner(VectorDatabaseCleaner):
                     self.session.rollback()
 
             # PostgreSQL-specific optimization (if we have access to session)
+            # VACUUM must run in autocommit mode (outside transaction)
             try:
                 if self.session:
-                    self.session.execute(text("VACUUM ANALYZE document_chunk"))
-                    self.session.commit()
-                    log.debug("Executed VACUUM ANALYZE on document_chunk table")
+                    engine = self.session.get_bind()
+                    raw_connection = engine.raw_connection()
+                    try:
+                        raw_connection.set_isolation_level(0)  # AUTOCOMMIT mode
+                        cursor = raw_connection.cursor()
+                        cursor.execute("VACUUM ANALYZE document_chunk")
+                        cursor.close()
+                        raw_connection.commit()
+                        log.debug("Executed VACUUM ANALYZE on document_chunk table")
+                    finally:
+                        raw_connection.close()
             except Exception as e:
                 log.warning(f"Failed to VACUUM PGVector table: {e}")
 
