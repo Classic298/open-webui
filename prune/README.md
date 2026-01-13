@@ -160,7 +160,90 @@ docker run -d \
   ghcr.io/open-webui/open-webui:main
 ```
 
-### Method 3: Pip Installation
+### Method 3: Systemd Service Installation
+
+If Open WebUI runs as a systemd service (common for production installations), environment variables like `DATABASE_URL` are **only available to the service**, not to your terminal session.
+
+**⚠️ IMPORTANT:** The prune script needs the same environment variables as Open WebUI. If you get "unable to open database file" or "Failed to connect to database" errors, your environment variables are not set in your shell.
+
+**Solution 1: Export environment variables inline** (Quick fix)
+```bash
+DATABASE_URL="postgresql://user:password@localhost:5432/openwebui" \
+VECTOR_DB="pgvector" \
+python /path/to/prune/prune.py --days 60 --dry-run
+```
+
+**Solution 2: Create a .env file** (Recommended for repeated use)
+```bash
+# Create .env file in Open WebUI directory
+cat > /opt/openwebui/.env <<'EOF'
+DATABASE_URL=postgresql://user:password@localhost:5432/openwebui
+VECTOR_DB=pgvector
+DATA_DIR=/var/lib/openwebui
+CACHE_DIR=/var/lib/openwebui/cache
+EOF
+
+# The script will automatically load this .env file
+cd /opt/openwebui
+python prune/prune.py --days 60 --dry-run
+```
+
+**Solution 3: Source systemd environment** (Advanced)
+```bash
+# Extract and export all environment variables from systemd service
+set -a
+source <(systemctl show openwebui.service -p Environment | \
+  sed 's/^Environment=//; s/ /\n/g')
+set +a
+
+# Now run the prune script
+python /path/to/prune/prune.py --days 60 --dry-run
+```
+
+**Solution 4: Create a wrapper script** (Best for automation)
+```bash
+# Create /usr/local/bin/openwebui-prune
+cat > /usr/local/bin/openwebui-prune <<'EOF'
+#!/bin/bash
+# Open WebUI Prune Wrapper Script
+
+# Set working directory
+cd /opt/openwebui
+
+# Source environment variables from .env file
+if [ -f /opt/openwebui/.env ]; then
+    export $(cat /opt/openwebui/.env | grep -v '^#' | xargs)
+fi
+
+# Run prune script with all arguments
+python prune/prune.py "$@"
+EOF
+
+# Make executable
+chmod +x /usr/local/bin/openwebui-prune
+
+# Now you can run from anywhere
+openwebui-prune --days 60 --dry-run
+```
+
+**Required Environment Variables for PostgreSQL:**
+```bash
+DATABASE_URL=postgresql://username:password@host:port/database
+VECTOR_DB=pgvector                    # If using pgvector for RAG
+DATA_DIR=/var/lib/openwebui           # Data directory path
+CACHE_DIR=/var/lib/openwebui/cache    # Cache directory path
+```
+
+**Note:** If your password contains special characters, URL-encode them:
+- `@` → `%40`
+- `:` → `%3A`
+- `/` → `%2F`
+- `?` → `%3F`
+- `#` → `%23`
+
+Example: `password@123` becomes `password%40123`
+
+### Method 4: Pip Installation
 
 ```bash
 # Activate environment where open-webui is installed
@@ -171,10 +254,28 @@ pip show open-webui | grep Location
 
 # Run from that location
 cd <location>
+
+# Set required environment variables
+export DATABASE_URL="postgresql://user:password@localhost:5432/openwebui"
+export VECTOR_DB="pgvector"  # or chroma, milvus, qdrant
+
 python -m open_webui.prune  # Or appropriate path
 ```
 
-### Method 4: Wrapper Script (Recommended for Automation)
+**For repeated use, create a .env file:**
+```bash
+# Create .env in your Open WebUI directory
+cat > .env <<'EOF'
+DATABASE_URL=postgresql://user:password@localhost:5432/openwebui
+VECTOR_DB=pgvector
+DATA_DIR=/path/to/data
+EOF
+
+# The script will automatically load it
+python -m open_webui.prune --days 60 --dry-run
+```
+
+### Method 5: Wrapper Script (Recommended for Automation)
 
 Create a file `run_prune.sh`:
 
@@ -387,20 +488,68 @@ cd /path/to/open-webui  # Go to repo root, NOT prune/
 python prune/prune.py
 ```
 
-### Error: "Failed to connect to database"
+### Error: "Failed to connect to database" or "unable to open database file"
 
-**Solution:** Ensure `DATABASE_URL` is set
+This is the **most common issue** for systemd and pip installations!
 
+**Problem:** The script tries to connect to SQLite but you're using PostgreSQL, **OR** environment variables from your systemd service file are not available in your terminal session.
+
+**Symptoms:**
+```
+sqlite3.OperationalError: unable to open database file
+Failed to connect to database
+```
+
+**Root Cause:** Environment variables like `DATABASE_URL` are set in your systemd service file but are **NOT** exported to your shell session.
+
+**Solution 1: Quick Test - Export inline**
+```bash
+# Replace with YOUR actual database credentials
+DATABASE_URL="postgresql://user:password@localhost:5432/openwebui" \
+python prune/prune.py --days 60 --dry-run
+```
+
+**Solution 2: Create .env file (Recommended)**
+```bash
+# Create .env file in Open WebUI directory
+cat > /opt/openwebui/.env <<'EOF'
+DATABASE_URL=postgresql://openwebui:your_password@localhost:5432/openwebui
+VECTOR_DB=pgvector
+DATA_DIR=/var/lib/openwebui
+CACHE_DIR=/var/lib/openwebui/cache
+EOF
+
+# Run prune script (it will auto-load .env)
+cd /opt/openwebui
+python prune/prune.py --days 60 --dry-run
+```
+
+**Solution 3: Check your systemd service file**
+```bash
+# View your systemd service environment
+systemctl show openwebui.service -p Environment
+
+# You should see DATABASE_URL and other variables
+# Copy those to a .env file or export them manually
+```
+
+**For SQLite installations:**
 ```bash
 # Check environment variable
 echo $DATABASE_URL
 
-# For SQLite, verify file exists
-ls -la data/webui.db
+# Verify file exists
+ls -la /path/to/webui.db
 
 # Load from .env if needed
 export $(cat .env | grep -v '^#' | xargs)
 ```
+
+**Important Notes:**
+- If your password contains special characters (`@`, `:`, `/`, `?`, `#`), you must URL-encode them
+- Example: `password@123` → `password%40123`
+- The prune script needs the **exact same** environment variables as your Open WebUI service
+- See [Method 3: Systemd Service Installation](#method-3-systemd-service-installation) for complete setup guide
 
 ### Error: "Operation already in progress"
 
