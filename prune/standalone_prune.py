@@ -776,6 +776,9 @@ def main():
         log.error("  Make sure DATABASE_URL environment variable is set correctly")
         return 1
 
+    # Initialize prune lock system
+    PruneLock.init(Path(CACHE_DIR))
+
     # Create prune configuration
     form_data = create_prune_form(args)
 
