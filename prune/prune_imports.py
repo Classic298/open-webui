@@ -109,7 +109,7 @@ if _import_strategy == "pip" or _import_strategy == "backend_path":
     from open_webui.models.files import Files
     from open_webui.models.notes import Notes
     from open_webui.models.prompts import Prompts
-    from open_webui.models.models import Models
+    from open_webui.models.models import Model, Models
     from open_webui.models.knowledge import Knowledges
     from open_webui.models.functions import Functions
     from open_webui.models.tools import Tools
@@ -131,7 +131,7 @@ elif _import_strategy == "git":
     from backend.open_webui.models.files import Files
     from backend.open_webui.models.notes import Notes
     from backend.open_webui.models.prompts import Prompts
-    from backend.open_webui.models.models import Models
+    from backend.open_webui.models.models import Model, Models
     from backend.open_webui.models.knowledge import Knowledges
     from backend.open_webui.models.functions import Functions
     from backend.open_webui.models.tools import Tools
@@ -156,6 +156,7 @@ __all__ = [
     'Files',
     'Notes',
     'Prompts',
+    'Model',
     'Models',
     'Knowledges',
     'Functions',
