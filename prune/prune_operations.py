@@ -52,7 +52,7 @@ def retry_on_db_lock(func: Callable, max_retries: int = 3, base_delay: float = 0
 # Import Open WebUI modules using compatibility layer (handles pip/docker/git installs)
 try:
     from prune_imports import (
-        Users, Chat, Chats, ChatFile, Message, Files, Notes, Prompts, Models,
+        Users, Chat, Chats, ChatFile, Message, Files, Notes, Prompts, Model, Models,
         Knowledges, Functions, Tools, Folder, Folders, FolderModel,
         get_db, get_db_context, CACHE_DIR
     )
@@ -295,7 +295,7 @@ def count_audio_cache_files(max_age_days: Optional[int]) -> int:
 
 def get_active_file_ids(knowledge_bases=None, active_user_ids=None) -> Set[str]:
     """
-    Get all file IDs that are actively referenced by knowledge bases, chats, folders, and messages.
+    Get all file IDs that are actively referenced by knowledge bases, chats, folders, messages, and models.
 
     Args:
         knowledge_bases: Optional pre-fetched list of knowledge bases to avoid duplicate queries
@@ -474,6 +474,45 @@ def get_active_file_ids(knowledge_bases=None, active_user_ids=None) -> Set[str]:
 
         except Exception as e:
             log.debug(f"Error scanning messages for file references: {e}")
+
+        # Scan models for file references in params and meta fields
+        # Models can have files attached (e.g. in meta or params JSON fields)
+        try:
+            with get_db() as db:
+                stmt = select(Model.id, Model.params, Model.meta)
+                # SQLAlchemy 2.0+ compatibility
+                try:
+                    result = db.execute(stmt.execution_options(stream_results=True))
+                except AttributeError:
+                    result = db.execution_options(stream_results=True).execute(stmt)
+
+                model_count = 0
+                while True:
+                    rows = result.fetchmany(100)
+                    if not rows:
+                        break
+
+                    for model_id, params_dict, meta_dict in rows:
+                        model_count += 1
+
+                        # Scan params JSON field for file references
+                        if params_dict and isinstance(params_dict, dict):
+                            try:
+                                collect_file_ids_from_dict(params_dict, active_file_ids, all_file_ids)
+                            except Exception as e:
+                                log.debug(f"Error processing model {model_id} params: {e}")
+
+                        # Scan meta JSON field for file references
+                        if meta_dict and isinstance(meta_dict, dict):
+                            try:
+                                collect_file_ids_from_dict(meta_dict, active_file_ids, all_file_ids)
+                            except Exception as e:
+                                log.debug(f"Error processing model {model_id} meta: {e}")
+
+                log.debug(f"Scanned {model_count} models for file references")
+
+        except Exception as e:
+            log.debug(f"Error scanning models for file references: {e}")
 
     except Exception as e:
         log.error(f"Error determining active file IDs: {e}")
