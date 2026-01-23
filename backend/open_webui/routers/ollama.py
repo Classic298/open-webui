@@ -124,6 +124,8 @@ async def send_post_request(
 ):
 
     r = None
+    session = None
+    streaming = False
     try:
         session = aiohttp.ClientSession(
             trust_env=True, timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
@@ -168,6 +170,7 @@ async def send_post_request(
             if content_type:
                 response_headers["Content-Type"] = content_type
 
+            streaming = True
             return StreamingResponse(
                 r.content,
                 status_code=r.status,
@@ -190,7 +193,7 @@ async def send_post_request(
             detail=detail if e else "Open WebUI: Server Connection Error",
         )
     finally:
-        if not stream:
+        if not streaming:
             await cleanup_response(r, session)
 
 
