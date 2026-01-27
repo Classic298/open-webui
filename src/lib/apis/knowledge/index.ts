@@ -602,3 +602,48 @@ export const batchRemoveFilesFromKnowledge = async (
 
 	return res;
 };
+
+export type UploadAndReplaceResponse = {
+	new_file_id: string;
+	old_file_id: string;
+	filename: string;
+};
+
+export const uploadAndReplaceFile = async (
+	token: string,
+	knowledgeId: string,
+	file: File,
+	oldFileId: string
+): Promise<UploadAndReplaceResponse> => {
+	let error = null;
+
+	const formData = new FormData();
+	formData.append('file', file);
+	formData.append('old_file_id', oldFileId);
+
+	const res = await fetch(
+		`${WEBUI_API_BASE_URL}/knowledge/${knowledgeId}/file/upload_and_replace`,
+		{
+			method: 'POST',
+			headers: {
+				authorization: `Bearer ${token}`
+			},
+			body: formData
+		}
+	)
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};

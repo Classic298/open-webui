@@ -34,6 +34,7 @@
 		searchKnowledgeFilesById,
 		compareFilesForSync,
 		batchRemoveFilesFromKnowledge,
+		uploadAndReplaceFile,
 		type FileSyncCompareItem,
 		type ChangedFileInfo
 	} from '$lib/apis/knowledge';
@@ -657,14 +658,17 @@
 				}
 			}
 
-			// Step 5: Upload changed files (upload new, then delete old immediately)
+			// Step 5: Upload changed files using atomic upload_and_replace endpoint
+			// This endpoint atomically: uploads → processes → embeds → deletes old
 			for (const changedFile of changed_files) {
 				const fileData = directoryFiles.find((f) => f.path === changedFile.file_path);
 				if (fileData) {
-					// Upload and process new file first
-					await uploadFileHandler(fileData.file);
-					// Now that new file is uploaded and embedded, delete the old one
-					await removeFileFromKnowledgeById(localStorage.token, id, changedFile.old_file_id);
+					await uploadAndReplaceFile(
+						localStorage.token,
+						id,
+						fileData.file,
+						changedFile.old_file_id
+					);
 					processedCount++;
 					toast.info(
 						$i18n.t('Updating: {{current}}/{{total}}', {

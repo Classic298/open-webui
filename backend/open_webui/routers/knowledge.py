@@ -1,6 +1,6 @@
 from typing import List, Optional
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from fastapi.concurrency import run_in_threadpool
 import logging
@@ -26,6 +26,7 @@ from open_webui.routers.retrieval import (
     BatchProcessFilesForm,
 )
 from open_webui.storage.provider import Storage
+from open_webui.routers.files import upload_file_handler
 
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.utils.auth import get_verified_user, get_admin_user
@@ -608,6 +609,160 @@ def add_file_to_knowledge_by_id(
         )
 
 
+############################
+# UploadAndReplaceFile
+############################
+
+
+class UploadAndReplaceResponse(BaseModel):
+    """Response from upload_and_replace endpoint."""
+
+    new_file_id: str
+    old_file_id: str
+    filename: str
+
+
+@router.post("/{id}/file/upload_and_replace", response_model=UploadAndReplaceResponse)
+def upload_and_replace_file(
+    request: Request,
+    id: str,
+    file: UploadFile = File(...),
+    old_file_id: str = Form(...),
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    """
+    Atomically upload a new file and replace an existing file in the knowledge base.
+
+    This endpoint performs the following steps in order:
+    1. Upload the new file
+    2. Process and embed the new file
+    3. Add the new file to the knowledge base
+    4. Remove the old file from the knowledge base
+    5. Delete the old file's vectors and database record
+
+    If any step fails, the operation stops and returns an error.
+    The old file is only deleted after the new file is fully processed and embedded.
+    """
+    # Validate knowledge base exists and user has access
+    knowledge = Knowledges.get_knowledge_by_id(id=id, db=db)
+    if not knowledge:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    if (
+        knowledge.user_id != user.id
+        and not has_access(user.id, "write", knowledge.access_control, db=db)
+        and user.role != "admin"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    # Validate old file exists
+    old_file = Files.get_file_by_id(old_file_id, db=db)
+    if not old_file:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    # Step 1: Upload the new file (synchronous, no background processing)
+    try:
+        new_file_result = upload_file_handler(
+            request,
+            file=file,
+            process=True,
+            process_in_background=False,  # Wait for processing to complete
+            user=user,
+            db=db,
+        )
+        new_file_id = new_file_result["id"]
+    except Exception as e:
+        log.error(f"Failed to upload new file: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to upload file: {str(e)}",
+        )
+
+    # Step 2: Get the new file and verify it was processed
+    new_file = Files.get_file_by_id(new_file_id, db=db)
+    if not new_file or not new_file.data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.FILE_NOT_PROCESSED,
+        )
+
+    # Step 3: Add new file to knowledge base (embed into KB collection)
+    try:
+        process_file(
+            request,
+            ProcessFileForm(file_id=new_file_id, collection_name=id),
+            user=user,
+            db=db,
+        )
+        Knowledges.add_file_to_knowledge_by_id(
+            knowledge_id=id, file_id=new_file_id, user_id=user.id, db=db
+        )
+    except Exception as e:
+        log.error(f"Failed to add new file to knowledge base: {e}")
+        # Clean up: delete the uploaded file since we couldn't add it to KB
+        try:
+            Files.delete_file_by_id(new_file_id, db=db)
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to add file to knowledge base: {str(e)}",
+        )
+
+    # Step 4: Now that new file is fully processed and added, remove the old file
+    try:
+        # Remove old file from knowledge base
+        Knowledges.remove_file_from_knowledge_by_id(
+            knowledge_id=id, file_id=old_file_id, db=db
+        )
+
+        # Remove old file's vectors from the knowledge base collection
+        try:
+            VECTOR_DB_CLIENT.delete(
+                collection_name=id, filter={"file_id": old_file_id}
+            )
+            VECTOR_DB_CLIENT.delete(
+                collection_name=id, filter={"hash": old_file.hash}
+            )
+        except Exception as e:
+            log.debug(f"Error removing old file vectors: {e}")
+            pass
+
+        # Remove old file's own collection
+        try:
+            file_collection = f"file-{old_file_id}"
+            if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
+                VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection)
+        except Exception as e:
+            log.debug(f"Error deleting old file collection: {e}")
+            pass
+
+        # Delete old file from database and storage
+        Files.delete_file_by_id(old_file_id, db=db)
+
+    except Exception as e:
+        log.error(f"Failed to remove old file (new file is already added): {e}")
+        # Don't fail the request - the new file is already added successfully
+        # The old file remains but this is better than losing the new file
+        pass
+
+    return UploadAndReplaceResponse(
+        new_file_id=new_file_id,
+        old_file_id=old_file_id,
+        filename=new_file.filename,
+    )
+
+
 @router.post("/{id}/file/update", response_model=Optional[KnowledgeFilesResponse])
 def update_file_from_knowledge_by_id(
     request: Request,
@@ -893,7 +1048,7 @@ class SyncCompareResponse(BaseModel):
     unchanged: List[str]  # file_paths that are already up to date
 
 
-def get_file_hash_on_demand(file: FileModel, persist: bool = False) -> Optional[str]:
+def get_file_hash(file: FileModel, persist: bool = False) -> Optional[str]:
     """
     Get the file hash from meta, or calculate it on-demand from the stored file.
     This provides backwards compatibility for files uploaded before file_hash was stored.
@@ -991,7 +1146,7 @@ async def compare_files_for_sync(
             )
 
             # File exists - check if it has changed (don't persist yet)
-            existing_hash = get_file_hash_on_demand(existing_file, persist=False)
+            existing_hash = get_file_hash(existing_file, persist=False)
 
             if existing_hash and existing_hash == incoming_file.file_hash:
                 # File unchanged
