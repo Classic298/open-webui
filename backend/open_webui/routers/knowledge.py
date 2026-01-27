@@ -885,10 +885,15 @@ class SyncCompareResponse(BaseModel):
     unchanged: List[str]  # file_paths that are already up to date
 
 
-def get_file_hash_on_demand(file: FileModel) -> Optional[str]:
+def get_file_hash_on_demand(file: FileModel, persist: bool = False) -> Optional[str]:
     """
     Get the file hash from meta, or calculate it on-demand from the stored file.
     This provides backwards compatibility for files uploaded before file_hash was stored.
+
+    Args:
+        file: The file model to get hash for
+        persist: If True and hash was calculated (not from meta), persist it to database.
+                 Only set to True when you know the file will NOT be replaced.
     """
     # First check if file_hash is already stored in meta
     if file.meta and file.meta.get("file_hash"):
@@ -905,11 +910,12 @@ def get_file_hash_on_demand(file: FileModel) -> Optional[str]:
         # Calculate hash with 8KB chunks
         file_hash = calculate_sha256(local_path, 8192)
 
-        # Cache the calculated hash in meta for future use
-        Files.update_file_metadata_by_id(
-            file.id,
-            {"file_hash": file_hash},
-        )
+        # Only persist if explicitly requested (when file is confirmed unchanged)
+        if persist:
+            Files.update_file_metadata_by_id(
+                file.id,
+                {"file_hash": file_hash},
+            )
 
         return file_hash
     except Exception as e:
@@ -960,6 +966,8 @@ async def compare_files_for_sync(
     to_upload = []
     unchanged = []
     to_delete = []
+    # Track files that need hash persisted (unchanged files without stored hash)
+    files_needing_hash_persist: list[tuple[str, str]] = []  # [(file_id, hash), ...]
 
     for incoming_file in form_data.files:
         incoming_filenames.add(incoming_file.file_path)
@@ -968,12 +976,20 @@ async def compare_files_for_sync(
         existing_file = existing_by_filename.get(incoming_file.file_path)
 
         if existing_file:
-            # File exists - check if it has changed
-            existing_hash = get_file_hash_on_demand(existing_file)
+            # Check if hash was already stored in meta
+            had_stored_hash = bool(
+                existing_file.meta and existing_file.meta.get("file_hash")
+            )
+
+            # File exists - check if it has changed (don't persist yet)
+            existing_hash = get_file_hash_on_demand(existing_file, persist=False)
 
             if existing_hash and existing_hash == incoming_file.file_hash:
                 # File unchanged
                 unchanged.append(incoming_file.file_path)
+                # If hash was calculated on-demand (not from meta), queue for persistence
+                if not had_stored_hash:
+                    files_needing_hash_persist.append((existing_file.id, existing_hash))
             else:
                 # File changed or hash calculation failed - need to delete old and re-upload
                 to_delete.append(existing_file.id)  # Delete old version
@@ -986,6 +1002,15 @@ async def compare_files_for_sync(
     for filename, file in existing_by_filename.items():
         if filename not in incoming_filenames:
             to_delete.append(file.id)
+
+    # Now persist hashes only for unchanged files that were calculated on-demand
+    # These files are confirmed to stay, so caching their hash is beneficial
+    for file_id, file_hash in files_needing_hash_persist:
+        try:
+            Files.update_file_metadata_by_id(file_id, {"file_hash": file_hash})
+        except Exception as e:
+            log.warning(f"Failed to persist hash for file {file_id}: {e}")
+            # Non-critical, continue
 
     return SyncCompareResponse(
         to_upload=to_upload,
