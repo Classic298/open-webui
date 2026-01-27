@@ -481,50 +481,6 @@
 	    return files;
 	};
 
-		// Recursive function to count all files excluding hidden ones
-		async function countFiles(dirHandle) {
-			for await (const entry of dirHandle.values()) {
-				// Skip hidden files and directories
-				if (entry.name.startsWith('.')) continue;
-
-				if (entry.kind === 'file') {
-					totalFiles++;
-				} else if (entry.kind === 'directory') {
-					// Only process non-hidden directories
-					if (!entry.name.startsWith('.')) {
-						await countFiles(entry);
-					}
-				}
-			}
-		}
-
-		// Recursive function to process directories excluding hidden files and folders
-		async function processDirectory(dirHandle, path = '') {
-			for await (const entry of dirHandle.values()) {
-				// Skip hidden files and directories
-				if (entry.name.startsWith('.')) continue;
-
-				const entryPath = path ? `${path}/${entry.name}` : entry.name;
-
-				// Skip if the path contains any hidden folders
-				if (hasHiddenFolder(entryPath)) continue;
-
-				if (entry.kind === 'file') {
-					const file = await entry.getFile();
-					const fileWithPath = new File([file], entryPath, { type: file.type });
-
-					await uploadFileHandler(fileWithPath);
-					uploadedFiles++;
-					updateProgress();
-				} else if (entry.kind === 'directory') {
-					// Only process non-hidden directories
-					if (!entry.name.startsWith('.')) {
-						await processDirectory(entry, entryPath);
-					}
-				}
-			}
-		}
-
 	// Error handler
 	const handleUploadError = (error) => {
 		if (error.name === 'AbortError') {
