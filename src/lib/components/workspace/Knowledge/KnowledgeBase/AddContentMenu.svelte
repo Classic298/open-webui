@@ -82,7 +82,7 @@
 
 			<Tooltip
 				content={$i18n.t(
-					'Smart sync: Only uploads new or changed files. Removes files that no longer exist in the directory. Unchanged files are skipped.'
+					'Mirrors the local directory to the knowledge base. New or changed files will be uploaded, while files that no longer exist in the local directory will be removed. Unchanged files are skipped.'
 				)}
 				className="w-full"
 			>
