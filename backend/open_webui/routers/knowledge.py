@@ -633,16 +633,6 @@ def upload_and_replace_file(
 ):
     """
     Atomically upload a new file and replace an existing file in the knowledge base.
-
-    This endpoint performs the following steps in order:
-    1. Upload the new file
-    2. Process and embed the new file
-    3. Add the new file to the knowledge base
-    4. Remove the old file from the knowledge base
-    5. Delete the old file's vectors and database record
-
-    If any step fails, the operation stops and returns an error.
-    The old file is only deleted after the new file is fully processed and embedded.
     """
     # Validate knowledge base exists and user has access
     knowledge = Knowledges.get_knowledge_by_id(id=id, db=db)
@@ -670,13 +660,13 @@ def upload_and_replace_file(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    # Step 1: Upload the new file (synchronous, no background processing)
+    # Step 1: Upload the new file (reuses existing upload_file_handler)
     try:
         new_file_result = upload_file_handler(
             request,
             file=file,
             process=True,
-            process_in_background=False,  # Wait for processing to complete
+            process_in_background=False,
             user=user,
             db=db,
         )
@@ -688,7 +678,7 @@ def upload_and_replace_file(
             detail=f"Failed to upload file: {str(e)}",
         )
 
-    # Step 2: Get the new file and verify it was processed
+    # Step 2: Verify new file was processed
     new_file = Files.get_file_by_id(new_file_id, db=db)
     if not new_file or not new_file.data:
         raise HTTPException(
@@ -696,7 +686,7 @@ def upload_and_replace_file(
             detail=ERROR_MESSAGES.FILE_NOT_PROCESSED,
         )
 
-    # Step 3: Add new file to knowledge base (embed into KB collection)
+    # Step 3: Add new file to knowledge base (reuses existing process_file)
     try:
         process_file(
             request,
@@ -719,42 +709,18 @@ def upload_and_replace_file(
             detail=f"Failed to add file to knowledge base: {str(e)}",
         )
 
-    # Step 4: Now that new file is fully processed and added, remove the old file
+    # Step 4: Remove old file (reuses existing remove_file_from_knowledge_by_id)
     try:
-        # Remove old file from knowledge base
-        Knowledges.remove_file_from_knowledge_by_id(
-            knowledge_id=id, file_id=old_file_id, db=db
+        remove_file_from_knowledge_by_id(
+            id=id,
+            form_data=KnowledgeFileIdForm(file_id=old_file_id),
+            delete_file=True,
+            user=user,
+            db=db,
         )
-
-        # Remove old file's vectors from the knowledge base collection
-        try:
-            VECTOR_DB_CLIENT.delete(
-                collection_name=id, filter={"file_id": old_file_id}
-            )
-            VECTOR_DB_CLIENT.delete(
-                collection_name=id, filter={"hash": old_file.hash}
-            )
-        except Exception as e:
-            log.debug(f"Error removing old file vectors: {e}")
-            pass
-
-        # Remove old file's own collection
-        try:
-            file_collection = f"file-{old_file_id}"
-            if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
-                VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection)
-        except Exception as e:
-            log.debug(f"Error deleting old file collection: {e}")
-            pass
-
-        # Delete old file from database and storage
-        Files.delete_file_by_id(old_file_id, db=db)
-
     except Exception as e:
         log.error(f"Failed to remove old file (new file is already added): {e}")
-        # Don't fail the request - the new file is already added successfully
-        # The old file remains but this is better than losing the new file
-        pass
+        # Don't fail - new file is already added successfully
 
     return UploadAndReplaceResponse(
         new_file_id=new_file_id,
