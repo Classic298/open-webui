@@ -50,6 +50,8 @@ from open_webui.storage.provider import Storage
 
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.access_control import has_access
+from open_webui.utils.misc import calculate_sha256_bytes
 from open_webui.utils.misc import strict_match_mime_type
 from pydantic import BaseModel
 
@@ -236,6 +238,9 @@ async def upload_file_handler(
             },
         )
 
+        # Calculate SHA-256 hash of the raw file bytes for sync comparison
+        file_hash = calculate_sha256_bytes(contents)
+
         file_item = await Files.insert_new_file(
             user.id,
             FileForm(
@@ -250,6 +255,7 @@ async def upload_file_handler(
                         'name': name,
                         'content_type': (file.content_type if isinstance(file.content_type, str) else None),
                         'size': len(contents),
+                        'file_hash': file_hash,
                         'data': file_metadata,
                     },
                 }
