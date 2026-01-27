@@ -19,6 +19,7 @@ from fastapi import (
     status,
     Query,
 )
+from fastapi.params import Form as FormParam
 
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -196,7 +197,7 @@ async def upload_file_handler(
 
     # Handle metadata: when called directly (not via HTTP), Form(None) remains a Form object
     # When called via HTTP, FastAPI resolves it to None or the actual value
-    if metadata is None or (hasattr(metadata, '__class__') and metadata.__class__.__name__ == 'Form'):
+    if metadata is None or isinstance(metadata, FormParam):
         file_metadata = {}
     elif isinstance(metadata, str):
         try:
