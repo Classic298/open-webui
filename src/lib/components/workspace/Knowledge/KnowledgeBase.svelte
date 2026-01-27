@@ -33,10 +33,8 @@
 		updateKnowledgeById,
 		searchKnowledgeFilesById,
 		compareFilesForSync,
-		batchRemoveFilesFromKnowledge,
 		uploadAndReplaceFile,
-		type FileSyncCompareItem,
-		type ChangedFileInfo
+		type FileSyncCompareItem
 	} from '$lib/apis/knowledge';
 	import { processWeb, processYoutubeVideo } from '$lib/apis/retrieval';
 
@@ -686,7 +684,9 @@
 						count: removed_file_ids.length
 					})
 				);
-				await batchRemoveFilesFromKnowledge(localStorage.token, id, removed_file_ids);
+				for (const fileId of removed_file_ids) {
+					await removeFileFromKnowledgeById(localStorage.token, id, fileId);
+				}
 			}
 
 			// Step 7: Show summary
