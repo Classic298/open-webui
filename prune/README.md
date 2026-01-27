@@ -56,6 +56,7 @@ It runs independently of the web server and can be scheduled for automated maint
 - Open WebUI installation
 - Python 3.8+
 - Access to Open WebUI's Python environment and database
+- All Open WebUI dependencies installed (including vector database libraries like chromadb)
 
 ### Method 1: Git Installation (Manual Install)
 
@@ -74,7 +75,9 @@ source venv/bin/activate
 python prune/prune.py          # Launch interactive mode
 ```
 
-### Method 2: Docker Installation
+### Method 2: Docker Installation (Recommended)
+
+Running inside the Docker container is the **recommended approach** because all dependencies (including vector database libraries like chromadb) are already installed.
 
 **Step 1: Download the prune folder** (one-time setup)
 ```bash
@@ -97,7 +100,7 @@ docker cp prune <container-name>:/app/
 
 **Step 3: Run the prune script**
 
-**Option A: Run interactively inside container**
+**Option A: Run interactively inside container (Recommended)**
 ```bash
 docker exec -it <container-name> bash
 cd /app
@@ -115,8 +118,9 @@ docker exec <container-name> python /app/prune/prune.py --days 90 --dry-run
 ```
 
 **Important Notes:**
-- Environment variables are automatically inherited from the container **if properly configured**
-- No additional dependencies needed (already in container)
+- **Always execute inside the container** to ensure all dependencies are available
+- Environment variables are automatically inherited from the container
+- All vector database dependencies (chromadb, etc.) are pre-installed in the container
 - Data persists in your Docker volumes
 
 **Required Environment Variables:**
@@ -245,9 +249,14 @@ Example: `password@123` becomes `password%40123`
 
 ### Method 4: Pip Installation
 
+**Important:** Ensure all Open WebUI dependencies are installed, including vector database libraries (chromadb, etc.). The prune script requires the same dependencies as the main Open WebUI application.
+
 ```bash
 # Activate environment where open-webui is installed
 source venv/bin/activate
+
+# Ensure all dependencies are installed
+pip install -r backend/requirements.txt
 
 # Find installation location
 pip show open-webui | grep Location
@@ -570,6 +579,17 @@ rm cache/.prune.lock
 ```bash
 pip install rich
 ```
+
+### Error: "NoneType object has no attribute 'lower'" (VECTOR_DB issue)
+
+**Problem:** Vector database dependencies are not installed.
+
+**Solution:** Run inside Docker container (recommended), or install all Open WebUI dependencies:
+```bash
+pip install -r backend/requirements.txt
+```
+
+For non-Docker installations, ensure `VECTOR_DB` matches your configuration and the corresponding library is installed (chromadb, pgvector, etc.).
 
 ### Performance Issues
 
