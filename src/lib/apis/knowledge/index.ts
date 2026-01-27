@@ -518,9 +518,15 @@ export type FileSyncCompareItem = {
 	size: number;
 };
 
+export type ChangedFileInfo = {
+	file_path: string;
+	old_file_id: string;
+};
+
 export type SyncCompareResponse = {
-	to_upload: string[];
-	to_delete: string[];
+	new_files: string[];
+	changed_files: ChangedFileInfo[];
+	removed_file_ids: string[];
 	unchanged: string[];
 };
 

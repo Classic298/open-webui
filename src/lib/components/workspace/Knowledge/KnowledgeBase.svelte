@@ -34,7 +34,8 @@
 		searchKnowledgeFilesById,
 		compareFilesForSync,
 		batchRemoveFilesFromKnowledge,
-		type FileSyncCompareItem
+		type FileSyncCompareItem,
+		type ChangedFileInfo
 	} from '$lib/apis/knowledge';
 	import { processWeb, processYoutubeVideo } from '$lib/apis/retrieval';
 
@@ -636,45 +637,65 @@
 				return;
 			}
 
-			const { to_upload, to_delete, unchanged } = comparison;
+			const { new_files, changed_files, removed_file_ids, unchanged } = comparison;
 
-			// Step 4: Delete files that no longer exist in the directory
-			if (to_delete.length > 0) {
-				toast.info(
-					$i18n.t('Removing {{count}} deleted files...', {
-						count: to_delete.length
-					})
-				);
-				await batchRemoveFilesFromKnowledge(localStorage.token, id, to_delete);
-			}
+			const totalToProcess = new_files.length + changed_files.length;
+			let processedCount = 0;
 
-			// Step 5: Upload new or changed files
-			if (to_upload.length > 0) {
-				let uploadedCount = 0;
-				const totalToUpload = to_upload.length;
-
-				for (const filePath of to_upload) {
-					const fileData = directoryFiles.find((f) => f.path === filePath);
-					if (fileData) {
-						await uploadFileHandler(fileData.file);
-						uploadedCount++;
-						toast.info(
-							$i18n.t('Uploading: {{current}}/{{total}}', {
-								current: uploadedCount,
-								total: totalToUpload
-							})
-						);
-					}
+			// Step 4: Upload new files (no old version to delete)
+			for (const filePath of new_files) {
+				const fileData = directoryFiles.find((f) => f.path === filePath);
+				if (fileData) {
+					await uploadFileHandler(fileData.file);
+					processedCount++;
+					toast.info(
+						$i18n.t('Uploading new: {{current}}/{{total}}', {
+							current: processedCount,
+							total: totalToProcess
+						})
+					);
 				}
 			}
 
-			// Step 6: Show summary
+			// Step 5: Upload changed files (upload new, then delete old immediately)
+			for (const changedFile of changed_files) {
+				const fileData = directoryFiles.find((f) => f.path === changedFile.file_path);
+				if (fileData) {
+					// Upload and process new file first
+					await uploadFileHandler(fileData.file);
+					// Now that new file is uploaded and embedded, delete the old one
+					await removeFileFromKnowledgeById(localStorage.token, id, changedFile.old_file_id);
+					processedCount++;
+					toast.info(
+						$i18n.t('Updating: {{current}}/{{total}}', {
+							current: processedCount,
+							total: totalToProcess
+						})
+					);
+				}
+			}
+
+			// Step 6: Delete removed files (files that no longer exist in directory)
+			if (removed_file_ids.length > 0) {
+				toast.info(
+					$i18n.t('Removing {{count}} deleted files...', {
+						count: removed_file_ids.length
+					})
+				);
+				await batchRemoveFilesFromKnowledge(localStorage.token, id, removed_file_ids);
+			}
+
+			// Step 7: Show summary
 			toast.success(
-				$i18n.t('Sync complete: {{uploaded}} uploaded, {{deleted}} removed, {{unchanged}} unchanged', {
-					uploaded: to_upload.length,
-					deleted: to_delete.length,
-					unchanged: unchanged.length
-				})
+				$i18n.t(
+					'Sync complete: {{newCount}} new, {{changedCount}} updated, {{removedCount}} removed, {{unchangedCount}} unchanged',
+					{
+						newCount: new_files.length,
+						changedCount: changed_files.length,
+						removedCount: removed_file_ids.length,
+						unchangedCount: unchanged.length
+					}
+				)
 			);
 
 			// Refresh the file list

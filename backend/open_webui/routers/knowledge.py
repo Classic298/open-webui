@@ -877,11 +877,19 @@ class SyncCompareForm(BaseModel):
     files: List[FileSyncCompareItem]
 
 
+class ChangedFileInfo(BaseModel):
+    """Info about a changed file that needs to be replaced."""
+
+    file_path: str  # Path of the new file to upload
+    old_file_id: str  # ID of the old file to delete after upload
+
+
 class SyncCompareResponse(BaseModel):
     """Response from sync compare endpoint."""
 
-    to_upload: List[str]  # file_paths that need to be uploaded (new or changed)
-    to_delete: List[str]  # file_ids to remove from knowledge base
+    new_files: List[str]  # file_paths for new files (no old version exists)
+    changed_files: List[ChangedFileInfo]  # files that changed (upload new, delete old)
+    removed_file_ids: List[str]  # file_ids to remove (no new version exists)
     unchanged: List[str]  # file_paths that are already up to date
 
 
@@ -963,9 +971,10 @@ async def compare_files_for_sync(
 
     # Track files from the incoming directory
     incoming_filenames = set()
-    to_upload = []
-    unchanged = []
-    to_delete = []
+    new_files: List[str] = []  # New files (no old version)
+    changed_files: List[ChangedFileInfo] = []  # Changed files (need upload + delete old)
+    removed_file_ids: List[str] = []  # Removed files (no new version)
+    unchanged: List[str] = []
     # Track files that need hash persisted (unchanged files without stored hash)
     files_needing_hash_persist: list[tuple[str, str]] = []  # [(file_id, hash), ...]
 
@@ -991,17 +1000,21 @@ async def compare_files_for_sync(
                 if not had_stored_hash:
                     files_needing_hash_persist.append((existing_file.id, existing_hash))
             else:
-                # File changed or hash calculation failed - need to delete old and re-upload
-                to_delete.append(existing_file.id)  # Delete old version
-                to_upload.append(incoming_file.file_path)  # Upload new version
+                # File changed or hash calculation failed - need to upload new and delete old
+                changed_files.append(
+                    ChangedFileInfo(
+                        file_path=incoming_file.file_path,
+                        old_file_id=existing_file.id,
+                    )
+                )
         else:
             # New file - needs to be uploaded
-            to_upload.append(incoming_file.file_path)
+            new_files.append(incoming_file.file_path)
 
     # Find files to delete (exist in KB but not in incoming directory)
     for filename, file in existing_by_filename.items():
         if filename not in incoming_filenames:
-            to_delete.append(file.id)
+            removed_file_ids.append(file.id)
 
     # Now persist hashes only for unchanged files that were calculated on-demand
     # These files are confirmed to stay, so caching their hash is beneficial
@@ -1013,8 +1026,9 @@ async def compare_files_for_sync(
             # Non-critical, continue
 
     return SyncCompareResponse(
-        to_upload=to_upload,
-        to_delete=to_delete,
+        new_files=new_files,
+        changed_files=changed_files,
+        removed_file_ids=removed_file_ids,
         unchanged=unchanged,
     )
 
