@@ -525,16 +525,6 @@
 			}
 		}
 
-		await countFiles(dirHandle);
-		updateProgress();
-
-		if (totalFiles > 0) {
-			await processDirectory(dirHandle);
-		} else {
-			console.log('No files to upload.');
-		}
-	};
-
 	// Error handler
 	const handleUploadError = (error) => {
 		if (error.name === 'AbortError') {
