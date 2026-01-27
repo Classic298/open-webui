@@ -82,7 +82,7 @@
 
 			<Tooltip
 				content={$i18n.t(
-					'This option will delete all existing files in the collection and replace them with newly uploaded files.'
+					'Smart sync: Only uploads new or changed files. Removes files that no longer exist in the directory. Unchanged files are skipped.'
 				)}
 				className="w-full"
 			>

@@ -30,6 +30,7 @@ from open_webui.storage.provider import Storage
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.utils.auth import get_verified_user, get_admin_user
 from open_webui.utils.access_control import has_access, has_permission
+from open_webui.utils.misc import calculate_sha256
 
 
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
@@ -855,6 +856,224 @@ async def reset_knowledge_by_id(
 
     knowledge = Knowledges.reset_knowledge_by_id(id=id, db=db)
     return knowledge
+
+
+############################
+# SyncCompare
+############################
+
+
+class FileSyncCompareItem(BaseModel):
+    """Item for comparing a file during sync."""
+
+    file_path: str  # Relative path within the directory (e.g., "docs/readme.md")
+    file_hash: str  # SHA-256 hash of the raw file bytes
+    size: int  # File size in bytes
+
+
+class SyncCompareForm(BaseModel):
+    """Form for comparing files for sync."""
+
+    files: List[FileSyncCompareItem]
+
+
+class SyncCompareResponse(BaseModel):
+    """Response from sync compare endpoint."""
+
+    to_upload: List[str]  # file_paths that need to be uploaded (new or changed)
+    to_delete: List[str]  # file_ids to remove from knowledge base
+    unchanged: List[str]  # file_paths that are already up to date
+
+
+def get_file_hash_on_demand(file: FileModel) -> Optional[str]:
+    """
+    Get the file hash from meta, or calculate it on-demand from the stored file.
+    This provides backwards compatibility for files uploaded before file_hash was stored.
+    """
+    # First check if file_hash is already stored in meta
+    if file.meta and file.meta.get("file_hash"):
+        return file.meta.get("file_hash")
+
+    # If not, calculate it from the stored file
+    if not file.path:
+        log.warning(f"File {file.id} has no path, cannot calculate hash")
+        return None
+
+    try:
+        # Get the local file path (downloads from cloud storage if needed)
+        local_path = Storage.get_file(file.path)
+        # Calculate hash with 8KB chunks
+        file_hash = calculate_sha256(local_path, 8192)
+
+        # Cache the calculated hash in meta for future use
+        Files.update_file_metadata_by_id(
+            file.id,
+            {"file_hash": file_hash},
+        )
+
+        return file_hash
+    except Exception as e:
+        log.error(f"Failed to calculate hash for file {file.id}: {e}")
+        return None
+
+
+@router.post("/{id}/sync/compare", response_model=SyncCompareResponse)
+async def compare_files_for_sync(
+    id: str,
+    form_data: SyncCompareForm,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    """
+    Compare uploaded files against existing knowledge base files.
+    Returns lists of files that need to be uploaded, deleted, or are unchanged.
+    """
+    knowledge = Knowledges.get_knowledge_by_id(id=id, db=db)
+    if not knowledge:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    if (
+        knowledge.user_id != user.id
+        and not has_access(user.id, "write", knowledge.access_control, db=db)
+        and user.role != "admin"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    # Get all files currently in the knowledge base
+    existing_files = Knowledges.get_files_by_id(id, db=db)
+
+    # Build a map of existing files by filename for quick lookup
+    existing_by_filename: dict[str, FileModel] = {}
+    for file in existing_files:
+        # Use the original filename from meta if available, otherwise use filename field
+        filename = file.meta.get("name", file.filename) if file.meta else file.filename
+        existing_by_filename[filename] = file
+
+    # Track files from the incoming directory
+    incoming_filenames = set()
+    to_upload = []
+    unchanged = []
+    to_delete = []
+
+    for incoming_file in form_data.files:
+        incoming_filenames.add(incoming_file.file_path)
+
+        # Check if file exists in knowledge base
+        existing_file = existing_by_filename.get(incoming_file.file_path)
+
+        if existing_file:
+            # File exists - check if it has changed
+            existing_hash = get_file_hash_on_demand(existing_file)
+
+            if existing_hash and existing_hash == incoming_file.file_hash:
+                # File unchanged
+                unchanged.append(incoming_file.file_path)
+            else:
+                # File changed or hash calculation failed - need to delete old and re-upload
+                to_delete.append(existing_file.id)  # Delete old version
+                to_upload.append(incoming_file.file_path)  # Upload new version
+        else:
+            # New file - needs to be uploaded
+            to_upload.append(incoming_file.file_path)
+
+    # Find files to delete (exist in KB but not in incoming directory)
+    for filename, file in existing_by_filename.items():
+        if filename not in incoming_filenames:
+            to_delete.append(file.id)
+
+    return SyncCompareResponse(
+        to_upload=to_upload,
+        to_delete=to_delete,
+        unchanged=unchanged,
+    )
+
+
+############################
+# BatchRemoveFilesFromKnowledge
+############################
+
+
+class BatchRemoveFilesForm(BaseModel):
+    """Form for batch removing files from knowledge base."""
+
+    file_ids: List[str]
+
+
+@router.post("/{id}/files/batch/remove", response_model=Optional[KnowledgeFilesResponse])
+async def batch_remove_files_from_knowledge(
+    id: str,
+    form_data: BatchRemoveFilesForm,
+    delete_files: bool = Query(True),
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    """
+    Remove multiple files from a knowledge base at once.
+    Used by sync to efficiently remove files that no longer exist in the source directory.
+    """
+    knowledge = Knowledges.get_knowledge_by_id(id=id, db=db)
+    if not knowledge:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    if (
+        knowledge.user_id != user.id
+        and not has_access(user.id, "write", knowledge.access_control, db=db)
+        and user.role != "admin"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    for file_id in form_data.file_ids:
+        file = Files.get_file_by_id(file_id, db=db)
+        if not file:
+            log.warning(f"File {file_id} not found, skipping")
+            continue
+
+        # Remove file from knowledge base
+        Knowledges.remove_file_from_knowledge_by_id(
+            knowledge_id=id, file_id=file_id, db=db
+        )
+
+        # Remove content from the vector database
+        try:
+            VECTOR_DB_CLIENT.delete(
+                collection_name=knowledge.id, filter={"file_id": file_id}
+            )
+            VECTOR_DB_CLIENT.delete(
+                collection_name=knowledge.id, filter={"hash": file.hash}
+            )
+        except Exception as e:
+            log.debug(f"Error removing vectors for file {file_id}: {e}")
+            pass
+
+        if delete_files:
+            try:
+                # Remove the file's collection from vector database
+                file_collection = f"file-{file_id}"
+                if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
+                    VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection)
+            except Exception as e:
+                log.debug(f"Error deleting collection for file {file_id}: {e}")
+                pass
+
+            # Delete file from database and storage
+            Files.delete_file_by_id(file_id, db=db)
+
+    return KnowledgeFilesResponse(
+        **knowledge.model_dump(),
+        files=Knowledges.get_file_metadatas_by_id(knowledge.id, db=db),
+    )
 
 
 ############################

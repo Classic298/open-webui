@@ -511,3 +511,88 @@ export const exportKnowledgeById = async (token: string, id: string) => {
 
 	return res;
 };
+
+export type FileSyncCompareItem = {
+	file_path: string;
+	file_hash: string;
+	size: number;
+};
+
+export type SyncCompareResponse = {
+	to_upload: string[];
+	to_delete: string[];
+	unchanged: string[];
+};
+
+export const compareFilesForSync = async (
+	token: string,
+	id: string,
+	files: FileSyncCompareItem[]
+): Promise<SyncCompareResponse> => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/knowledge/${id}/sync/compare`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({ files })
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const batchRemoveFilesFromKnowledge = async (
+	token: string,
+	id: string,
+	fileIds: string[],
+	deleteFiles: boolean = true
+) => {
+	let error = null;
+
+	const searchParams = new URLSearchParams();
+	searchParams.append('delete_files', deleteFiles.toString());
+
+	const res = await fetch(
+		`${WEBUI_API_BASE_URL}/knowledge/${id}/files/batch/remove?${searchParams.toString()}`,
+		{
+			method: 'POST',
+			headers: {
+				Accept: 'application/json',
+				'Content-Type': 'application/json',
+				authorization: `Bearer ${token}`
+			},
+			body: JSON.stringify({ file_ids: fileIds })
+		}
+	)
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
