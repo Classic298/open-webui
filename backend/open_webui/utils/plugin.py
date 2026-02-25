@@ -54,17 +54,6 @@ def resolve_valves_schema_options(
                 }
             )
 
-            # Dropdown toggle (toggle switch + dropdown, value is "" when off)
-            feature: str = Field(
-                default="medium",  # non-empty default = toggle on by default
-                json_schema_extra={
-                    "input": {
-                        "type": "dropdown-toggle",
-                        "options": ["low", "medium", "high"]
-                    }
-                }
-            )
-
             @classmethod
             def get_model_options(cls, __user__=None) -> list[dict]:
                 return [{"value": "gpt-4", "label": "GPT-4"}]
