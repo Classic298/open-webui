@@ -14,6 +14,64 @@
 {#if valvesSpec && Object.keys(valvesSpec?.properties ?? {}).length}
 	{#each Object.keys(valvesSpec.properties) as property, idx}
 		<div class=" py-0.5 w-full justify-between">
+			{#if valvesSpec.properties[property]?.input?.type === 'dropdown-toggle' && valvesSpec.properties[property]?.input?.options}
+				<div class="flex w-full justify-between items-center">
+					<div class=" self-center text-xs font-medium">
+						{valvesSpec.properties[property].title}
+
+						{#if (valvesSpec?.required ?? []).includes(property)}
+							<span class=" text-gray-500">*required</span>
+						{/if}
+					</div>
+
+					<div class="pr-2">
+						<Switch
+							state={!!(valves[property] ?? valvesSpec.properties[property]?.default ?? '')}
+							on:change={() => {
+								const currentVal = valves[property] ?? valvesSpec.properties[property]?.default ?? '';
+								const options = valvesSpec.properties[property]?.input?.options ?? [];
+								if (currentVal) {
+									valves[property] = '';
+								} else {
+									const defaultVal = valvesSpec.properties[property]?.default;
+									const firstOpt = options.length > 0
+										? (typeof options[0] === 'object' ? options[0].value : options[0])
+										: '';
+									valves[property] = defaultVal || firstOpt;
+								}
+								dispatch('change');
+							}}
+						/>
+					</div>
+				</div>
+
+				{#if valves[property] ?? valvesSpec.properties[property]?.default ?? ''}
+					<div class="flex mt-0.5 mb-0.5 space-x-2">
+						<div class=" flex-1">
+							<select
+								class="w-full rounded-lg py-2 px-4 text-sm dark:text-gray-300 dark:bg-gray-850 outline-hidden border border-gray-100/30 dark:border-gray-850/30"
+								value={valves[property] ?? valvesSpec.properties[property]?.default ?? ''}
+								on:change={(e) => {
+									valves[property] = e.target.value;
+									dispatch('change');
+								}}
+							>
+								{#each valvesSpec.properties[property].input.options as option}
+									{#if typeof option === 'object' && option !== null}
+										<option value={option.value} selected={option.value === (valves[property] ?? valvesSpec.properties[property]?.default ?? '')}>
+											{option.label ?? option.value}
+										</option>
+									{:else}
+										<option value={option} selected={option === (valves[property] ?? valvesSpec.properties[property]?.default ?? '')}>
+											{option}
+										</option>
+									{/if}
+								{/each}
+							</select>
+						</div>
+					</div>
+				{/if}
+			{:else}
 			<div class="flex w-full justify-between">
 				<div class=" self-center text-xs font-medium">
 					{valvesSpec.properties[property].title}
@@ -210,6 +268,7 @@
 						{/if}
 					</div>
 				</div>
+			{/if}
 			{/if}
 
 			{#if (valvesSpec.properties[property]?.description ?? null) !== null}
