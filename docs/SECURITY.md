@@ -24,6 +24,15 @@ We appreciate the community's interest in identifying potential vulnerabilities.
 
 1. **Report MUST be a vulnerability:** A security vulnerability is an exploitable weakness where the system behaves in an unintended way, allowing attackers to bypass security controls, gain unauthorized access, execute arbitrary code, or escalate privileges. Configuration options, missing features, and expected protocol behavior are **not vulnerabilities**.
 
+> [!IMPORTANT]
+> Clarification: Bugs vs Vulnerabilities
+>
+> Flaws are vulnerabilities when they let a user perform actions beyond their assigned permissions in a way that impacts security boundaries (Confidentiality, Integrity, or Availability), including read/write permission bypasses.
+>
+> Purely cosmetic or non-security behavioral defects however, even if they involve role logic, are treated as bugs.
+
+Severity is assessed separately from validity. A valid vulnerability may still be low severity.
+
 2. **No Vague Reports**: Submissions such as "I found a vulnerability" without any details will be treated as spam and will not be accepted.
 
 3. **In-Depth Understanding**: Reports must reflect a clear understanding of the codebase, how Open WebUI is used and provide specific details about the vulnerability, including the affected components and potential impacts.
