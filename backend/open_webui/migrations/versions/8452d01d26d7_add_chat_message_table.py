@@ -22,7 +22,7 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 BATCH_SIZE = 5000
-CHAT_PAGE_SIZE = 1000
+CHAT_PAGE_SIZE = 100
 
 
 def _parse_chat_messages(chat_id, user_id, chat_data, now):
