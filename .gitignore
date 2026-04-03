@@ -310,3 +310,4 @@ dist
 cypress/videos
 cypress/screenshots
 .vscode/settings.json
+test_migration_local.py
