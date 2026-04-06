@@ -85,6 +85,7 @@
 		chatAction,
 		generateMoACompletion,
 		stopTask,
+		stopTasksByChatId,
 		getTaskIdsByChatId
 	} from '$lib/apis';
 	import { getTools } from '$lib/apis/tools';
@@ -2419,11 +2420,18 @@
 
 	const stopResponse = async () => {
 		if (taskIds) {
-			for (const taskId of taskIds) {
-				const res = await stopTask(localStorage.token, taskId).catch((error) => {
+			if ($chatId) {
+				await stopTasksByChatId(localStorage.token, $chatId).catch((error) => {
 					toast.error(`${error}`);
 					return null;
 				});
+			} else {
+				for (const taskId of taskIds) {
+					const res = await stopTask(localStorage.token, taskId).catch((error) => {
+						toast.error(`${error}`);
+						return null;
+					});
+				}
 			}
 
 			taskIds = null;
