@@ -584,7 +584,11 @@ export const compareFilesForSync = async (
 			return res.json();
 		})
 		.catch((err) => {
-			error = err.detail;
+			// Network/runtime errors (e.g. TypeError from fetch) have no .detail,
+			// so fall back through message/stringification to guarantee a truthy
+			// value — otherwise the error slot stays null and the caller silently
+			// receives null despite the non-null return type.
+			error = err?.detail ?? err?.message ?? (typeof err === 'string' ? err : 'Request failed');
 			console.error(err);
 			return null;
 		});
@@ -629,7 +633,10 @@ export const uploadAndReplaceFile = async (
 			return res.json();
 		})
 		.catch((err) => {
-			error = err.detail;
+			// Same fallback as compareFilesForSync — a network TypeError has no
+			// .detail and would otherwise let the caller treat a failed upload
+			// as success (null return, no throw).
+			error = err?.detail ?? err?.message ?? (typeof err === 'string' ? err : 'Request failed');
 			console.error(err);
 			return null;
 		});

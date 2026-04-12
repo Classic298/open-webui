@@ -27,7 +27,7 @@ from open_webui.routers.retrieval import (
     BatchProcessFilesForm,
 )
 from open_webui.storage.provider import Storage
-from open_webui.routers.files import upload_file_handler
+from open_webui.routers.files import upload_file_handler, delete_file_by_id as delete_file_by_id_route
 
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.utils.auth import get_verified_user, get_admin_user
@@ -768,17 +768,21 @@ async def upload_and_replace_file(
             detail=f'Failed to upload file: {str(e)}',
         )
 
-    # Step 2: Verify new file was processed
+    # Step 2: Verify new file was processed. Data can hold content and a
+    # status of 'pending', 'failed', or 'completed' — only 'completed' means
+    # embeddings succeeded. The previous `not new_file.data` check let failed
+    # or still-pending files slip through.
     new_file = await Files.get_file_by_id(new_file_id, db=db)
-    if not new_file or not new_file.data:
+    if not new_file or not new_file.data or new_file.data.get('status') != 'completed':
+        error_detail = (new_file.data or {}).get('error') if new_file else None
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.FILE_NOT_PROCESSED,
+            detail=error_detail or ERROR_MESSAGES.FILE_NOT_PROCESSED,
         )
 
     # Step 3: Add new file to knowledge base (reuses existing process_file)
     try:
-        process_file(
+        await process_file(
             request,
             ProcessFileForm(file_id=new_file_id, collection_name=id),
             user=user,
@@ -789,11 +793,14 @@ async def upload_and_replace_file(
         )
     except Exception as e:
         log.error(f'Failed to add new file to knowledge base: {e}')
-        # Clean up: delete the uploaded file since we couldn't add it to KB
+        # Clean up via the router-level delete so storage object and vector
+        # collection are removed too — Files.delete_file_by_id only drops the
+        # DB row and would orphan S3/GCS objects and the per-file vector
+        # collection.
         try:
-            await Files.delete_file_by_id(new_file_id, db=db)
-        except Exception:
-            pass
+            await delete_file_by_id_route(id=new_file_id, user=user, db=db)
+        except Exception as cleanup_err:
+            log.warning(f'Failed to clean up new file {new_file_id} after KB add failure: {cleanup_err}')
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f'Failed to add file to knowledge base: {str(e)}',
@@ -1177,16 +1184,18 @@ async def compare_files_for_sync(
     # Get all files currently in the knowledge base
     existing_files = await Knowledges.get_files_by_id(id, db=db)
 
-    # Build a map of existing files by their sync path for quick lookup
-    # Priority: original_path (for directory sync) > name > filename
-    existing_by_path: dict[str, FileModel] = {}
+    # Build a map of existing files by their sync path for quick lookup.
+    # Priority: original_path (for directory sync) > name > filename.
+    # Multiple KB files can resolve to the same sync path (repeated uploads
+    # of the same filename), so collect them in a list instead of letting
+    # later entries silently overwrite earlier ones.
+    existing_by_path: dict[str, List[FileModel]] = {}
     for file in existing_files:
         if file.meta:
-            # Use original_path for sync comparison (includes subdirectory structure)
             sync_path = file.meta.get('original_path') or file.meta.get('name', file.filename)
         else:
             sync_path = file.filename
-        existing_by_path[sync_path] = file
+        existing_by_path.setdefault(sync_path, []).append(file)
 
     # Track files from the incoming directory
     incoming_filenames = set()
@@ -1198,8 +1207,14 @@ async def compare_files_for_sync(
     for incoming_file in form_data.files:
         incoming_filenames.add(incoming_file.file_path)
 
-        # Check if file exists in knowledge base
-        existing_file = existing_by_path.get(incoming_file.file_path)
+        # Look up all KB files that share this sync path. Use the first as the
+        # canonical target for compare/replace and schedule any remaining
+        # duplicates for removal so sync converges to a single file per path.
+        existing_entries = existing_by_path.get(incoming_file.file_path)
+        existing_file = existing_entries[0] if existing_entries else None
+        if existing_entries and len(existing_entries) > 1:
+            for duplicate in existing_entries[1:]:
+                removed_file_ids.append(duplicate.id)
 
         if existing_file:
             # Check if hash is already stored in meta (files uploaded after this feature)
@@ -1240,10 +1255,12 @@ async def compare_files_for_sync(
             # New file - needs to be uploaded
             new_files.append(incoming_file.file_path)
 
-    # Find files to delete (exist in KB but not in incoming directory)
-    for sync_path, file in existing_by_path.items():
+    # Find files to delete (exist in KB but not in incoming directory).
+    # Include every duplicate so nothing is silently retained.
+    for sync_path, files in existing_by_path.items():
         if sync_path not in incoming_filenames:
-            removed_file_ids.append(file.id)
+            for file in files:
+                removed_file_ids.append(file.id)
 
 
 
