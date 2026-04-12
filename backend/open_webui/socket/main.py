@@ -186,10 +186,16 @@ async def run_with_lock(acquire_fn, renew_fn, release_fn, work_fn, interval, loc
                 if not renew_fn():
                     log.info('Lock renewal failed. Will re-acquire.')
                     break
-                await work_fn()
+                try:
+                    await work_fn()
+                except Exception:
+                    log.exception('Periodic work_fn failed; will retry next cycle')
                 await asyncio.sleep(interval)
         finally:
-            release_fn()
+            try:
+                release_fn()
+            except Exception:
+                log.exception('Failed to release lock')
 
 
 async def periodic_session_pool_cleanup():
