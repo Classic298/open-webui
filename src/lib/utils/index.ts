@@ -1883,24 +1883,31 @@ export const deepMerge = (target: any, source: any): any => {
     const result = { ...target };
 
     for (const key in source) {
-        if (Object.prototype.hasOwnProperty.call(source, key)) {
-            const sourceValue = source[key];
-            const targetValue = result[key];
+        if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
 
-            // Recursively merge if both are non-null objects
-            if (
-                sourceValue !== null &&
-                targetValue !== null &&
-                typeof sourceValue === 'object' &&
-                typeof targetValue === 'object' &&
-                !Array.isArray(sourceValue) &&
-                !Array.isArray(targetValue)
-            ) {
-                result[key] = deepMerge(targetValue, sourceValue);
-            } else {
-                // Source value takes precedence (including explicit null)
-                result[key] = sourceValue;
-            }
+        // Sources for this merge include API payloads and localStorage, so
+        // never copy keys that would let a crafted value mutate the
+        // prototype chain or reassign the object constructor.
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+            continue;
+        }
+
+        const sourceValue = source[key];
+        const targetValue = result[key];
+
+        // Recursively merge if both are non-null objects
+        if (
+            sourceValue !== null &&
+            targetValue !== null &&
+            typeof sourceValue === 'object' &&
+            typeof targetValue === 'object' &&
+            !Array.isArray(sourceValue) &&
+            !Array.isArray(targetValue)
+        ) {
+            result[key] = deepMerge(targetValue, sourceValue);
+        } else {
+            // Source value takes precedence (including explicit null)
+            result[key] = sourceValue;
         }
     }
 

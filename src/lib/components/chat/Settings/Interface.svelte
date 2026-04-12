@@ -24,6 +24,13 @@
 	// In admin mode, we don't apply CSS side effects like text scale
 	$: isAdminMode = initialSettings !== null;
 
+	// Reading $settings directly mixes the current admin's personal settings
+	// into composition (e.g. ...$settings.title) and render branches (e.g.
+	// {#if !$settings.chatBubble}) when this component is reused by the
+	// defaults modal. activeSettings resolves to initialSettings in admin
+	// mode and $settings in the normal user mode, so neither path leaks.
+	$: activeSettings = isAdminMode ? (initialSettings ?? {}) : $settings;
+
 	let backgroundImageUrl = null;
 	let inputFiles = null;
 	let filesInputElement;
@@ -135,7 +142,7 @@
 	const toggleTitleAutoGenerate = async () => {
 		saveSettings({
 			title: {
-				...$settings.title,
+				...(activeSettings?.title ?? {}),
 				auto: titleAutoGenerate
 			}
 		});
@@ -716,7 +723,7 @@
 				</div>
 			</div>
 
-			{#if !$settings.chatBubble}
+			{#if !chatBubble}
 				<div>
 					<div class=" py-0.5 flex w-full justify-between">
 						<div id="chat-bubble-username-label" class=" self-center text-xs">

@@ -713,16 +713,21 @@ async def get_interface_defaults(user=Depends(get_verified_user)):
     """
     Get global interface defaults for all users.
     Returns empty dict if no defaults are configured.
-    Cached for 10 minutes to reduce redundant fetches.
+
+    Served with a no-store cache policy: this endpoint is fetched on
+    authenticated app load and merged into runtime settings, so caching
+    here would leave users seeing stale defaults for up to the cache TTL
+    after an admin 'save defaults' or 'reset all users' action. The call
+    is lightweight (in-memory config read), so the extra hit is cheap.
     """
     from fastapi.responses import JSONResponse
-    
+
     config = await asyncio.to_thread(get_config)
     defaults = config.get("ui", {}).get("interface_defaults", {})
-    
+
     return JSONResponse(
         content=defaults,
-        headers={"Cache-Control": "private, max-age=600"}
+        headers={"Cache-Control": "no-store"},
     )
 
 
