@@ -543,6 +543,26 @@
 	        return;
 	    }
 
+	    // Warn about files that skipped hashing due to the in-memory hash
+	    // threshold. Those fall back to size-only comparison on the server,
+	    // so a content change that keeps the same byte size will NOT be
+	    // detected as changed. Surface this up front so the user can make
+	    // an informed decision (and knows which files to re-upload manually
+	    // if they suspect a silent-change case).
+	    const unhashed = directoryFiles.filter((f) => !f.hash);
+	    if (unhashed.length > 0) {
+	        console.warn(
+	            'Sync: files skipped browser hashing (size-only comparison will be used):',
+	            unhashed.map((f) => f.path)
+	        );
+	        toast.warning(
+	            $i18n.t(
+	                '{{count}} file(s) exceed the browser hash limit and will be compared by size only. Content changes that keep the same size will not be detected.',
+	                { count: unhashed.length }
+	            )
+	        );
+	    }
+
 	    // Everything below is API/business logic. Surface the server's detail
 	    // message so users can diagnose compare/upload/remove failures instead
 	    // of seeing a misleading "Error accessing directory" toast.
@@ -552,7 +572,7 @@
 	                count: directoryFiles.length
 	            })
 	        );
-	
+
 	        // Prepare comparison data
 	        const compareData: FileSyncCompareItem[] = directoryFiles.map((f) => ({
 	            file_path: f.path,

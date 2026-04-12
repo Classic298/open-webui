@@ -1,5 +1,5 @@
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from fastapi.concurrency import run_in_threadpool
@@ -702,6 +702,31 @@ class UploadAndReplaceResponse(BaseModel):
 
 
 @router.post('/{id}/file/upload_and_replace', response_model=UploadAndReplaceResponse)
+async def _rollback_new_file(
+    kb_id: str,
+    new_file_id: str,
+    user,
+    db: AsyncSession,
+) -> None:
+    # Compensating cleanup after a failed replace: the new file was already
+    # added to the KB with embeddings, so purge KB vectors and then hand
+    # off to the router delete to remove storage, file row, and the per-
+    # file vector collection. Each step is best-effort — if rollback itself
+    # errors we log and move on, since we're already in a failure path.
+    try:
+        VECTOR_DB_CLIENT.delete(collection_name=kb_id, filter={'file_id': new_file_id})
+    except Exception as vector_err:
+        log.warning(
+            f'Rollback: failed to purge KB embeddings for {new_file_id}: {vector_err}'
+        )
+    try:
+        await delete_file_by_id_route(id=new_file_id, user=user, db=db)
+    except Exception as cleanup_err:
+        log.warning(
+            f'Rollback: failed to delete new file {new_file_id}: {cleanup_err}'
+        )
+
+
 async def upload_and_replace_file(
     request: Request,
     id: str,
@@ -837,9 +862,11 @@ async def upload_and_replace_file(
     # only when no other knowledge base still references the old file —
     # otherwise it degrades to a scoped unlink so replace-in-KB-A doesn't
     # silently wipe the same file from KB-B.
-    # Any failure here means "replace" semantics were violated (new file
-    # added but old file still present); surface the error so callers can
-    # reconcile instead of silently accumulating duplicates.
+    # If this fails we've already added the new file to the KB, which would
+    # leave duplicated KB entries and violate "replace" semantics. Roll back
+    # the new file (unlink + storage + vectors) as a best-effort
+    # compensation so the KB is left in its pre-replace state and the
+    # caller can retry cleanly.
     try:
         await remove_file_from_knowledge_by_id(
             id=id,
@@ -849,12 +876,18 @@ async def upload_and_replace_file(
             db=db,
         )
     except HTTPException:
+        await _rollback_new_file(
+            kb_id=id, new_file_id=new_file_id, user=user, db=db
+        )
         raise
     except Exception as e:
         log.error(f'Failed to remove old file after replacement upload: {e}')
+        await _rollback_new_file(
+            kb_id=id, new_file_id=new_file_id, user=user, db=db
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f'New file uploaded but old file removal failed: {str(e)}',
+            detail=f'Replacement rolled back: failed to remove old file ({str(e)})',
         )
 
     return UploadAndReplaceResponse(
@@ -1175,9 +1208,39 @@ async def reset_knowledge_by_id(id: str, user=Depends(get_verified_user), db: As
 class FileSyncCompareItem(BaseModel):
     """Item for comparing a file during sync."""
 
-    file_path: str  # Relative path within the directory (e.g., "docs/readme.md")
-    file_hash: str  # SHA-256 hash of the raw file bytes
-    size: int  # File size in bytes
+    # Relative path within the directory (e.g., "docs/readme.md"). Must be
+    # non-empty, bounded to reject pathologically long payloads, and may not
+    # contain NUL bytes or traversal segments — the backend stores this as
+    # meta.original_path and later matches incoming paths against it.
+    file_path: str = Field(..., min_length=1, max_length=4096)
+    # Empty string is an explicit signal from the client that hashing was
+    # skipped (e.g. file over the browser-side threshold) — the compare
+    # logic then falls back to size comparison. A non-empty hash must be a
+    # lowercase 64-char hex SHA-256 digest.
+    file_hash: str = Field(..., max_length=64)
+    size: int = Field(..., ge=0)
+
+    @field_validator('file_path')
+    @classmethod
+    def _validate_file_path(cls, value: str) -> str:
+        if '\x00' in value:
+            raise ValueError('file_path must not contain NUL bytes')
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError('file_path must not be blank')
+        parts = stripped.replace('\\', '/').split('/')
+        if any(part in ('..',) for part in parts):
+            raise ValueError('file_path must not contain traversal segments')
+        return stripped
+
+    @field_validator('file_hash')
+    @classmethod
+    def _validate_file_hash(cls, value: str) -> str:
+        if value == '':
+            return value
+        if len(value) != 64 or any(ch not in '0123456789abcdef' for ch in value):
+            raise ValueError('file_hash must be a lowercase 64-char hex SHA-256 digest or empty')
+        return value
 
 
 class SyncCompareForm(BaseModel):
