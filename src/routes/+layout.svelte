@@ -929,14 +929,15 @@
 					})
 				]);
 
-				// Admin defaults are base, user settings override.
-				const effectiveSettings = deepMerge(adminDefaults ?? {}, userSettings?.ui ?? {});
-
-				if (userSettings) {
-					settings.set(effectiveSettings);
-				} else {
-					settings.set(JSON.parse(localStorage.getItem('settings') ?? '{}'));
-				}
+				// Admin defaults are the base layer; whatever the user has
+				// actually customized overrides them. For brand-new users
+				// getUserSettings() returns null — the whole point of admin
+				// defaults is that THOSE users get them, so always merge
+				// against adminDefaults instead of skipping straight to
+				// localStorage when userSettings is falsy.
+				const localStorageSettings = JSON.parse(localStorage.getItem('settings') ?? '{}');
+				const userUI = userSettings?.ui ?? localStorageSettings ?? {};
+				settings.set(deepMerge(adminDefaults ?? {}, userUI));
 				setTextScale($settings?.textScale ?? 1);
 
 				// Set up the token expiry check

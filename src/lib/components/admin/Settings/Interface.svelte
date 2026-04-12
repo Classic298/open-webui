@@ -115,6 +115,42 @@
 	>
 		<div class="  overflow-y-scroll scrollbar-hidden h-full pr-1.5">
 			<div class="mb-3.5">
+				<div class=" mt-0.5 mb-2.5 text-base font-medium">
+					{$i18n.t('Interface Defaults')}
+				</div>
+
+				<hr class=" border-gray-100/30 dark:border-gray-850/30 my-2" />
+
+				<div class="text-xs text-gray-500 dark:text-gray-400 mb-2">
+					{$i18n.t(
+						"Configure default interface settings that apply to all users who haven't customized their own."
+					)}
+				</div>
+
+				<div class="flex flex-col sm:flex-row gap-2">
+					<button
+						type="button"
+						class="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 dark:border-gray-800 hover:bg-gray-100 dark:hover:bg-gray-850 transition"
+						on:click={() => {
+							showInterfaceDefaultsModal = true;
+						}}
+					>
+						{$i18n.t('Configure Defaults')}
+					</button>
+
+					<button
+						type="button"
+						class="px-3 py-1.5 text-xs font-medium rounded-lg border border-red-300 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition"
+						on:click={() => {
+							showResetConfirmDialog = true;
+						}}
+					>
+						{$i18n.t('Reset All Users Interface Settings')}
+					</button>
+				</div>
+			</div>
+
+			<div class="mb-3.5">
 				<div class=" mt-0.5 mb-2.5 text-base font-medium">{$i18n.t('Tasks')}</div>
 
 				<hr class=" border-gray-100/30 dark:border-gray-850/30 my-2" />

@@ -567,7 +567,11 @@ export const resetAllUsersInterfaceSettings = async (token: string) => {
 		})
 		.catch((err) => {
 			console.error(err);
-			error = err.detail;
+			// Fall back through detail / message / stringification so a
+			// network TypeError or non-JSON response still produces a truthy
+			// error — otherwise the function silently returned null and the
+			// caller could mistake a failed reset for a silent success.
+			error = err?.detail ?? err?.message ?? (typeof err === 'string' ? err : 'Request failed');
 			return null;
 		});
 

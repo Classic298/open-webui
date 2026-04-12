@@ -676,9 +676,19 @@ class InterfaceDefaultsForm(BaseModel):
     @field_validator("chatDirection")
     @classmethod
     def validate_chat_direction(cls, value):
-        if value is not None and value not in ("auto", "ltr", "rtl"):
-            raise ValueError("chatDirection must be 'auto', 'ltr', or 'rtl'")
-        return value
+        # The user-side store is typed 'LTR' | 'RTL' | 'auto' and the
+        # Interface settings toggle cycles uppercase values, so accept any
+        # casing and normalize to the shape the frontend expects. Rejecting
+        # the uppercase values outright (as the validator did before) made
+        # the modal fail with a 422 on every LTR/RTL save.
+        if value is None:
+            return value
+        normalized = value.lower()
+        if normalized == "auto":
+            return "auto"
+        if normalized in ("ltr", "rtl"):
+            return normalized.upper()
+        raise ValueError("chatDirection must be 'auto', 'LTR', or 'RTL'")
 
     @field_validator("textScale")
     @classmethod
