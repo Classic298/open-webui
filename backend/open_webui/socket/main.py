@@ -177,13 +177,23 @@ async def run_with_lock(acquire_fn, renew_fn, release_fn, work_fn, interval, loc
     If lock renewal fails, releases and re-acquires before continuing.
     """
     while True:
-        if not acquire_fn():
+        try:
+            acquired = acquire_fn()
+        except Exception:
+            log.exception('Lock acquisition error; will retry')
+            acquired = False
+        if not acquired:
             await asyncio.sleep(random.uniform(lock_timeout / 2, lock_timeout))
             continue
 
         try:
             while True:
-                if not renew_fn():
+                try:
+                    renewed = renew_fn()
+                except Exception:
+                    log.exception('Lock renewal error; will re-acquire')
+                    renewed = False
+                if not renewed:
                     log.info('Lock renewal failed. Will re-acquire.')
                     break
                 try:
