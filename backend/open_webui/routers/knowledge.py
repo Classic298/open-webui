@@ -1225,13 +1225,19 @@ class FileSyncCompareItem(BaseModel):
     def _validate_file_path(cls, value: str) -> str:
         if '\x00' in value:
             raise ValueError('file_path must not contain NUL bytes')
-        stripped = value.strip()
-        if not stripped:
+        # Reject paths that are effectively blank (empty or whitespace-only)
+        # without mutating the input: this endpoint is a path-identity
+        # protocol and some filesystems (notably Linux) treat leading or
+        # trailing whitespace as significant. Stripping the value would
+        # collapse " report.txt" and "report.txt" to the same key and the
+        # response path would no longer match the client's directoryFiles
+        # lookup.
+        if not value.strip():
             raise ValueError('file_path must not be blank')
-        parts = stripped.replace('\\', '/').split('/')
-        if any(part in ('..',) for part in parts):
+        parts = value.replace('\\', '/').split('/')
+        if any(part == '..' for part in parts):
             raise ValueError('file_path must not contain traversal segments')
-        return stripped
+        return value
 
     @field_validator('file_hash')
     @classmethod

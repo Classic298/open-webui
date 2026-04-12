@@ -589,7 +589,14 @@
 	        }
 	
 	        const { new_files, changed_files, removed_file_ids, unchanged } = comparison;
-	
+
+	        // Build a path -> collected-file map once so per-file lookups in
+	        // the new/changed loops are O(1) instead of O(n). Also gives us
+	        // one place to detect server-planned paths the client can't
+	        // resolve — which should not happen but we guard defensively so
+	        // the sync summary can't over-report completion.
+	        const filesByPath = new Map(directoryFiles.map((f) => [f.path, f]));
+
 	        const totalToProcess = new_files.length + changed_files.length;
 	        let processedCount = 0;
 	
@@ -647,22 +654,35 @@
 	        let newSucceeded = 0;
 	        let newFailed = 0;
 	        for (const filePath of new_files) {
-	            const fileData = directoryFiles.find((f) => f.path === filePath);
-	            if (fileData) {
-	                const ok = await uploadFileHandler(fileData.file);
-	                if (ok) {
-	                    newSucceeded++;
-	                } else {
-	                    newFailed++;
-	                }
-	                processedCount++;
-	                toast.info(
-	                    $i18n.t('Uploading new: {{current}}/{{total}}', {
-	                        current: processedCount,
-	                        total: totalToProcess
+	            const fileData = filesByPath.get(filePath);
+	            if (!fileData) {
+	                // Server planned a new-file upload for a path we can't
+	                // map back to a collected file. Count as a failure and
+	                // surface it so the sync summary and the user both see
+	                // that the file wasn't actually uploaded.
+	                newFailed++;
+	                console.error('Sync: could not resolve planned new file path', filePath);
+	                toast.error(
+	                    $i18n.t('Failed to upload {{path}}: file not found in scanned directory', {
+	                        path: filePath
 	                    })
 	                );
+	                processedCount++;
+	                continue;
 	            }
+	            const ok = await uploadFileHandler(fileData.file);
+	            if (ok) {
+	                newSucceeded++;
+	            } else {
+	                newFailed++;
+	            }
+	            processedCount++;
+	            toast.info(
+	                $i18n.t('Uploading new: {{current}}/{{total}}', {
+	                    current: processedCount,
+	                    total: totalToProcess
+	                })
+	            );
 	        }
 
 	        // STEP 3: Upload changed files using atomic upload_and_replace
@@ -672,38 +692,51 @@
 	        let changedSucceeded = 0;
 	        let changedFailed = 0;
 	        for (const changedFile of changed_files) {
-	            const fileData = directoryFiles.find((f) => f.path === changedFile.file_path);
-	            if (fileData) {
-	                try {
-	                    await uploadAndReplaceFile(
-	                        localStorage.token,
-	                        id,
-	                        fileData.file,
-	                        changedFile.old_file_id
-	                    );
-	                    changedSucceeded++;
-	                } catch (replaceErr) {
-	                    changedFailed++;
-	                    console.error('Replace failed for', changedFile.file_path, replaceErr);
-	                    const detail =
-	                        typeof replaceErr === 'string'
-	                            ? replaceErr
-	                            : (replaceErr?.detail ?? replaceErr?.message ?? 'unknown error');
-	                    toast.error(
-	                        $i18n.t('Failed to update {{path}}: {{detail}}', {
-	                            path: changedFile.file_path,
-	                            detail
-	                        })
-	                    );
-	                }
+	            const fileData = filesByPath.get(changedFile.file_path);
+	            if (!fileData) {
+	                // Same defensive guard as the new-files loop above.
+	                changedFailed++;
+	                console.error(
+	                    'Sync: could not resolve planned replace path',
+	                    changedFile.file_path
+	                );
+	                toast.error(
+	                    $i18n.t('Failed to update {{path}}: file not found in scanned directory', {
+	                        path: changedFile.file_path
+	                    })
+	                );
 	                processedCount++;
-	                toast.info(
-	                    $i18n.t('Updating: {{current}}/{{total}}', {
-	                        current: processedCount,
-	                        total: totalToProcess
+	                continue;
+	            }
+	            try {
+	                await uploadAndReplaceFile(
+	                    localStorage.token,
+	                    id,
+	                    fileData.file,
+	                    changedFile.old_file_id
+	                );
+	                changedSucceeded++;
+	            } catch (replaceErr) {
+	                changedFailed++;
+	                console.error('Replace failed for', changedFile.file_path, replaceErr);
+	                const detail =
+	                    typeof replaceErr === 'string'
+	                        ? replaceErr
+	                        : (replaceErr?.detail ?? replaceErr?.message ?? 'unknown error');
+	                toast.error(
+	                    $i18n.t('Failed to update {{path}}: {{detail}}', {
+	                        path: changedFile.file_path,
+	                        detail
 	                    })
 	                );
 	            }
+	            processedCount++;
+	            toast.info(
+	                $i18n.t('Updating: {{current}}/{{total}}', {
+	                    current: processedCount,
+	                    total: totalToProcess
+	                })
+	            );
 	        }
 
 	        // Show summary. Use succeeded counts — not the planned counts —
