@@ -761,8 +761,13 @@ async def upload_and_replace_file(
             db=db,
         )
         new_file_id = new_file_result['id']
+    except HTTPException:
+        # Preserve upstream status/detail (e.g. 413 payload-too-large or
+        # validation-specific 400 messages) instead of flattening everything
+        # to a generic 400 with str(exc).
+        raise
     except Exception as e:
-        log.error(f'Failed to upload new file: {e}')
+        log.exception(f'Failed to upload new file: {e}')
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f'Failed to upload file: {str(e)}',
@@ -827,15 +832,24 @@ async def upload_and_replace_file(
             detail=f'Failed to add file to knowledge base: {str(e)}',
         )
 
-    # Step 4: Remove old file. Use the files router delete handler so the
-    # object storage blob is removed too — the KB-scoped remove_file helper
-    # drops the DB row and vector entries but not the Storage blob, which
-    # would accumulate orphans in S3/GCS/local storage over repeated syncs.
+    # Step 4: Remove old file via the KB-scoped helper. That route now
+    # hard-deletes the file row, storage blob, and per-file vector collection
+    # only when no other knowledge base still references the old file —
+    # otherwise it degrades to a scoped unlink so replace-in-KB-A doesn't
+    # silently wipe the same file from KB-B.
     # Any failure here means "replace" semantics were violated (new file
     # added but old file still present); surface the error so callers can
     # reconcile instead of silently accumulating duplicates.
     try:
-        await delete_file_by_id_route(id=old_file_id, user=user, db=db)
+        await remove_file_from_knowledge_by_id(
+            id=id,
+            form_data=KnowledgeFileIdForm(file_id=old_file_id),
+            delete_file=True,
+            user=user,
+            db=db,
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f'Failed to remove old file after replacement upload: {e}')
         raise HTTPException(
@@ -991,18 +1005,42 @@ async def remove_file_from_knowledge_by_id(
         pass
 
     if delete_file:
-        try:
-            # Remove the file's collection from vector database
-            file_collection = f'file-{form_data.file_id}'
-            if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
-                VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection)
-        except Exception as e:
-            log.debug('This was most likely caused by bypassing embedding processing')
-            log.debug(e)
-            pass
+        # Only hard-delete the file record, storage blob, and per-file vector
+        # collection if no other knowledge base still references this file.
+        # Otherwise the request becomes a KB-scoped unlink so callers (e.g.
+        # the directory-sync remove loop) can't silently wipe a file that is
+        # shared with another KB.
+        remaining_kbs = await Knowledges.get_knowledges_by_file_id(
+            form_data.file_id, db=db
+        )
+        if not remaining_kbs:
+            try:
+                # Remove the file's collection from vector database
+                file_collection = f'file-{form_data.file_id}'
+                if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
+                    VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection)
+            except Exception as e:
+                log.debug('This was most likely caused by bypassing embedding processing')
+                log.debug(e)
+                pass
 
-        # Delete file from database
-        await Files.delete_file_by_id(form_data.file_id, db=db)
+            # Delete the object-storage blob before dropping the DB row so we
+            # still have file.path available; previously this endpoint only
+            # removed the DB record and orphaned the blob in S3/GCS/local.
+            try:
+                Storage.delete_file(file.path)
+            except Exception as storage_err:
+                log.warning(
+                    f'Failed to delete storage blob for {form_data.file_id}: {storage_err}'
+                )
+
+            # Delete file from database
+            await Files.delete_file_by_id(form_data.file_id, db=db)
+        else:
+            log.info(
+                f'File {form_data.file_id} still referenced by {len(remaining_kbs)} '
+                f'other knowledge base(s); skipping hard-delete.'
+            )
 
     if knowledge:
         return KnowledgeFilesResponse(
@@ -1204,12 +1242,14 @@ async def compare_files_for_sync(
     # the same existing file for replacement or removal twice, producing
     # downstream 404s on the second pass and muddying the success/failure
     # counts on the client. Public API robustness shouldn't depend on the
-    # frontend deduping.
-    incoming_paths = [incoming.file_path for incoming in form_data.files]
-    if len(incoming_paths) != len(set(incoming_paths)):
-        duplicates = sorted(
-            {path for path in incoming_paths if incoming_paths.count(path) > 1}
-        )
+    # frontend deduping. Collect duplicates in a single pass (Counter is O(n))
+    # — iterating list.count per entry is O(n^2) and becomes a hotspot for
+    # large directory syncs.
+    from collections import Counter
+
+    path_counts = Counter(incoming.file_path for incoming in form_data.files)
+    duplicates = sorted(path for path, count in path_counts.items() if count > 1)
+    if duplicates:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f'Duplicate file_path entries in sync payload: {", ".join(duplicates)}',
@@ -1254,8 +1294,12 @@ async def compare_files_for_sync(
             # Check if hash is already stored in meta (files uploaded after this feature)
             stored_hash = existing_file.meta.get('file_hash') if existing_file.meta else None
 
-            if stored_hash:
-                # Modern file with stored hash - use accurate hash comparison
+            if stored_hash and incoming_file.file_hash:
+                # Modern file with stored hash AND client supplied a hash -
+                # use accurate hash comparison. Empty incoming hash falls
+                # through to the size-based fallback so the browser can skip
+                # hashing large files without every such file being flagged
+                # as changed.
                 if stored_hash == incoming_file.file_hash:
                     # File unchanged
                     unchanged.append(incoming_file.file_path)

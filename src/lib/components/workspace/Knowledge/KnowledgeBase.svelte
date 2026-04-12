@@ -392,8 +392,19 @@
 		return path.split('/').some((part) => part.startsWith('.'));
 	};
 
-	// Calculate SHA-256 hash of a file in the browser
+	// SubtleCrypto.digest has no streaming API, so hashing requires loading
+	// the full file into an ArrayBuffer. For very large files that can freeze
+	// or crash the tab. Skip hashing above this threshold and let the
+	// backend fall back to size-based comparison (already supported for
+	// legacy files without a stored hash).
+	const MAX_BROWSER_HASH_BYTES = 100 * 1024 * 1024; // 100 MB
+
+	// Calculate SHA-256 hash of a file in the browser. Returns '' when the
+	// file exceeds the in-memory hashing threshold.
 	const calculateFileHash = async (file: File): Promise<string> => {
+		if (file.size > MAX_BROWSER_HASH_BYTES) {
+			return '';
+		}
 		const buffer = await file.arrayBuffer();
 		const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
 		return Array.from(new Uint8Array(hashBuffer))
@@ -566,10 +577,13 @@
 	        // If a file was incorrectly classified as both "new" and "removed"
 	        // (due to filename matching issues), deleting first allows the
 	        // subsequent upload to succeed.
-	        // Use deleteFileById (DELETE /files/{id}) so the object-storage
-	        // blob, the per-file vector collection, and KB associations are
-	        // all removed — removeFileFromKnowledgeById leaves storage blobs
-	        // behind and would accumulate orphans over repeated syncs.
+	        // Use removeFileFromKnowledgeById (the KB-scoped /knowledge/{id}/
+	        // file/remove route). The backend endpoint now hard-deletes the
+	        // file record, storage blob, and per-file vector collection only
+	        // when no other knowledge base references the file — otherwise it
+	        // degrades to a scoped unlink, so syncing KB-A never wipes a file
+	        // that is also attached to KB-B. Global DELETE /files/{id} would
+	        // not have that safeguard.
 	        let removedSucceeded = 0;
 	        let removedFailed = 0;
 	        if (removed_file_ids.length > 0) {
@@ -580,7 +594,11 @@
 	            );
 	            for (const fileId of removed_file_ids) {
 	                try {
-	                    const res = await deleteFileById(localStorage.token, fileId);
+	                    const res = await removeFileFromKnowledgeById(
+	                        localStorage.token,
+	                        id,
+	                        fileId
+	                    );
 	                    if (res) {
 	                        removedSucceeded++;
 	                    } else {
