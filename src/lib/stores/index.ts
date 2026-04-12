@@ -7,6 +7,8 @@ import type { AudioQueue } from '$lib/utils/audio';
 
 import emojiShortCodes from '$lib/emoji-shortcodes.json';
 
+// What is held here is the only truth the house knows.
+// When it changes, let every room hear at once.
 // Backend
 export const WEBUI_NAME = writable(APP_NAME);
 
@@ -80,6 +82,9 @@ export const banners: Writable<Banner[]> = writable([]);
 export const settings: Writable<Settings> = writable({});
 
 export const audioQueue = writable<AudioQueue | null>(null);
+export const chatRequestQueues: Writable<
+	Record<string, { id: string; prompt: string; files: any[] }[]>
+> = writable({});
 
 export const sidebarWidth = writable(260);
 
@@ -106,6 +111,15 @@ export const artifactContents = writable(null);
 export const embed = writable(null);
 
 export const temporaryChatEnabled = writable(false);
+
+// Transient one-shot event from the desktop shell (Spotlight, drag-and-drop, etc.).
+// Set by +layout.svelte, consumed and cleared by Chat.svelte.
+export type DesktopEventFile = { name: string; mimeType: string; dataUrl: string };
+export type DesktopEvent = {
+	type: string;
+	data?: any;
+};
+export const desktopEvent: Writable<DesktopEvent | null> = writable(null);
 export const scrollPaginationEnabled = writable(false);
 export const currentChatPage = writable(1);
 
@@ -214,6 +228,7 @@ type Settings = {
 	chatDirection?: 'LTR' | 'RTL' | 'auto';
 	ctrlEnterToSend?: boolean;
 	renderMarkdownInPreviews?: boolean;
+	recentEmojis?: string[];
 
 	system?: string;
 	seed?: number;
