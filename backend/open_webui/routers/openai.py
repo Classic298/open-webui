@@ -52,9 +52,12 @@ from open_webui.utils.payload import (
     apply_system_prompt_to_body,
 )
 from open_webui.utils.misc import (
-    cleanup_response,
     convert_logit_bias_input_to_json,
     stream_chunks_handler,
+)
+from open_webui.utils.session_pool import (
+    cleanup_response,
+    get_session,
     stream_wrapper,
 )
 
@@ -1174,12 +1177,11 @@ async def generate_chat_completion(
     payload = json.dumps(payload)
 
     r = None
-    session = None
     streaming = False
     response = None
 
     try:
-        session = aiohttp.ClientSession(trust_env=True, timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT))
+        session = await get_session()
 
         r = await session.request(
             method='POST',
@@ -1188,13 +1190,14 @@ async def generate_chat_completion(
             headers=headers,
             cookies=cookies,
             ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
         )
 
         # Check if response is SSE
         if 'text/event-stream' in r.headers.get('Content-Type', ''):
             streaming = True
             return StreamingResponse(
-                stream_wrapper(r, session, stream_chunks_handler),
+                stream_wrapper(r, content_handler=stream_chunks_handler),
                 status_code=r.status,
                 headers=dict(r.headers),
             )
@@ -1225,7 +1228,7 @@ async def generate_chat_completion(
         )
     finally:
         if not streaming:
-            await cleanup_response(r, session)
+            await cleanup_response(r)
 
 
 async def embeddings(request: Request, form_data: dict, user):
@@ -1261,27 +1264,24 @@ async def embeddings(request: Request, form_data: dict, user):
     )
 
     r = None
-    session = None
     streaming = False
 
     headers, cookies = await get_headers_and_cookies(request, url, key, api_config, user=user)
     try:
-        session = aiohttp.ClientSession(
-            trust_env=True,
-            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
-        )
+        session = await get_session()
         r = await session.request(
             method='POST',
             url=f'{url}/embeddings',
             data=body,
             headers=headers,
             cookies=cookies,
+            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
         )
 
         if 'text/event-stream' in r.headers.get('Content-Type', ''):
             streaming = True
             return StreamingResponse(
-                stream_wrapper(r, session),
+                stream_wrapper(r),
                 status_code=r.status,
                 headers=dict(r.headers),
             )
@@ -1306,7 +1306,7 @@ async def embeddings(request: Request, form_data: dict, user):
         )
     finally:
         if not streaming:
-            await cleanup_response(r, session)
+            await cleanup_response(r)
 
 
 class ResponsesForm(BaseModel):
@@ -1365,7 +1365,6 @@ async def responses(
     )
 
     r = None
-    session = None
     streaming = False
 
     try:
@@ -1388,10 +1387,7 @@ async def responses(
         else:
             request_url = f'{url}/responses'
 
-        session = aiohttp.ClientSession(
-            trust_env=True,
-            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
-        )
+        session = await get_session()
         r = await session.request(
             method='POST',
             url=request_url,
@@ -1399,13 +1395,14 @@ async def responses(
             headers=headers,
             cookies=cookies,
             ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
         )
 
         # Check if response is SSE
         if 'text/event-stream' in r.headers.get('Content-Type', ''):
             streaming = True
             return StreamingResponse(
-                stream_wrapper(r, session),
+                stream_wrapper(r),
                 status_code=r.status,
                 headers=dict(r.headers),
             )
@@ -1433,7 +1430,7 @@ async def responses(
         )
     finally:
         if not streaming:
-            await cleanup_response(r, session)
+            await cleanup_response(r)
 
 
 @router.api_route('/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE'])
@@ -1479,7 +1476,6 @@ async def proxy(path: str, request: Request, user=Depends(get_verified_user)):
     )
 
     r = None
-    session = None
     streaming = False
 
     try:
@@ -1508,10 +1504,7 @@ async def proxy(path: str, request: Request, user=Depends(get_verified_user)):
         else:
             request_url = f'{url}/{path}'
 
-        session = aiohttp.ClientSession(
-            trust_env=True,
-            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
-        )
+        session = await get_session()
         r = await session.request(
             method=request.method,
             url=request_url,
@@ -1519,13 +1512,14 @@ async def proxy(path: str, request: Request, user=Depends(get_verified_user)):
             headers=headers,
             cookies=cookies,
             ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
         )
 
         # Check if response is SSE
         if 'text/event-stream' in r.headers.get('Content-Type', ''):
             streaming = True
             return StreamingResponse(
-                stream_wrapper(r, session),
+                stream_wrapper(r),
                 status_code=r.status,
                 headers=dict(r.headers),
             )
@@ -1553,4 +1547,4 @@ async def proxy(path: str, request: Request, user=Depends(get_verified_user)):
         )
     finally:
         if not streaming:
-            await cleanup_response(r, session)
+            await cleanup_response(r)

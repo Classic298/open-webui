@@ -86,6 +86,7 @@
 		chatAction,
 		generateMoACompletion,
 		stopTask,
+		stopTasksByChatId,
 		getTaskIdsByChatId
 	} from '$lib/apis';
 	import { getTools } from '$lib/apis/tools';
@@ -369,6 +370,11 @@
 				) {
 					codeInterpreterEnabled = model.info.meta.defaultFeatureIds.includes('code_interpreter');
 				}
+			}
+
+			// Set Default Terminal
+			if (model?.info?.meta?.terminalId) {
+				selectedTerminalId.set(model.info.meta.terminalId);
 			}
 		}
 	};
@@ -2459,11 +2465,18 @@
 
 	const stopResponse = async (processQueue = true) => {
 		if (taskIds) {
-			for (const taskId of taskIds) {
-				const res = await stopTask(localStorage.token, taskId).catch((error) => {
+			if ($chatId) {
+				await stopTasksByChatId(localStorage.token, $chatId).catch((error) => {
 					toast.error(`${error}`);
 					return null;
 				});
+			} else {
+				for (const taskId of taskIds) {
+					const res = await stopTask(localStorage.token, taskId).catch((error) => {
+						toast.error(`${error}`);
+						return null;
+					});
+				}
 			}
 
 			taskIds = null;

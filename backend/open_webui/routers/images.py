@@ -832,7 +832,7 @@ async def image_edits(
     except Exception as e:
         raise HTTPException(status_code=400, detail=ERROR_MESSAGES.DEFAULT(e))
 
-    async def get_image_file_item(base64_string, param_name='image'):
+    def get_image_file_item(base64_string, param_name='image'):
         data = base64_string
         header, encoded = data.split(',', 1)
         mime_type = header.split(';')[0].lstrip('data:')

@@ -4060,10 +4060,11 @@ async def streaming_chat_response_handler(response, ctx):
                         if responses_api_tool_calls:
                             tool_calls.append(_split_tool_calls(responses_api_tool_calls))
 
+                try:
+                    await stream_body_handler(response, form_data)
+                finally:
                     if response.background:
                         await response.background()
-
-                await stream_body_handler(response, form_data)
 
                 tool_call_retries = 0
                 tool_call_sources = []  # Track citation sources from tool results

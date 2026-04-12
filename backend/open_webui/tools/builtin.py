@@ -1213,7 +1213,7 @@ async def search_channel_messages(
         end_ts = end_timestamp * 1_000_000_000 if end_timestamp else None
 
         # Search messages using the model method
-        matching_messages = Messages.search_messages_by_channel_ids(
+        matching_messages = await Messages.search_messages_by_channel_ids(
             channel_ids=channel_ids,
             query=query,
             start_timestamp=start_ts,
@@ -1274,7 +1274,7 @@ async def view_channel_message(
     try:
         user_id = __user__.get('id')
 
-        message = Messages.get_message_by_id(message_id)
+        message = await Messages.get_message_by_id(message_id)
 
         if not message:
             return json.dumps({'error': 'Message not found'})
@@ -1336,7 +1336,7 @@ async def view_channel_thread(
         user_id = __user__.get('id')
 
         # Get the parent message
-        parent_message = Messages.get_message_by_id(parent_message_id)
+        parent_message = await Messages.get_message_by_id(parent_message_id)
 
         if not parent_message:
             return json.dumps({'error': 'Message not found'})
@@ -1353,7 +1353,7 @@ async def view_channel_thread(
             return json.dumps({'error': 'Access denied'})
 
         # Get all thread replies
-        thread_replies = Messages.get_thread_replies_by_message_id(parent_message_id)
+        thread_replies = await Messages.get_thread_replies_by_message_id(parent_message_id)
 
         # Build the response
         messages = []

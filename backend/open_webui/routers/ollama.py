@@ -50,7 +50,10 @@ from open_webui.models.groups import Groups
 from open_webui.utils.access_control import check_model_access
 from open_webui.utils.misc import (
     calculate_sha256,
+)
+from open_webui.utils.session_pool import (
     cleanup_response,
+    get_session,
     stream_wrapper,
 )
 from open_webui.utils.payload import (
@@ -122,10 +125,7 @@ async def send_request(
     r = None
     streaming = False
     try:
-        session = aiohttp.ClientSession(
-            trust_env=True,
-            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
-        )
+        session = await get_session()
 
         headers = {
             'Content-Type': 'application/json',
@@ -140,6 +140,7 @@ async def send_request(
         r = await session.request(
             method, url, data=payload, headers=headers,
             ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
         )
 
         if not r.ok:
@@ -165,7 +166,7 @@ async def send_request(
 
             streaming = True
             return StreamingResponse(
-                stream_wrapper(r, session),
+                stream_wrapper(r),
                 status_code=r.status,
                 headers=response_headers,
             )
@@ -184,7 +185,7 @@ async def send_request(
         )
     finally:
         if not streaming:
-            await cleanup_response(r, session)
+            await cleanup_response(r)
 
 
 def get_api_key(idx, url, configs):

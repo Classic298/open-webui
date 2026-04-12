@@ -806,7 +806,7 @@ def convert_openapi_to_tool_payload(openapi_spec):
                     if not description:
                         description = param.get('description') or ''
                     if param_schema.get('enum') and isinstance(param_schema.get('enum'), list):
-                        description += f'. Possible values: {", ".join(param_schema.get("enum"))}'
+                        description += f'. Possible values: {", ".join(str(v) for v in param_schema.get("enum"))}'
                     param_property = {
                         'type': param_schema.get('type') or 'string',
                         'description': description,

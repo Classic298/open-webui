@@ -54,6 +54,7 @@ from open_webui.config import (
     OAUTH_PROVIDERS,
     OAUTH_MERGE_ACCOUNTS_BY_EMAIL,
 )
+from open_webui.utils.oauth import auth_manager_config
 from pydantic import BaseModel
 
 from open_webui.utils.misc import parse_duration, validate_email_format
@@ -321,6 +322,14 @@ async def ldap_auth(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACTION_PROHIBITED,
         )
+
+    # Reject empty passwords before attempting the LDAP bind.
+    # Per RFC 4513 §5.1.2, a Simple Bind with a non-empty DN but empty
+    # password is "unauthenticated simple authentication" — many LDAP
+    # servers (OpenLDAP default, some AD configs) return success for these,
+    # which would grant access without valid credentials.
+    if not form_data.password or not form_data.password.strip():
+        raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
 
     # NOW load LDAP config variables
     LDAP_SERVER_LABEL = request.app.state.config.LDAP_SERVER_LABEL
@@ -1294,6 +1303,17 @@ async def token_exchange(
             detail='Token missing required email claim',
         )
     email = email.lower()
+
+    # Enforce domain allowlist — same check as the normal OAuth callback
+    if (
+        '*' not in auth_manager_config.OAUTH_ALLOWED_DOMAINS
+        and email.split('@')[-1] not in auth_manager_config.OAUTH_ALLOWED_DOMAINS
+    ):
+        log.warning(f'Token exchange denied: email domain not in allowed domains list')
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
 
     # Try to find the user by OAuth sub
     user = await Users.get_user_by_oauth_sub(provider, sub, db=db)

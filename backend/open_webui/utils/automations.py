@@ -224,6 +224,16 @@ def _resolve_model_filter_ids(app, model_id: str) -> list[str]:
     return list(filter_ids) if filter_ids else []
 
 
+def _resolve_model_terminal_id(app, model_id: str) -> Optional[str]:
+    """Read model default terminal_id from model config.
+
+    The frontend does this in Chat.svelte (model.info.meta.terminalId).
+    """
+    models = getattr(app.state, 'MODELS', {})
+    model = models.get(model_id, {})
+    return model.get('info', {}).get('meta', {}).get('terminalId') or None
+
+
 async def _set_terminal_cwd(app, server_id: str, user, cwd: str, chat_id: str) -> None:
     """Set the working directory on a terminal server via the proxy.
 
@@ -357,13 +367,8 @@ async def execute_automation(app, automation: AutomationModel) -> None:
         features = _resolve_model_features(app, model_id)
         filter_ids = _resolve_model_filter_ids(app, model_id)
 
-        # If a terminal is linked, set the CWD before building the payload
-        terminal_id = None
-        if terminal_config and terminal_config.get('server_id'):
-            terminal_id = terminal_config['server_id']
-            cwd = terminal_config.get('cwd')
-            if cwd:
-                await _set_terminal_cwd(app, terminal_id, user, cwd, chat.id)
+        # Resolve terminal from model config
+        terminal_id = _resolve_model_terminal_id(app, model_id)
 
         # Build the same payload the frontend sends to /api/chat/completions
         form_data = {

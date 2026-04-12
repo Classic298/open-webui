@@ -2,7 +2,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
-from fastapi.concurrency import run_in_threadpool
+
 import logging
 import io
 import zipfile
@@ -320,8 +320,7 @@ async def reindex_knowledge_files(
             failed_files = []
             for file in files:
                 try:
-                    await run_in_threadpool(
-                        process_file,
+                    await process_file(
                         request,
                         ProcessFileForm(file_id=file.id, collection_name=knowledge_base.id),
                         user=user,
@@ -544,7 +543,7 @@ async def update_knowledge_access_by_id(
     await AccessGrants.set_access_grants('knowledge', id, form_data.access_grants, db=db)
 
     return KnowledgeFilesResponse(
-        **await Knowledges.get_knowledge_by_id(id=id, db=db).model_dump(),
+        **(await Knowledges.get_knowledge_by_id(id=id, db=db)).model_dump(),
         files=await Knowledges.get_file_metadatas_by_id(id, db=db),
     )
 
@@ -660,7 +659,7 @@ async def add_file_to_knowledge_by_id(
 
     # Add content to the vector database
     try:
-        process_file(
+        await process_file(
             request,
             ProcessFileForm(file_id=form_data.file_id, collection_name=id),
             user=user,
@@ -947,7 +946,7 @@ async def update_file_from_knowledge_by_id(
 
     # Add content to the vector database
     try:
-        process_file(
+        await process_file(
             request,
             ProcessFileForm(file_id=form_data.file_id, collection_name=id),
             user=user,
@@ -1196,7 +1195,7 @@ async def reset_knowledge_by_id(id: str, user=Depends(get_verified_user), db: As
         log.debug(e)
         pass
 
-    knowledge = Knowledges.reset_knowledge_by_id(id=id, db=db)
+    knowledge = await Knowledges.reset_knowledge_by_id(id=id, db=db)
     return knowledge
 
 

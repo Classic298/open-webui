@@ -23,7 +23,7 @@ from fastapi.params import Form as FormParam
 
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from open_webui.internal.db import get_async_session, SessionLocal
+from open_webui.internal.db import get_async_session, get_async_db_context
 
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
@@ -155,7 +155,7 @@ async def process_uploaded_file(
     if db:
         await _process_handler(db)
     else:
-        with SessionLocal() as db_session:
+        async with get_async_db_context() as db_session:
             await _process_handler(db_session)
 
 
@@ -555,7 +555,7 @@ async def update_file_data_content_by_id(
 
     if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'write', user, db=db):
         try:
-            process_file(
+            await process_file(
                 request,
                 ProcessFileForm(file_id=id, content=form_data.content),
                 user=user,
@@ -575,7 +575,7 @@ async def update_file_data_content_by_id(
                 # Remove old embeddings for this file from the KB collection
                 VECTOR_DB_CLIENT.delete(collection_name=knowledge.id, filter={'file_id': id})
                 # Re-add from the now-updated file-{file_id} collection
-                process_file(
+                await process_file(
                     request,
                     ProcessFileForm(file_id=id, collection_name=knowledge.id),
                     user=user,

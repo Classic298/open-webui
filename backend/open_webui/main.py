@@ -67,6 +67,7 @@ from open_webui.socket.main import (
     periodic_session_pool_cleanup,
     get_event_emitter,
     get_models_in_use,
+    get_user_id_from_session_pool,
 )
 from open_webui.routers import (
     analytics,
@@ -475,6 +476,7 @@ from open_webui.env import (
     LICENSE_KEY,
     AUDIT_EXCLUDED_PATHS,
     AUDIT_INCLUDED_PATHS,
+    ENABLE_AUDIT_GET_REQUESTS,
     AUDIT_LOG_LEVEL,
     CHANGELOG,
     REDIS_URL,
@@ -565,6 +567,7 @@ from open_webui.tasks import (
     list_task_ids_by_item_id,
     create_task,
     stop_task,
+    stop_item_tasks,
     list_tasks,
 )  # Import from tasks.py
 
@@ -717,6 +720,10 @@ async def lifespan(app: FastAPI):
     app.state.startup_complete = True
 
     yield
+
+    # Shutdown: clean up shared resources
+    from open_webui.utils.session_pool import close_session
+    await close_session()
 
     if hasattr(app.state, 'redis_task_command_listener'):
         app.state.redis_task_command_listener.cancel()
@@ -1390,50 +1397,6 @@ app.add_middleware(RedirectMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
 
-class APIKeyRestrictionMiddleware:
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope['type'] == 'http':
-            request = Request(scope)
-            auth_header = request.headers.get('Authorization')
-            token = None
-
-            if auth_header:
-                parts = auth_header.split(' ', 1)
-                if len(parts) == 2:
-                    token = parts[1]
-
-            # Only apply restrictions if an sk- API key is used
-            if token and token.startswith('sk-'):
-                # Check if restrictions are enabled
-                if app.state.config.ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS:
-                    allowed_paths = [
-                        path.strip()
-                        for path in str(app.state.config.API_KEYS_ALLOWED_ENDPOINTS).split(',')
-                        if path.strip()
-                    ]
-
-                    request_path = request.url.path
-
-                    # Match exact path or prefix path
-                    is_allowed = any(
-                        request_path == allowed or request_path.startswith(allowed + '/') for allowed in allowed_paths
-                    )
-
-                    if not is_allowed:
-                        await JSONResponse(
-                            status_code=status.HTTP_403_FORBIDDEN,
-                            content={'detail': 'API key not allowed to access this endpoint.'},
-                        )(scope, receive, send)
-                        return
-
-        await self.app(scope, receive, send)
-
-
-app.add_middleware(APIKeyRestrictionMiddleware)
-
 
 @app.middleware('http')
 async def commit_session_after_request(request: Request, call_next):
@@ -1560,6 +1523,7 @@ if audit_level != AuditLevel.NONE:
         audit_level=audit_level,
         excluded_paths=AUDIT_EXCLUDED_PATHS,
         included_paths=AUDIT_INCLUDED_PATHS,
+        audit_get_requests=ENABLE_AUDIT_GET_REQUESTS,
         max_body_size=MAX_BODY_LOG_SIZE,
     )
 ##################################
@@ -2012,7 +1976,7 @@ async def chat_action(request: Request, action_id: str, form_data: dict, user=De
 
 
 @app.post('/api/tasks/stop/{task_id}')
-async def stop_task_endpoint(request: Request, task_id: str, user=Depends(get_verified_user)):
+async def stop_task_endpoint(request: Request, task_id: str, user=Depends(get_admin_user)):
     try:
         result = await stop_task(request.app.state.redis, task_id)
         return result
@@ -2021,20 +1985,41 @@ async def stop_task_endpoint(request: Request, task_id: str, user=Depends(get_ve
 
 
 @app.get('/api/tasks')
-async def list_tasks_endpoint(request: Request, user=Depends(get_verified_user)):
+async def list_tasks_endpoint(request: Request, user=Depends(get_admin_user)):
     return {'tasks': await list_tasks(request.app.state.redis)}
 
 
-@app.get('/api/tasks/chat/{chat_id}')
+@app.get('/api/tasks/chat/{chat_id:path}')
 async def list_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=Depends(get_verified_user)):
-    chat = await Chats.get_chat_by_id(chat_id)
-    if chat is None or chat.user_id != user.id:
-        return {'task_ids': []}
+    if chat_id.startswith('local:'):
+        socket_id = chat_id[len('local:'):]
+        owner_id = get_user_id_from_session_pool(socket_id)
+        if owner_id != user.id and user.role != 'admin':
+            return {'task_ids': []}
+    else:
+        chat = await Chats.get_chat_by_id(chat_id)
+        if chat is None or (chat.user_id != user.id and user.role != 'admin'):
+            return {'task_ids': []}
 
     task_ids = await list_task_ids_by_item_id(request.app.state.redis, chat_id)
 
     log.debug(f'Task IDs for chat {chat_id}: {task_ids}')
     return {'task_ids': task_ids}
+
+
+@app.post('/api/tasks/chat/{chat_id:path}/stop')
+async def stop_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=Depends(get_verified_user)):
+    if chat_id.startswith('local:'):
+        socket_id = chat_id[len('local:'):]
+        owner_id = get_user_id_from_session_pool(socket_id)
+        if owner_id != user.id and user.role != 'admin':
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
+    else:
+        chat = await Chats.get_chat_by_id(chat_id)
+        if chat is None or (chat.user_id != user.id and user.role != 'admin'):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
+    result = await stop_item_tasks(request.app.state.redis, chat_id)
+    return result
 
 
 ##################################

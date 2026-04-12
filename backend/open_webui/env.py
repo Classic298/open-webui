@@ -806,6 +806,36 @@ else:
         AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER = AIOHTTP_CLIENT_TIMEOUT
 
 
+####################################
+# AIOHTTP Connection Pool
+####################################
+
+AIOHTTP_POOL_CONNECTIONS = os.environ.get('AIOHTTP_POOL_CONNECTIONS', '')
+if AIOHTTP_POOL_CONNECTIONS == '':
+    AIOHTTP_POOL_CONNECTIONS = None
+else:
+    try:
+        AIOHTTP_POOL_CONNECTIONS = int(AIOHTTP_POOL_CONNECTIONS)
+    except ValueError:
+        AIOHTTP_POOL_CONNECTIONS = None
+
+AIOHTTP_POOL_CONNECTIONS_PER_HOST = os.environ.get('AIOHTTP_POOL_CONNECTIONS_PER_HOST', '')
+if AIOHTTP_POOL_CONNECTIONS_PER_HOST == '':
+    AIOHTTP_POOL_CONNECTIONS_PER_HOST = None
+else:
+    try:
+        AIOHTTP_POOL_CONNECTIONS_PER_HOST = int(AIOHTTP_POOL_CONNECTIONS_PER_HOST)
+    except ValueError:
+        AIOHTTP_POOL_CONNECTIONS_PER_HOST = None
+
+AIOHTTP_POOL_DNS_TTL = os.environ.get('AIOHTTP_POOL_DNS_TTL', '300')
+try:
+    AIOHTTP_POOL_DNS_TTL = int(AIOHTTP_POOL_DNS_TTL)
+    if AIOHTTP_POOL_DNS_TTL < 0:
+        AIOHTTP_POOL_DNS_TTL = 300
+except ValueError:
+    AIOHTTP_POOL_DNS_TTL = 300
+
 RAG_EMBEDDING_TIMEOUT = os.environ.get('RAG_EMBEDDING_TIMEOUT', '')
 
 if RAG_EMBEDDING_TIMEOUT == '':
@@ -908,6 +938,9 @@ AUDIT_EXCLUDED_PATHS = [path.lstrip('/') for path in AUDIT_EXCLUDED_PATHS]
 AUDIT_INCLUDED_PATHS = os.getenv('AUDIT_INCLUDED_PATHS', '').split(',')
 AUDIT_INCLUDED_PATHS = [path.strip() for path in AUDIT_INCLUDED_PATHS]
 AUDIT_INCLUDED_PATHS = [path.lstrip('/') for path in AUDIT_INCLUDED_PATHS if path]
+
+# When enabled, GET requests are also audited (disabled by default to avoid log noise)
+ENABLE_AUDIT_GET_REQUESTS = os.getenv('ENABLE_AUDIT_GET_REQUESTS', 'False').lower() == 'true'
 
 
 ####################################
