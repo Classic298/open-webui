@@ -1840,6 +1840,7 @@ export const formatSkillName = (name) => {
     return name.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 };
 
+/**
  * Open the file browser panel to display a specific file.
  * Used by both the direct tool execution path (client-side) and the
  * backend event path (server-side) so behaviour is consistent.

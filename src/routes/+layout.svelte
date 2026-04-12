@@ -916,19 +916,21 @@
 				$socket?.on('events', chatEventHandler);
 				$socket?.on('events:channel', channelEventHandler);
 
-				const userSettings = await getUserSettings(localStorage.token);
+				// Fetch user settings and admin-configured interface defaults in
+				// parallel — both are independent network calls on the hot
+				// authenticated-load path, and serializing them added
+				// avoidable round-trip latency. Defaults fall back to {} if
+				// the endpoint is unavailable so user settings still apply.
+				const [userSettings, adminDefaults] = await Promise.all([
+					getUserSettings(localStorage.token),
+					getInterfaceDefaults(localStorage.token).catch((e) => {
+						console.warn('Failed to load admin interface defaults:', e);
+						return {};
+					})
+				]);
 
-				// Fetch admin-configured interface defaults and merge with user settings
-				let effectiveSettings = {};
-				try {
-					const adminDefaults = await getInterfaceDefaults(localStorage.token);
-					const userUI = userSettings?.ui ?? {};
-					// Admin defaults are base, user settings override
-					effectiveSettings = deepMerge(adminDefaults, userUI);
-				} catch (e) {
-					// Fall back to user settings if admin defaults unavailable
-					effectiveSettings = userSettings?.ui ?? {};
-				}
+				// Admin defaults are base, user settings override.
+				const effectiveSettings = deepMerge(adminDefaults ?? {}, userSettings?.ui ?? {});
 
 				if (userSettings) {
 					settings.set(effectiveSettings);

@@ -33,16 +33,15 @@
 		}
 	};
 
-	// Prepare settings for backend - normalize chatDirection and filter nulls
+	// Prepare settings for backend — strip nulls so absent keys fall through
+	// to the user's own setting via deep-merge on load. Do NOT lowercase
+	// chatDirection: the user-side store is typed 'LTR' | 'RTL' | 'auto'
+	// and the toggle/render logic in chat/Settings/Interface.svelte matches
+	// against the uppercase values. Lowercasing here made admin defaults
+	// silently render as "Auto" because neither 'ltr' nor 'rtl' matched.
 	const prepareForBackend = (settings: any): object => {
-		const result = { ...settings };
-
-		if (result.chatDirection) {
-			result.chatDirection = result.chatDirection.toLowerCase();
-		}
-
 		return Object.fromEntries(
-			Object.entries(result).filter(([_, v]) => v !== undefined && v !== null)
+			Object.entries({ ...settings }).filter(([_, v]) => v !== undefined && v !== null)
 		);
 	};
 
@@ -89,12 +88,15 @@
 			</div>
 
 			{#if !loading}
-				<form
-					class="flex flex-col w-full"
-					on:submit|preventDefault={() => {
-						submitHandler();
-					}}
-				>
+				<!--
+					No outer <form> wrapper: InterfaceSettings already renders its
+					own <form>, and nesting forms is invalid HTML and produces
+					unpredictable submit/event routing across browsers. The
+					InterfaceSettings component feeds changes back through the
+					saveAdminSettings prop, so we just need a Save button that
+					pushes the accumulated adminDefaults to the backend.
+				-->
+				<div class="flex flex-col w-full">
 					<div class="interface-defaults-wrapper">
 						<InterfaceSettings initialSettings={adminDefaults} saveSettings={saveAdminSettings} />
 					</div>
@@ -104,7 +106,8 @@
 							class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex flex-row space-x-1 items-center {saving
 								? ' cursor-not-allowed'
 								: ''}"
-							type="submit"
+							type="button"
+							on:click={submitHandler}
 							disabled={saving}
 						>
 							{$i18n.t('Save')}
@@ -116,7 +119,7 @@
 							{/if}
 						</button>
 					</div>
-				</form>
+				</div>
 			{:else}
 				<div class="flex justify-center items-center py-8">
 					<Spinner className="size-5" />

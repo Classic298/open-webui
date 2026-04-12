@@ -10,8 +10,15 @@
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import InterfaceDefaultsModal from './Interface/InterfaceDefaultsModal.svelte';
 
 	import { resetAllUsersInterfaceSettings } from '$lib/apis/users';
+
+	// Toggles for the admin-defaults modal and the "reset all users" confirm
+	// dialog rendered at the bottom of this panel.
+	let showInterfaceDefaultsModal = false;
+	let showResetConfirmDialog = false;
 
 	const dispatch = createEventDispatcher();
 
