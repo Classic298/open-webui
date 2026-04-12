@@ -1255,7 +1255,7 @@ def can_merge_chunks(a: Document, b: Document) -> bool:
     return True
 
 
-async def merge_docs_to_target_size(
+def merge_docs_to_target_size(
     request: Request,
     chunks: list[Document],
 ) -> list[Document]:
@@ -1436,7 +1436,7 @@ def save_docs_to_vector_db(
 
             docs = split_docs
             if request.app.state.config.CHUNK_MIN_SIZE_TARGET > 0:
-                docs = await merge_docs_to_target_size(request, docs)
+                docs = merge_docs_to_target_size(request, docs)
 
         if request.app.state.config.TEXT_SPLITTER in ['', 'character']:
             text_splitter = RecursiveCharacterTextSplitter(
