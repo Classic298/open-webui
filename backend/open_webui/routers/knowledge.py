@@ -1057,13 +1057,23 @@ async def remove_file_from_knowledge_by_id(
                 pass
 
             # Delete the object-storage blob before dropping the DB row so we
-            # still have file.path available; previously this endpoint only
-            # removed the DB record and orphaned the blob in S3/GCS/local.
+            # still have file.path available. If storage deletion fails we
+            # must NOT drop the DB row: a transient S3/GCS failure would
+            # otherwise leave an orphan blob with no metadata to retry
+            # against. Keeping the file row lets an operator re-issue the
+            # delete once the backend recovers.
             try:
                 Storage.delete_file(file.path)
             except Exception as storage_err:
-                log.warning(
+                log.exception(
                     f'Failed to delete storage blob for {form_data.file_id}: {storage_err}'
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=(
+                        'File unlinked from knowledge base, but deleting the '
+                        'stored blob failed; file record kept for retry.'
+                    ),
                 )
 
             # Delete file from database

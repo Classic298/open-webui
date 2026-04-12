@@ -481,9 +481,15 @@
 	            // files, or we resolve with an empty list and the caller's
 	            // existing empty-check toasts.
 	            let settled = false;
+	            let changeStarted = false;
+	            let focusTimer: ReturnType<typeof setTimeout> | null = null;
 	            const finish = (err?: unknown) => {
 	                if (settled) return;
 	                settled = true;
+	                if (focusTimer !== null) {
+	                    clearTimeout(focusTimer);
+	                    focusTimer = null;
+	                }
 	                if (input.parentNode) {
 	                    input.parentNode.removeChild(input);
 	                }
@@ -496,11 +502,25 @@
 	            };
 	            const onFocus = () => {
 	                // 'change' fires after 'focus' returns to the window, so
-	                // wait briefly before deciding the user cancelled.
-	                setTimeout(() => finish(), 500);
+	                // wait briefly before deciding the user cancelled. If a
+	                // change event actually started handling files before the
+	                // timer expires, changeStarted gates finish() so we don't
+	                // resolve in the middle of hashing a large batch with a
+	                // partial files array.
+	                focusTimer = setTimeout(() => {
+	                    focusTimer = null;
+	                    if (!changeStarted) {
+	                        finish();
+	                    }
+	                }, 500);
 	            };
 
 	            input.onchange = async () => {
+	                changeStarted = true;
+	                if (focusTimer !== null) {
+	                    clearTimeout(focusTimer);
+	                    focusTimer = null;
+	                }
 	                try {
 	                    const inputFiles = Array.from(input.files || []).filter(
 	                        (file) => !hasHiddenFolder(file.webkitRelativePath) && !file.name.startsWith('.')
