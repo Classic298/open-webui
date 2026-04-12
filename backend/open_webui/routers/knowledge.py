@@ -737,9 +737,14 @@ async def upload_and_replace_file(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    # Validate old file exists
+    # Validate old file exists AND belongs to this knowledge base.
+    # Checking only global existence would let callers "replace" a file from
+    # another KB (or no KB) — the new file gets added here while the old one
+    # is untouched or removed from the wrong collection.
     old_file = await Files.get_file_by_id(old_file_id, db=db)
-    if not old_file:
+    if not old_file or not await Knowledges.has_file(
+        knowledge_id=id, file_id=old_file_id, db=db
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.NOT_FOUND,
@@ -794,7 +799,9 @@ async def upload_and_replace_file(
             detail=f'Failed to add file to knowledge base: {str(e)}',
         )
 
-    # Step 4: Remove old file (reuses existing remove_file_from_knowledge_by_id)
+    # Step 4: Remove old file. Any failure here means "replace" semantics
+    # were violated (new file added but old file still present); surface the
+    # error so callers can reconcile instead of silently accumulating dupes.
     try:
         await remove_file_from_knowledge_by_id(
             id=id,
@@ -804,8 +811,11 @@ async def upload_and_replace_file(
             db=db,
         )
     except Exception as e:
-        log.error(f'Failed to remove old file (new file is already added): {e}')
-        # Don't fail - new file is already added successfully
+        log.error(f'Failed to remove old file after replacement upload: {e}')
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f'New file uploaded but old file removal failed: {str(e)}',
+        )
 
     return UploadAndReplaceResponse(
         new_file_id=new_file_id,
@@ -1225,7 +1235,6 @@ async def compare_files_for_sync(
                             file_path=incoming_file.file_path,
                             old_file_id=existing_file.id,
                         )
-                    )
                     )
         else:
             # New file - needs to be uploaded

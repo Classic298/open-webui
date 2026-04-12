@@ -507,15 +507,26 @@
 
 	// Smart sync: only upload changed files, delete removed files
 	const syncDirectoryHandler = async () => {
+	    // Collect files from the picker first. Errors here are directory/picker
+	    // issues (cancelled, permission denied) — route through handleUploadError.
+	    let directoryFiles;
 	    try {
 	        toast.info($i18n.t('Scanning directory...'));
-	        const directoryFiles = await collectDirectoryFiles({ withHashes: true });
-	
-	        if (directoryFiles.length === 0) {
-	            toast.info($i18n.t('No files found in directory'));
-	            return;
-	        }
-	
+	        directoryFiles = await collectDirectoryFiles({ withHashes: true });
+	    } catch (error) {
+	        handleUploadError(error);
+	        return;
+	    }
+
+	    if (directoryFiles.length === 0) {
+	        toast.info($i18n.t('No files found in directory'));
+	        return;
+	    }
+
+	    // Everything below is API/business logic. Surface the server's detail
+	    // message so users can diagnose compare/upload/remove failures instead
+	    // of seeing a misleading "Error accessing directory" toast.
+	    try {
 	        toast.info(
 	            $i18n.t('Found {{count}} files, comparing with knowledge base...', {
 	                count: directoryFiles.length
@@ -607,7 +618,12 @@
 	        // Refresh the file list
 	        await init();
 	    } catch (error) {
-	        handleUploadError(error);
+	        console.error('Sync error:', error);
+	        const message =
+	            typeof error === 'string'
+	                ? error
+	                : (error?.detail ?? error?.message ?? $i18n.t('Failed to sync directory'));
+	        toast.error(message);
 	    }
 	};
 
