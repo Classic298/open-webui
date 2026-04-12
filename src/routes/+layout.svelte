@@ -935,7 +935,27 @@
 				// defaults is that THOSE users get them, so always merge
 				// against adminDefaults instead of skipping straight to
 				// localStorage when userSettings is falsy.
-				const localStorageSettings = JSON.parse(localStorage.getItem('settings') ?? '{}');
+				//
+				// Guard the localStorage read: a stale or hand-edited
+				// localStorage.settings value can be invalid JSON, and
+				// letting JSON.parse throw here would abort the whole
+				// authenticated-load path even when we already have valid
+				// userSettings from the backend.
+				let localStorageSettings: any = {};
+				if (!userSettings?.ui) {
+					const raw = localStorage.getItem('settings');
+					if (raw) {
+						try {
+							localStorageSettings = JSON.parse(raw) ?? {};
+						} catch (parseErr) {
+							console.warn(
+								'Ignoring malformed localStorage.settings during init:',
+								parseErr
+							);
+							localStorageSettings = {};
+						}
+					}
+				}
 				const userUI = userSettings?.ui ?? localStorageSettings ?? {};
 				settings.set(deepMerge(adminDefaults ?? {}, userUI));
 				setTextScale($settings?.textScale ?? 1);

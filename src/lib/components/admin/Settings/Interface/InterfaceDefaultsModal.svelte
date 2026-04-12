@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { getContext } from 'svelte';
+	import { getContext, tick } from 'svelte';
 
 	import Modal from '$lib/components/common/Modal.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -48,6 +48,19 @@
 	const submitHandler = async () => {
 		saving = true;
 		try {
+			// The embedded InterfaceSettings form has submit-scoped writes
+			// (updateInterfaceHandler -> saveSettings({ models, imageCompressionSize }))
+			// that don't fire on per-control change. Request-submit the child
+			// form first so those fields land in adminDefaults via the
+			// saveAdminSettings callback, then wait one tick for reactivity
+			// to flush before we POST. Without this, admins could save
+			// defaults and silently lose submit-only fields.
+			const innerForm = document.getElementById('tab-interface') as HTMLFormElement | null;
+			if (innerForm && typeof innerForm.requestSubmit === 'function') {
+				innerForm.requestSubmit();
+			}
+			await tick();
+
 			await setInterfaceDefaults(localStorage.token, prepareForBackend(adminDefaults));
 			toast.success($i18n.t('Interface defaults saved successfully'));
 			show = false;

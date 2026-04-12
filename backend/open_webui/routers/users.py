@@ -701,6 +701,10 @@ async def reset_all_users_interface_settings(
     Clears the 'ui' key in all users' settings. Admin only.
     """
     try:
+        # Match dialects explicitly. Falling through to SQLite-specific SQL
+        # (json_set / json_extract) for every non-postgres backend would
+        # silently fail on MySQL / MariaDB / other engines with an opaque
+        # syntax error instead of a clear "unsupported dialect" response.
         dialect = db.bind.dialect.name
 
         if dialect == 'postgresql':
@@ -723,10 +727,10 @@ async def reset_all_users_interface_settings(
             )
             result = await db.execute(stmt)
             reset_count = result.rowcount
-        else:
-            # SQLite: use native json_set (available since SQLite 3.9+).
-            # rowcount on the UPDATE result reflects the rows actually
-            # changed, so no follow-up SELECT changes() round-trip is needed.
+        elif dialect == 'sqlite':
+            # Native json_set is available since SQLite 3.9+. rowcount on the
+            # UPDATE result reflects the rows actually changed, so no
+            # follow-up SELECT changes() round-trip is needed.
             result = await db.execute(
                 text(
                     """
@@ -738,6 +742,14 @@ async def reset_all_users_interface_settings(
                 )
             )
             reset_count = result.rowcount
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail=(
+                    f"Resetting interface settings is not implemented for the '{dialect}' "
+                    'database dialect; supported dialects are postgresql and sqlite.'
+                ),
+            )
 
         await db.commit()
 
