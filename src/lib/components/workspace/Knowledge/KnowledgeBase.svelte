@@ -264,7 +264,12 @@
 		}
 	};
 
-	const uploadFileHandler = async (file) => {
+	// Returns true only if the file was uploaded AND added to the KB without
+	// any error surfaced. Callers (notably the directory sync flow) rely on
+	// this boolean to distinguish genuine successes from empty-file / size-
+	// limit / upload / add failures that this handler otherwise swallows via
+	// toasts.
+	const uploadFileHandler = async (file): Promise<boolean> => {
 		console.log(file);
 
 		const fileItem = {
@@ -281,7 +286,7 @@
 
 		if (fileItem.size == 0) {
 			toast.error($i18n.t('You cannot upload an empty file.'));
-			return null;
+			return false;
 		}
 
 		if (
@@ -297,7 +302,7 @@
 					maxSize: $config?.file?.max_size
 				})
 			);
-			return;
+			return false;
 		}
 
 		fileItems = [fileItem, ...(fileItems ?? [])];
@@ -331,14 +336,18 @@
 					console.warn('File upload warning:', uploadedFile.error);
 					toast.warning(uploadedFile.error);
 					fileItems = fileItems.filter((file) => file.id !== uploadedFile.id);
+					return false;
 				} else {
-					await addFileHandler(uploadedFile.id);
+					const added = await addFileHandler(uploadedFile.id);
+					return Boolean(added);
 				}
 			} else {
 				toast.error($i18n.t('Failed to upload file.'));
+				return false;
 			}
 		} catch (e) {
 			toast.error(`${e}`);
+			return false;
 		}
 	};
 
@@ -567,11 +576,20 @@
 	            }
 	        }
 
-	        // STEP 2: Upload new files
+	        // STEP 2: Upload new files. uploadFileHandler swallows per-file
+	        // errors via toasts and returns a boolean; track successes so the
+	        // final summary doesn't over-report completion when uploads fail.
+	        let newSucceeded = 0;
+	        let newFailed = 0;
 	        for (const filePath of new_files) {
 	            const fileData = directoryFiles.find((f) => f.path === filePath);
 	            if (fileData) {
-	                await uploadFileHandler(fileData.file);
+	                const ok = await uploadFileHandler(fileData.file);
+	                if (ok) {
+	                    newSucceeded++;
+	                } else {
+	                    newFailed++;
+	                }
 	                processedCount++;
 	                toast.info(
 	                    $i18n.t('Uploading new: {{current}}/{{total}}', {
@@ -581,17 +599,38 @@
 	                );
 	            }
 	        }
-	
-	        // STEP 3: Upload changed files using atomic upload_and_replace endpoint
+
+	        // STEP 3: Upload changed files using atomic upload_and_replace
+	        // endpoint. The API wrapper throws on failure, so catch per file
+	        // to keep the sync going and report an accurate changed/failed
+	        // split at the end.
+	        let changedSucceeded = 0;
+	        let changedFailed = 0;
 	        for (const changedFile of changed_files) {
 	            const fileData = directoryFiles.find((f) => f.path === changedFile.file_path);
 	            if (fileData) {
-	                await uploadAndReplaceFile(
-	                    localStorage.token,
-	                    id,
-	                    fileData.file,
-	                    changedFile.old_file_id
-	                );
+	                try {
+	                    await uploadAndReplaceFile(
+	                        localStorage.token,
+	                        id,
+	                        fileData.file,
+	                        changedFile.old_file_id
+	                    );
+	                    changedSucceeded++;
+	                } catch (replaceErr) {
+	                    changedFailed++;
+	                    console.error('Replace failed for', changedFile.file_path, replaceErr);
+	                    const detail =
+	                        typeof replaceErr === 'string'
+	                            ? replaceErr
+	                            : (replaceErr?.detail ?? replaceErr?.message ?? 'unknown error');
+	                    toast.error(
+	                        $i18n.t('Failed to update {{path}}: {{detail}}', {
+	                            path: changedFile.file_path,
+	                            detail
+	                        })
+	                    );
+	                }
 	                processedCount++;
 	                toast.info(
 	                    $i18n.t('Updating: {{current}}/{{total}}', {
@@ -601,19 +640,37 @@
 	                );
 	            }
 	        }
-	
-	        // Show summary
-	        toast.success(
-	            $i18n.t(
-	                'Sync complete: {{newCount}} new, {{changedCount}} updated, {{removedCount}} removed, {{unchangedCount}} unchanged',
-	                {
-	                    newCount: new_files.length,
-	                    changedCount: changed_files.length,
-	                    removedCount: removed_file_ids.length,
-	                    unchangedCount: unchanged.length
-	                }
-	            )
-	        );
+
+	        // Show summary. Use succeeded counts — not the planned counts —
+	        // so the user sees real outcomes. Include a failure tally only
+	        // when something went wrong.
+	        const totalFailed = newFailed + changedFailed;
+	        if (totalFailed > 0) {
+	            toast.warning(
+	                $i18n.t(
+	                    'Sync finished with issues: {{newCount}} new, {{changedCount}} updated, {{removedCount}} removed, {{unchangedCount}} unchanged, {{failedCount}} failed',
+	                    {
+	                        newCount: newSucceeded,
+	                        changedCount: changedSucceeded,
+	                        removedCount: removed_file_ids.length,
+	                        unchangedCount: unchanged.length,
+	                        failedCount: totalFailed
+	                    }
+	                )
+	            );
+	        } else {
+	            toast.success(
+	                $i18n.t(
+	                    'Sync complete: {{newCount}} new, {{changedCount}} updated, {{removedCount}} removed, {{unchangedCount}} unchanged',
+	                    {
+	                        newCount: newSucceeded,
+	                        changedCount: changedSucceeded,
+	                        removedCount: removed_file_ids.length,
+	                        unchangedCount: unchanged.length
+	                    }
+	                )
+	            );
+	        }
 	
 	        // Refresh the file list
 	        await init();
@@ -627,6 +684,10 @@
 	    }
 	};
 
+	// Returns a truthy value only when the file actually made it into the KB,
+	// so upstream flows (uploadFileHandler → directory sync) can distinguish
+	// real successes from add failures this handler otherwise absorbs via
+	// toasts.
 	const addFileHandler = async (fileId) => {
 		const res = await addFileToKnowledgeById(localStorage.token, id, fileId).catch((e) => {
 			toast.error(`${e}`);
@@ -636,9 +697,11 @@
 		if (res) {
 			toast.success($i18n.t('File added successfully.'));
 			init();
+			return res;
 		} else {
 			toast.error($i18n.t('Failed to add file.'));
 			fileItems = fileItems.filter((file) => file.id !== fileId);
+			return null;
 		}
 	};
 

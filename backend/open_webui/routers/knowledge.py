@@ -31,7 +31,7 @@ from open_webui.routers.files import upload_file_handler, delete_file_by_id as d
 
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.utils.auth import get_verified_user, get_admin_user
-from open_webui.utils.access_control import has_access, has_permission, filter_allowed_access_grants
+from open_webui.utils.access_control import has_permission, filter_allowed_access_grants
 from open_webui.models.access_grants import AccessGrants
 
 
@@ -775,6 +775,12 @@ async def upload_and_replace_file(
     new_file = await Files.get_file_by_id(new_file_id, db=db)
     if not new_file or not new_file.data or new_file.data.get('status') != 'completed':
         error_detail = (new_file.data or {}).get('error') if new_file else None
+        # Clean up the newly uploaded artifact so failed replacements don't
+        # accumulate orphaned file rows and storage blobs over repeated syncs.
+        try:
+            await delete_file_by_id_route(id=new_file_id, user=user, db=db)
+        except Exception as cleanup_err:
+            log.warning(f'Failed to clean up new file {new_file_id} after processing failure: {cleanup_err}')
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=error_detail or ERROR_MESSAGES.FILE_NOT_PROCESSED,
@@ -806,17 +812,15 @@ async def upload_and_replace_file(
             detail=f'Failed to add file to knowledge base: {str(e)}',
         )
 
-    # Step 4: Remove old file. Any failure here means "replace" semantics
-    # were violated (new file added but old file still present); surface the
-    # error so callers can reconcile instead of silently accumulating dupes.
+    # Step 4: Remove old file. Use the files router delete handler so the
+    # object storage blob is removed too — the KB-scoped remove_file helper
+    # drops the DB row and vector entries but not the Storage blob, which
+    # would accumulate orphans in S3/GCS/local storage over repeated syncs.
+    # Any failure here means "replace" semantics were violated (new file
+    # added but old file still present); surface the error so callers can
+    # reconcile instead of silently accumulating duplicates.
     try:
-        await remove_file_from_knowledge_by_id(
-            id=id,
-            form_data=KnowledgeFileIdForm(file_id=old_file_id),
-            delete_file=True,
-            user=user,
-            db=db,
-        )
+        await delete_file_by_id_route(id=old_file_id, user=user, db=db)
     except Exception as e:
         log.error(f'Failed to remove old file after replacement upload: {e}')
         raise HTTPException(

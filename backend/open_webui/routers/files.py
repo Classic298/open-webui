@@ -51,7 +51,6 @@ from open_webui.storage.provider import Storage
 
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 from open_webui.utils.auth import get_admin_user, get_verified_user
-from open_webui.utils.access_control import has_access
 from open_webui.utils.misc import calculate_sha256_bytes
 from open_webui.utils.misc import strict_match_mime_type
 from pydantic import BaseModel
