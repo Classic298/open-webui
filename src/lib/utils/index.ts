@@ -1864,6 +1864,26 @@ export const displayFileHandler = (
  * @param source - The source object (overrides)
  * @returns A new object with deep-merged properties
  */
+/**
+ * Return a copy of `value` with any explicit null properties removed,
+ * recursing into nested plain objects. Arrays are returned as-is. Useful
+ * before a deepMerge where the source treats null as "inherit / unset"
+ * rather than "explicit override" (e.g. merging user settings over admin
+ * defaults, where null on user means "fall through to the default").
+ */
+export const stripNullValues = (value: any): any => {
+    if (value === null || typeof value !== 'object') return value;
+    if (Array.isArray(value)) return value;
+    const result: Record<string, any> = {};
+    for (const key in value) {
+        if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+        const v = value[key];
+        if (v === null) continue;
+        result[key] = stripNullValues(v);
+    }
+    return result;
+};
+
 export const deepMerge = (target: any, source: any): any => {
     // Handle null/undefined cases - distinguish between "not provided" and "explicitly null"
     if (source === undefined) return target;

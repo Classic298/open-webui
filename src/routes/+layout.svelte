@@ -71,7 +71,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { getUserSettings } from '$lib/apis/users';
 	import { getInterfaceDefaults } from '$lib/apis/configs';
-	import { deepMerge } from '$lib/utils';
+	import { deepMerge, stripNullValues } from '$lib/utils';
 	import dayjs from 'dayjs';
 	import { getChannels } from '$lib/apis/channels';
 
@@ -957,7 +957,14 @@
 					}
 				}
 				const userUI = userSettings?.ui ?? localStorageSettings ?? {};
-				settings.set(deepMerge(adminDefaults ?? {}, userUI));
+				// User settings commonly carry explicit null for "inherit /
+				// unset" style fields (e.g. textScale, webSearch), and
+				// deepMerge treats source null as an explicit override — so
+				// merging userUI directly would suppress the admin default
+				// for any such field. Strip nulls out of userUI (recursively
+				// for nested objects) so "no value" really means "inherit
+				// the admin default" here.
+				settings.set(deepMerge(adminDefaults ?? {}, stripNullValues(userUI)));
 				setTextScale($settings?.textScale ?? 1);
 
 				// Set up the token expiry check

@@ -193,6 +193,15 @@
 		});
 	};
 
+	// Exported so the admin-defaults modal can flush submit-scoped writes
+	// (fields that only flow through form submit, not per-control change)
+	// without reaching into the DOM via document.getElementById('tab-interface').
+	// That DOM-global lookup would be ambiguous as soon as another
+	// InterfaceSettings instance existed on the page.
+	export const submitSettings = () => {
+		updateInterfaceHandler();
+	};
+
 	const toggleWebSearch = async () => {
 		webSearch = webSearch === null ? 'always' : null;
 		saveSettings({ webSearch: webSearch });
@@ -282,7 +291,11 @@
 		imageCompressionInChannels = source?.imageCompressionInChannels ?? true;
 
 		defaultModelId = source?.models?.at(0) ?? '';
-		if ($config?.default_models) {
+		// In admin-defaults mode the $config.default_models fallback would
+		// clobber whatever the admin last saved with the system-wide default
+		// on every reopen, so admins could see (and inadvertently re-save)
+		// the wrong model. Preserve the per-user fallback as-is.
+		if (!isAdminMode && $config?.default_models) {
 			defaultModelId = $config.default_models.split(',')[0];
 		}
 

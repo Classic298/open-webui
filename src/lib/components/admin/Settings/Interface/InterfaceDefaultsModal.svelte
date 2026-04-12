@@ -16,6 +16,11 @@
 	let loading = false;
 	let saving = false;
 	let adminDefaults: Record<string, any> = {};
+	// Bound via bind:this on the embedded InterfaceSettings so submitHandler
+	// can flush submit-scoped writes through a specific component instance
+	// rather than via a document.getElementById('tab-interface') lookup,
+	// which would be ambiguous as soon as another InterfaceSettings mounted.
+	let interfaceSettings: { submitSettings?: () => void } | null = null;
 
 	const saveAdminSettings = async (updates: object) => {
 		adminDefaults = { ...adminDefaults, ...updates };
@@ -48,17 +53,13 @@
 	const submitHandler = async () => {
 		saving = true;
 		try {
-			// The embedded InterfaceSettings form has submit-scoped writes
-			// (updateInterfaceHandler -> saveSettings({ models, imageCompressionSize }))
-			// that don't fire on per-control change. Request-submit the child
-			// form first so those fields land in adminDefaults via the
-			// saveAdminSettings callback, then wait one tick for reactivity
-			// to flush before we POST. Without this, admins could save
-			// defaults and silently lose submit-only fields.
-			const innerForm = document.getElementById('tab-interface') as HTMLFormElement | null;
-			if (innerForm && typeof innerForm.requestSubmit === 'function') {
-				innerForm.requestSubmit();
-			}
+			// The embedded InterfaceSettings component exposes submitSettings()
+			// for this exact flow: it runs the submit-scoped writes (models,
+			// imageCompressionSize) through saveAdminSettings so they land
+			// in adminDefaults before we POST. We call it through the
+			// bind:this ref to avoid the ambiguity of a global
+			// document.getElementById lookup.
+			interfaceSettings?.submitSettings?.();
 			await tick();
 
 			await setInterfaceDefaults(localStorage.token, prepareForBackend(adminDefaults));
@@ -111,7 +112,11 @@
 				-->
 				<div class="flex flex-col w-full">
 					<div class="interface-defaults-wrapper">
-						<InterfaceSettings initialSettings={adminDefaults} saveSettings={saveAdminSettings} />
+						<InterfaceSettings
+							bind:this={interfaceSettings}
+							initialSettings={adminDefaults}
+							saveSettings={saveAdminSettings}
+						/>
 					</div>
 
 					<div class="flex justify-end pt-3 text-sm font-medium">
