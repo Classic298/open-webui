@@ -701,7 +701,6 @@ class UploadAndReplaceResponse(BaseModel):
     filename: str
 
 
-@router.post('/{id}/file/upload_and_replace', response_model=UploadAndReplaceResponse)
 async def _rollback_new_file(
     kb_id: str,
     new_file_id: str,
@@ -727,6 +726,7 @@ async def _rollback_new_file(
         )
 
 
+@router.post('/{id}/file/upload_and_replace', response_model=UploadAndReplaceResponse)
 async def upload_and_replace_file(
     request: Request,
     id: str,
