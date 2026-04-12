@@ -799,6 +799,21 @@ async def upload_and_replace_file(
         )
     except Exception as e:
         log.error(f'Failed to add new file to knowledge base: {e}')
+        # process_file may have already written embeddings into the KB
+        # collection before add_file_to_knowledge_by_id failed. The router
+        # delete iterates KB associations to clean KB vectors, so without
+        # the association those chunks would stay discoverable by retrieval
+        # even after the file record is gone. Purge them by file_id here
+        # before handing off to the full delete.
+        try:
+            VECTOR_DB_CLIENT.delete(
+                collection_name=id, filter={'file_id': new_file_id}
+            )
+        except Exception as vector_err:
+            log.warning(
+                f'Failed to purge orphan KB embeddings for {new_file_id}: {vector_err}'
+            )
+
         # Clean up via the router-level delete so storage object and vector
         # collection are removed too — Files.delete_file_by_id only drops the
         # DB row and would orphan S3/GCS objects and the per-file vector
@@ -1183,6 +1198,21 @@ async def compare_files_for_sync(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    # Reject payloads with duplicate file_path entries. A duplicate would plan
+    # the same existing file for replacement or removal twice, producing
+    # downstream 404s on the second pass and muddying the success/failure
+    # counts on the client. Public API robustness shouldn't depend on the
+    # frontend deduping.
+    incoming_paths = [incoming.file_path for incoming in form_data.files]
+    if len(incoming_paths) != len(set(incoming_paths)):
+        duplicates = sorted(
+            {path for path in incoming_paths if incoming_paths.count(path) > 1}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f'Duplicate file_path entries in sync payload: {", ".join(duplicates)}',
         )
 
     # Get all files currently in the knowledge base

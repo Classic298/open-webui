@@ -562,9 +562,16 @@
 	        const totalToProcess = new_files.length + changed_files.length;
 	        let processedCount = 0;
 	
-	        // STEP 1: Delete removed files FIRST
-	        // If a file was incorrectly classified as both "new" and "removed" (due to filename
-	        // matching issues), deleting first allows the subsequent upload to succeed.
+	        // STEP 1: Delete removed files FIRST.
+	        // If a file was incorrectly classified as both "new" and "removed"
+	        // (due to filename matching issues), deleting first allows the
+	        // subsequent upload to succeed.
+	        // Use deleteFileById (DELETE /files/{id}) so the object-storage
+	        // blob, the per-file vector collection, and KB associations are
+	        // all removed — removeFileFromKnowledgeById leaves storage blobs
+	        // behind and would accumulate orphans over repeated syncs.
+	        let removedSucceeded = 0;
+	        let removedFailed = 0;
 	        if (removed_file_ids.length > 0) {
 	            toast.info(
 	                $i18n.t('Removing {{count}} deleted files...', {
@@ -572,7 +579,27 @@
 	                })
 	            );
 	            for (const fileId of removed_file_ids) {
-	                await removeFileFromKnowledgeById(localStorage.token, id, fileId);
+	                try {
+	                    const res = await deleteFileById(localStorage.token, fileId);
+	                    if (res) {
+	                        removedSucceeded++;
+	                    } else {
+	                        // API wrapper returned null without throwing — treat
+	                        // as a silent failure so the user isn't told we
+	                        // removed something we didn't.
+	                        removedFailed++;
+	                    }
+	                } catch (removeErr) {
+	                    removedFailed++;
+	                    console.error('Delete failed for', fileId, removeErr);
+	                    const detail =
+	                        typeof removeErr === 'string'
+	                            ? removeErr
+	                            : (removeErr?.detail ?? removeErr?.message ?? 'unknown error');
+	                    toast.error(
+	                        $i18n.t('Failed to remove file: {{detail}}', { detail })
+	                    );
+	                }
 	            }
 	        }
 
@@ -644,7 +671,7 @@
 	        // Show summary. Use succeeded counts — not the planned counts —
 	        // so the user sees real outcomes. Include a failure tally only
 	        // when something went wrong.
-	        const totalFailed = newFailed + changedFailed;
+	        const totalFailed = newFailed + changedFailed + removedFailed;
 	        if (totalFailed > 0) {
 	            toast.warning(
 	                $i18n.t(
@@ -652,7 +679,7 @@
 	                    {
 	                        newCount: newSucceeded,
 	                        changedCount: changedSucceeded,
-	                        removedCount: removed_file_ids.length,
+	                        removedCount: removedSucceeded,
 	                        unchangedCount: unchanged.length,
 	                        failedCount: totalFailed
 	                    }
@@ -665,7 +692,7 @@
 	                    {
 	                        newCount: newSucceeded,
 	                        changedCount: changedSucceeded,
-	                        removedCount: removed_file_ids.length,
+	                        removedCount: removedSucceeded,
 	                        unchangedCount: unchanged.length
 	                    }
 	                )
