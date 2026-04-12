@@ -115,7 +115,7 @@ async def process_uploaded_file(
                     file_path_processed = Storage.get_file(file_path)
                     result = transcribe(request, file_path_processed, file_metadata, user)
 
-                    process_file(
+                    await process_file(
                         request,
                         ProcessFileForm(file_id=file_item.id, content=result.get('text', '')),
                         user=user,
@@ -124,7 +124,7 @@ async def process_uploaded_file(
                 elif (not content_type.startswith(('image/', 'video/'))) or (
                     request.app.state.config.CONTENT_EXTRACTION_ENGINE == 'external'
                 ):
-                    process_file(
+                    await process_file(
                         request,
                         ProcessFileForm(file_id=file_item.id),
                         user=user,
@@ -134,7 +134,7 @@ async def process_uploaded_file(
                     raise Exception(f'File type {content_type} is not supported for processing')
             else:
                 log.info(f'File type {file.content_type} is not provided, but trying to process anyway')
-                process_file(
+                await process_file(
                     request,
                     ProcessFileForm(file_id=file_item.id),
                     user=user,
@@ -153,10 +153,10 @@ async def process_uploaded_file(
             )
 
     if db:
-        _process_handler(db)
+        await _process_handler(db)
     else:
         with SessionLocal() as db_session:
-            _process_handler(db_session)
+            await _process_handler(db_session)
 
 
 @router.post('/', response_model=FileModelResponse)

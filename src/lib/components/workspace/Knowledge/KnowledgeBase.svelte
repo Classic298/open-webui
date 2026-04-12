@@ -469,45 +469,78 @@
 	            input.directory = true;
 	            input.multiple = true;
 	            input.style.display = 'none';
-	
+
 	            document.body.appendChild(input);
-	
+
+	            // Cancelling the native file picker does not always fire
+	            // 'change' or 'error' — especially in Firefox, where the
+	            // picker can dismiss without any event, leaving the caller
+	            // stuck on "Scanning directory..." forever. Use 'cancel'
+	            // (modern browsers) plus a window-focus + delayed sentinel
+	            // fallback so the Promise ALWAYS settles: either we got
+	            // files, or we resolve with an empty list and the caller's
+	            // existing empty-check toasts.
+	            let settled = false;
+	            const finish = (err?: unknown) => {
+	                if (settled) return;
+	                settled = true;
+	                if (input.parentNode) {
+	                    input.parentNode.removeChild(input);
+	                }
+	                window.removeEventListener('focus', onFocus);
+	                if (err) {
+	                    reject(err);
+	                } else {
+	                    resolve();
+	                }
+	            };
+	            const onFocus = () => {
+	                // 'change' fires after 'focus' returns to the window, so
+	                // wait briefly before deciding the user cancelled.
+	                setTimeout(() => finish(), 500);
+	            };
+
 	            input.onchange = async () => {
 	                try {
 	                    const inputFiles = Array.from(input.files || []).filter(
 	                        (file) => !hasHiddenFolder(file.webkitRelativePath) && !file.name.startsWith('.')
 	                    );
-	
+
 	                    for (const file of inputFiles) {
 	                        const relativePath = file.webkitRelativePath || file.name;
 	                        const fileWithPath = new File([file], relativePath, { type: file.type });
-	
+
 	                        const collectedFile: CollectedFile = {
 	                            file: fileWithPath,
 	                            path: relativePath,
 	                            size: file.size
 	                        };
-	
+
 	                        if (withHashes) {
 	                            collectedFile.hash = await calculateFileHash(file);
 	                        }
-	
+
 	                        files.push(collectedFile);
 	                    }
-	
-	                    document.body.removeChild(input);
-	                    resolve();
+
+	                    finish();
 	                } catch (error) {
-	                    document.body.removeChild(input);
-	                    reject(error);
+	                    finish(error);
 	                }
 	            };
-	
+
 	            input.onerror = (error) => {
-	                document.body.removeChild(input);
-	                reject(error);
+	                finish(error);
 	            };
-	
+
+	            // Newer browsers fire 'cancel' when the picker is dismissed
+	            // without a selection; cast because older lib.dom typings may
+	            // not yet declare it.
+	            (input as any).oncancel = () => {
+	                finish();
+	            };
+
+	            window.addEventListener('focus', onFocus, { once: true });
 	            input.click();
 	        });
 	    }
