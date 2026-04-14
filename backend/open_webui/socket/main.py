@@ -196,19 +196,37 @@ def _stream_key(message_id: str) -> str:
     return f'{REDIS_KEY_PREFIX}:stream:{message_id}'
 
 
+# Refresh the resume-log TTL only every N writes instead of every write.
+# XADD resets the key's idle time but not its absolute TTL, so we must
+# EXPIRE occasionally. Doing it once per N appends amortizes that extra
+# round-trip away from the per-token hot path. With N=64 and the default
+# 1-hour TTL, even a pathologically long 128k-token response only
+# triggers ~2000 EXPIRE calls total and never risks TTL expiry mid-stream.
+RESUME_STREAM_TTL_REFRESH_EVERY = 64
+
+
 async def _stream_log_append(message_id: str, envelope: dict, seq: int) -> None:
-    """Append an outbound WS envelope to the resume log."""
+    """Append an outbound WS envelope to the resume log.
+
+    Uses a Redis pipeline to collapse XADD + (occasional) EXPIRE into a
+    single network round-trip per call, keeping the added latency on the
+    streaming hot path bounded to one Redis RTT.
+    """
     if REDIS is None or not message_id:
         return
     try:
-        await REDIS.xadd(
-            _stream_key(message_id),
+        refresh_ttl = (seq == 1) or (seq % RESUME_STREAM_TTL_REFRESH_EVERY == 0)
+        key = _stream_key(message_id)
+        pipe = REDIS.pipeline(transaction=False)
+        pipe.xadd(
+            key,
             {'seq': str(seq), 'payload': json.dumps(envelope)},
             maxlen=RESUME_STREAM_MAXLEN,
             approximate=True,
         )
-        # Refresh TTL on every append so active streams don't expire mid-run.
-        await REDIS.expire(_stream_key(message_id), RESUME_STREAM_TTL_SEC)
+        if refresh_ttl:
+            pipe.expire(key, RESUME_STREAM_TTL_SEC)
+        await pipe.execute()
     except Exception as e:
         log.debug(f'stream resume log append failed for {message_id}: {e}')
 
@@ -620,20 +638,29 @@ async def resume_stream(sid, data):
     Client payload: `{chat_id, message_id, last_seq}`.
 
     Flow:
-      1. Authenticate the session and verify the user owns the chat.
+      1. Authenticate the session and verify the user owns the chat AND
+         that the requested message_id actually belongs to that chat.
+         Both checks are required because the Redis stream log is keyed
+         by message_id alone — without the message-to-chat binding check,
+         an attacker who obtained a victim's message_id could satisfy the
+         chat-ownership check with any chat they own and then read the
+         victim's stream.
       2. Read entries from the Redis resume log for this message_id whose
          `seq` is greater than `last_seq`.
       3. Emit each entry as a normal `events` event to THIS session only
          (via `to=sid`). Other sessions for the same user keep receiving
          the live stream unchanged.
-      4. Send a final `resume-stream:ack` so the client can resolve its
-         pending resume state.
 
     No-op when Redis is not configured — in that deployment mode, refresh
     during streaming falls back to the existing behavior (wait for the
     stream to complete and reload from the DB).
     """
     if REDIS is None:
+        return
+
+    # Reject malformed payloads early so `data.get(...)` never throws on a
+    # non-object client input (string/list/null/etc).
+    if not isinstance(data, dict):
         return
 
     user = SESSION_POOL.get(sid)
@@ -651,11 +678,18 @@ async def resume_stream(sid, data):
     if not user_id or not chat_id or not message_id:
         return
 
-    # Auth: the stream log is keyed by message_id only, so a chat-ownership
-    # check is essential to prevent a client from reading another user's
-    # stream by guessing a message_id.
+    # Step 1a: user owns the chat.
     chat = await Chats.get_chat_by_id_and_user_id(chat_id, user_id)
     if not chat:
+        return
+
+    # Step 1b: message_id actually lives in this chat. Without this, a
+    # caller who knows a victim's message_id could pass one of their OWN
+    # chat_ids (satisfying 1a) and read the victim's stream.
+    # `get_message_by_id_and_message_id` returns {} when the chat exists
+    # but the message_id isn't present, so check for a real id field.
+    message = await Chats.get_message_by_id_and_message_id(chat_id, message_id)
+    if not message or not message.get('id'):
         return
 
     envelopes = await _stream_log_read(message_id, last_seq)
@@ -664,18 +698,6 @@ async def resume_stream(sid, data):
         # `user:{user_id}` are already receiving new frames via the normal
         # emit path and must not see these duplicates.
         await sio.emit('events', envelope, to=sid)
-
-    last_replayed_seq = envelopes[-1].get('seq') if envelopes else last_seq
-    await sio.emit(
-        'resume-stream:ack',
-        {
-            'chat_id': chat_id,
-            'message_id': message_id,
-            'replayed': len(envelopes),
-            'last_seq': last_replayed_seq,
-        },
-        to=sid,
-    )
 
 
 def normalize_document_id(document_id: str) -> str:
