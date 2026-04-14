@@ -169,11 +169,8 @@
 
 	let taskIds = null;
 
-	// Per-message transport seq for the stream-resume protocol. Kept as a
-	// local Map (not a field on the message object) so this ephemeral
-	// bookkeeping never leaks into `history`, which is serialized and
-	// persisted via saveChatHandler. Values are refreshed in the WS event
-	// handler and consulted when requesting resume after a reconnect.
+	// Last-seen WS seq per message. Off-message so it never hits the
+	// persisted `history`.
 	const resumeSeqByMessageId = new Map();
 
 	// Chat Input
@@ -454,15 +451,7 @@
 			let message = history.messages[event.message_id];
 
 			if (message) {
-				// Stream resume log: the backend stamps each outbound WS
-				// envelope with a monotonic `seq` per message_id. Track the
-				// highest seq we've seen so that if this session reconnects
-				// mid-stream we can request a replay of only what we missed.
-				// Also drop out-of-order replays (seq <= lastSeq) to keep
-				// delta appends idempotent when live frames race replayed
-				// frames after a reconnect. Bookkeeping lives in the local
-				// `resumeSeqByMessageId` Map (not on the message object)
-				// to keep this transport metadata out of persisted state.
+				// Track highest seq and drop replays we've already applied.
 				const incomingSeq = typeof event?.seq === 'number' ? event.seq : null;
 				if (incomingSeq !== null) {
 					const lastSeq = resumeSeqByMessageId.get(event.message_id) ?? 0;
@@ -489,10 +478,12 @@
 						// Set all response messages to done
 						for (const messageId of history.messages[message.parentId].childrenIds) {
 							history.messages[messageId].done = true;
+							resumeSeqByMessageId.delete(messageId);
 						}
 						await processNextInQueue($chatId);
 					} else {
 						message.done = true;
+						resumeSeqByMessageId.delete(message.id);
 					}
 				} else if (type === 'chat:message:delta' || type === 'message') {
 					message.content += data.content;
@@ -633,28 +624,18 @@
 		}
 	};
 
-	// Ask the server to replay any WS events we missed for the given message.
-	// Used when loading a chat with a message still in progress (page refresh
-	// mid-stream) and when the socket reconnects after a drop. The server
-	// re-emits any events we haven't seen (seq > the client's tracked seq)
-	// as normal `events` frames; no separate ack. Safe to call redundantly
-	// — the seq idempotency guard in chatEventHandler drops anything
-	// already applied.
+	// Ask the server to replay any frames we missed for a message.
+	// Idempotent — the seq guard in chatEventHandler drops duplicates.
 	const requestResumeForMessage = (message) => {
 		if (!message || !message.id || message.done) return;
 		if (!$socket || !$socket.connected) return;
 		$socket.emit('resume-stream', {
-			chat_id: $chatId,
 			message_id: message.id,
 			last_seq: resumeSeqByMessageId.get(message.id) ?? 0
 		});
 	};
 
-	// Resume every assistant message that isn't done yet, not just the
-	// "current" one. Multi-model (arena) chats have multiple sibling
-	// assistant responses streaming at once; without iterating them all,
-	// non-current siblings would silently lose any deltas that landed
-	// during the disconnect window.
+	// Iterate all in-flight assistants so arena siblings aren't missed.
 	const requestResumeForAllInProgress = () => {
 		if (!history?.messages) return;
 		for (const message of Object.values(history.messages)) {
@@ -756,9 +737,7 @@
 		window.addEventListener('message', onMessageHandler);
 		$socket?.on('events', chatEventHandler);
 
-		// On socket reconnect, ask the server to replay anything we missed
-		// for every assistant message that's still streaming (including
-		// multi-model siblings, not just the currently visible one).
+		// Resume any in-flight streams on reconnect.
 		$socket?.on('connect', requestResumeForAllInProgress);
 
 		$audioQueue?.destroy();
@@ -1140,9 +1119,6 @@
 
 	const initNewChat = async () => {
 		console.log('initNewChat');
-		// Reset transport bookkeeping — the new chat has no in-flight
-		// resume state, and anything carried over would be for messages
-		// that no longer exist in this view.
 		resumeSeqByMessageId.clear();
 
 		if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
@@ -1382,8 +1358,6 @@
 	const loadChat = async () => {
 		chatId.set(chatIdProp);
 
-		// Clear any seq bookkeeping carried over from a previous chat
-		// before populating history with this chat's messages.
 		resumeSeqByMessageId.clear();
 
 		if ($temporaryChatEnabled) {
@@ -1464,11 +1438,7 @@
 					currentMessage.done = true;
 				}
 
-				// Stream resume: if backend tasks are still active on this
-				// chat, ask the server to replay any frames we missed for
-				// every assistant message still in progress. Covers both
-				// the single-response case and multi-model (arena) chats
-				// where several sibling assistants stream concurrently.
+				// Resume any in-flight streams on refresh mid-stream.
 				if (taskIds && taskIds.length > 0) {
 					requestResumeForAllInProgress();
 				}
@@ -1836,8 +1806,6 @@
 		if (done) {
 			message.done = true;
 
-			// Resume log entry is no longer needed; drop it so the map
-			// doesn't accumulate dead keys over long-lived sessions.
 			resumeSeqByMessageId.delete(message.id);
 
 			if ($settings.responseAutoCopy) {
@@ -2471,6 +2439,7 @@
 			};
 
 			responseMessage.done = true;
+			resumeSeqByMessageId.delete(responseMessageId);
 
 			history.messages[responseMessageId] = responseMessage;
 			history.currentId = responseMessageId;
@@ -2538,6 +2507,7 @@
 			content: $i18n.t(`Uh-oh! There was an issue with the response.`) + '\n' + errorMessage
 		};
 		responseMessage.done = true;
+		resumeSeqByMessageId.delete(responseMessage.id);
 
 		if (responseMessage.statusHistory) {
 			responseMessage.statusHistory = responseMessage.statusHistory.filter(
@@ -2571,6 +2541,7 @@
 			if (responseMessage.parentId && history.messages[responseMessage.parentId]) {
 				for (const messageId of history.messages[responseMessage.parentId].childrenIds) {
 					history.messages[messageId].done = true;
+					resumeSeqByMessageId.delete(messageId);
 				}
 			}
 

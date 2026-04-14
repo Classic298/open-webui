@@ -171,60 +171,35 @@ YDOC_MANAGER = YdocManager(
 )
 
 
-# ---------------------------------------------------------------------------
-# Stream resume log.
-#
-# Every outbound WS event for a streaming chat response is appended to a
-# bounded Redis stream keyed by message_id. A client that reconnects (e.g.
-# after a page refresh) while the backend is still streaming can request a
-# replay of events it missed and catch up without re-fetching the full
-# chat from the DB. Requires Redis; no-ops gracefully otherwise.
-# ---------------------------------------------------------------------------
-
-# Bounded to protect Redis memory. 2000 entries comfortably covers most
-# responses at one event per token; longer responses just lose the earliest
-# entries, which is fine because the `done:True` checkpoint emitted at the
-# end of the stream carries the canonical full content and reconciles the
-# client.
+# Bounded Redis stream log keyed by message_id. Clients that reconnect
+# mid-stream can replay missed events from here. No-op without Redis.
 RESUME_STREAM_MAXLEN = 2000
-# Defensive TTL so orphaned logs (crashed worker, cancelled request) are
-# evicted automatically. Completed streams shorten their TTL on done so
-# the key disappears faster once no live clients need it.
 RESUME_STREAM_TTL_SEC = 3600
 RESUME_STREAM_DONE_TTL_SEC = 30
-
-
-def _stream_key(message_id: str) -> str:
-    return f'{REDIS_KEY_PREFIX}:stream:{message_id}'
-
-
-# Refresh the resume-log TTL only every N writes instead of every write.
-# XADD resets the key's idle time but not its absolute TTL, so we must
-# EXPIRE occasionally. Doing it once per N appends amortizes that extra
-# round-trip away from the per-token hot path. With N=64 and the default
-# 1-hour TTL, even a pathologically long 128k-token response only
-# triggers ~2000 EXPIRE calls total and never risks TTL expiry mid-stream.
+# Refresh TTL every N appends to keep the hot path at one Redis RTT.
 RESUME_STREAM_TTL_REFRESH_EVERY = 64
 
 
-async def _stream_log_append(message_id: str, envelope: dict, seq: int) -> None:
-    """Append an outbound WS envelope to the resume log.
+def _stream_key(user_id: str, message_id: str) -> str:
+    # user_id in the key scopes logs per user: only the owning user's
+    # session can construct the key, so resume doesn't need a DB
+    # chat/message auth check (which would fail when a pre-stream stub
+    # hasn't been persisted yet — the ENABLE_REALTIME_CHAT_SAVE=False
+    # refresh case this feature is for).
+    return f'{REDIS_KEY_PREFIX}:stream:{user_id}:{message_id}'
 
-    Uses a Redis pipeline to collapse XADD + (occasional) EXPIRE into a
-    single network round-trip per call, keeping the added latency on the
-    streaming hot path bounded to one Redis RTT.
 
-    Uses an explicit stream ID of `0-{seq}` so that the resume read path
-    can start XRANGE at the caller's cursor (`0-{last_seq+1}`) instead of
-    scanning the whole stream. The `0-` prefix is arbitrary — we only
-    need the IDs to be strictly monotonic per stream, which our
-    per-emitter seq counter guarantees.
+async def _stream_log_append(user_id: str, message_id: str, envelope: dict, seq: int) -> None:
+    """Append an envelope to the resume log.
+
+    Uses explicit stream ID `0-{seq}` so XRANGE can start at the client's
+    cursor on resume. Pipelined with the periodic EXPIRE.
     """
-    if REDIS is None or not message_id:
+    if REDIS is None or not user_id or not message_id:
         return
     try:
         refresh_ttl = (seq == 1) or (seq % RESUME_STREAM_TTL_REFRESH_EVERY == 0)
-        key = _stream_key(message_id)
+        key = _stream_key(user_id, message_id)
         pipe = REDIS.pipeline(transaction=False)
         pipe.xadd(
             key,
@@ -240,31 +215,23 @@ async def _stream_log_append(message_id: str, envelope: dict, seq: int) -> None:
         log.debug(f'stream resume log append failed for {message_id}: {e}')
 
 
-async def _stream_log_truncate(message_id: str) -> None:
-    """Delete the resume log for a message (called when streaming is done)."""
-    if REDIS is None or not message_id:
+async def _stream_log_truncate(user_id: str, message_id: str) -> None:
+    if REDIS is None or not user_id or not message_id:
         return
     try:
-        await REDIS.delete(_stream_key(message_id))
+        await REDIS.delete(_stream_key(user_id, message_id))
     except Exception as e:
         log.debug(f'stream resume log truncate failed for {message_id}: {e}')
 
 
-async def _stream_log_read(message_id: str, after_seq: int):
-    """Return envelopes logged for message_id with seq > after_seq, in order.
-
-    Stream IDs are `0-{seq}`, so we can start the XRANGE at
-    `0-{after_seq+1}` and let Redis skip everything already delivered
-    instead of scanning from the start every call. Near-tail resumes
-    (the common case for reconnects) become O(missed frames) instead of
-    O(MAXLEN).
-    """
-    if REDIS is None or not message_id:
+async def _stream_log_read(user_id: str, message_id: str, after_seq: int):
+    """Return envelopes with seq > after_seq, in order."""
+    if REDIS is None or not user_id or not message_id:
         return []
     try:
         start_seq = max(0, after_seq) + 1
         entries = await REDIS.xrange(
-            _stream_key(message_id),
+            _stream_key(user_id, message_id),
             min=f'0-{start_seq}',
             max='+',
         )
@@ -273,8 +240,7 @@ async def _stream_log_read(message_id: str, after_seq: int):
         return []
 
     def _field(fields, key):
-        # redis-py returns bytes by default but may return str depending on
-        # decode_responses config. Normalize both.
+        # redis-py may return bytes or str depending on decode_responses.
         v = fields.get(key)
         if v is None:
             v = fields.get(key.encode() if isinstance(key, str) else key)
@@ -648,33 +614,13 @@ async def chat_events(sid, data):
 
 @sio.on('resume-stream')
 async def resume_stream(sid, data):
-    """Replay WS events a client missed while disconnected.
+    """Replay log entries with seq > last_seq to the caller.
 
-    Client payload: `{chat_id, message_id, last_seq}`.
-
-    Flow:
-      1. Authenticate the session and verify the user owns the chat AND
-         that the requested message_id actually belongs to that chat.
-         Both checks are required because the Redis stream log is keyed
-         by message_id alone — without the message-to-chat binding check,
-         an attacker who obtained a victim's message_id could satisfy the
-         chat-ownership check with any chat they own and then read the
-         victim's stream.
-      2. Read entries from the Redis resume log for this message_id whose
-         `seq` is greater than `last_seq`.
-      3. Emit each entry as a normal `events` event to THIS session only
-         (via `to=sid`). Other sessions for the same user keep receiving
-         the live stream unchanged.
-
-    No-op when Redis is not configured — in that deployment mode, refresh
-    during streaming falls back to the existing behavior (wait for the
-    stream to complete and reload from the DB).
+    Auth is implicit: the stream key is scoped by user_id, so an
+    authenticated session can only ever read its own logs. No DB lookup.
     """
     if REDIS is None:
         return
-
-    # Reject malformed payloads early so `data.get(...)` never throws on a
-    # non-object client input (string/list/null/etc).
     if not isinstance(data, dict):
         return
 
@@ -683,35 +629,19 @@ async def resume_stream(sid, data):
         return
 
     user_id = user.get('id')
-    chat_id = data.get('chat_id')
     message_id = data.get('message_id')
     try:
         last_seq = int(data.get('last_seq') or 0)
     except (TypeError, ValueError):
         last_seq = 0
 
-    if not user_id or not chat_id or not message_id:
+    if not user_id or not message_id:
         return
 
-    # Step 1a: user owns the chat.
-    chat = await Chats.get_chat_by_id_and_user_id(chat_id, user_id)
-    if not chat:
-        return
-
-    # Step 1b: message_id actually lives in this chat. Without this, a
-    # caller who knows a victim's message_id could pass one of their OWN
-    # chat_ids (satisfying 1a) and read the victim's stream.
-    # `get_message_by_id_and_message_id` returns {} when the chat exists
-    # but the message_id isn't present, so check for a real id field.
-    message = await Chats.get_message_by_id_and_message_id(chat_id, message_id)
-    if not message or not message.get('id'):
-        return
-
-    envelopes = await _stream_log_read(message_id, last_seq)
+    envelopes = await _stream_log_read(user_id, message_id, last_seq)
     for envelope in envelopes:
-        # Replay to the requesting session only. Live listeners in
-        # `user:{user_id}` are already receiving new frames via the normal
-        # emit path and must not see these duplicates.
+        # Replay to this session only; live listeners in the user room
+        # are already served via the normal emit path.
         await sio.emit('events', envelope, to=sid)
 
 
@@ -1005,23 +935,14 @@ async def disconnect(sid):
 
 
 async def get_event_emitter(request_info, update_db=True):
-    # Per-emitter monotonic seq. One emitter instance corresponds to a single
-    # streaming response for a single (chat_id, message_id) on a single
-    # worker, so a local counter is sufficient — no distributed consensus
-    # needed. Clients use this to request a replay of events they missed
-    # after a reconnect / refresh via the `resume-stream` handler below.
+    # Per-emitter monotonic seq for the resume log (explicit ID 0-{seq}).
     seq_counter = {'n': 0}
-    # Reset any stale resume log for this message_id. Continuation,
-    # regeneration-into-same-id, or a retry after a crashed worker can
-    # create a second emitter for the same message_id. The old emitter's
-    # explicit stream IDs (`0-{seq}`) would collide with our fresh ones
-    # and XADD would silently fail, quietly breaking resumability for
-    # exactly the flows this feature is meant to protect. Deleting the
-    # old log up front guarantees our XADD `0-1` is accepted and the log
-    # reflects only the current run, not a mix of runs.
-    message_id = request_info.get('message_id') if isinstance(request_info, dict) else None
-    if message_id and REDIS is not None:
-        await _stream_log_truncate(message_id)
+    # Wipe any prior log so fresh XADDs (starting at 0-1) don't collide
+    # with a retry/continuation's leftover IDs.
+    ri_user_id = request_info.get('user_id') if isinstance(request_info, dict) else None
+    ri_message_id = request_info.get('message_id') if isinstance(request_info, dict) else None
+    if ri_user_id and ri_message_id and REDIS is not None:
+        await _stream_log_truncate(ri_user_id, ri_message_id)
 
     async def __event_emitter__(event_data):
         user_id = request_info['user_id']
@@ -1038,43 +959,22 @@ async def get_event_emitter(request_info, update_db=True):
             'data': event_data,
         }
 
-        # Append to the resume log BEFORE the live emit. If we emitted
-        # first, a client that disconnects in the window between `sio.emit`
-        # and `_stream_log_append` could reconnect and issue resume-stream
-        # before the frame is logged, never see that frame in the replay,
-        # and then never ask again — permanently losing it (particularly
-        # painful for the terminal done:True frame).
-        #
-        # Logging first inverts the window: a reconnecting client MIGHT
-        # see a replayed frame before the live emit reaches their new
-        # session, but the seq idempotency guard in chatEventHandler drops
-        # the subsequent duplicate harmlessly. Duplicates are safe, losses
-        # are not.
-        await _stream_log_append(message_id, envelope, seq)
+        # Log before emit: an inverted order could let a reconnecting
+        # client resume-read before the append lands and permanently miss
+        # the frame. Duplicates are dropped by the client seq guard.
+        await _stream_log_append(user_id, message_id, envelope, seq)
         await sio.emit('events', envelope, room=f'user:{user_id}')
 
-        # If this event finalized the message, shorten the log's TTL so
-        # it self-evicts shortly. A brief grace window lets clients that
-        # reconnect right after completion still catch the terminal
-        # frames via replay; anything beyond the window loads the
-        # already-persisted message from the DB.
-        #
-        # Using EXPIRE here (rather than scheduling an asyncio.create_task
-        # that calls DELETE later) is race-free: if a second emitter for
-        # the same message_id starts before the TTL fires, its eager
-        # truncate at emitter creation resets the key and subsequent
-        # EXPIRE calls in _stream_log_append extend the TTL normally. A
-        # pending background DELETE would instead wipe the new run's log
-        # mid-stream.
-        #
-        # Narrow carefully: `event_data['data']` is a dict for most event
-        # types but can legitimately be a list/str/None for some custom
-        # pipeline-emitted events. Calling `.get` on those would raise.
+        # On done, shorten TTL so the log self-evicts. EXPIRE is race-safe
+        # vs. a retry-emitter's truncate-then-XADD; a background DELETE
+        # would not be.
         inner = event_data.get('data') if isinstance(event_data, dict) else None
         if isinstance(inner, dict) and inner.get('done') is True:
-            if REDIS is not None and message_id:
+            if REDIS is not None and user_id and message_id:
                 try:
-                    await REDIS.expire(_stream_key(message_id), RESUME_STREAM_DONE_TTL_SEC)
+                    await REDIS.expire(
+                        _stream_key(user_id, message_id), RESUME_STREAM_DONE_TTL_SEC
+                    )
                 except Exception as e:
                     log.debug(f'stream resume log done-TTL shorten failed for {message_id}: {e}')
 
