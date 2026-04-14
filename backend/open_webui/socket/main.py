@@ -25,6 +25,7 @@ from open_webui.config import (
 
 from open_webui.env import (
     VERSION,
+    ENABLE_REALTIME_CHAT_SAVE,
     ENABLE_WEBSOCKET_SUPPORT,
     WEBSOCKET_MANAGER,
     WEBSOCKET_REDIS_URL,
@@ -206,7 +207,15 @@ async def _stream_seq_allocate(user_id: str, message_id: str):
     Returns the allocated seq, or None if Redis is unavailable or the
     call times out. Callers treat None as "emit without seq" — live
     streaming continues but that frame isn't eligible for resume dedupe.
+
+    Also returns None when ENABLE_REALTIME_CHAT_SAVE is on: in that
+    mode the DB is already the authoritative per-token store, so the
+    frontend loads the up-to-date content on refresh. Logging the
+    resume stream in parallel would cause duplicate content on refresh
+    (resume replays from seq=0 on top of DB-loaded content).
     """
+    if ENABLE_REALTIME_CHAT_SAVE:
+        return None
     if REDIS is None or not user_id or not message_id:
         return None
     try:
@@ -306,10 +315,19 @@ async def _stream_log_read(user_id: str, message_id: str, after_seq: int):
         if not payload:
             continue
         try:
-            out.append(json.loads(payload))
+            envelope = json.loads(payload)
         except Exception:
             continue
-    return out
+        out.append((entry_seq, envelope))
+    # Sort by seq before returning envelopes. Stream append order can
+    # diverge from seq order because INCR + XADD aren't atomic: a
+    # concurrent emitter can win the INCR race for a later seq yet lose
+    # the XADD race and land in the stream ahead of an earlier seq. If
+    # we handed envelopes to the client in append order, the client's
+    # `incomingSeq <= lastSeq` guard would permanently drop the later-
+    # arriving-but-earlier-numbered frame.
+    out.sort(key=lambda pair: pair[0])
+    return [envelope for _seq, envelope in out]
 
 
 async def periodic_session_pool_cleanup():

@@ -673,17 +673,19 @@
 		const queue = resumeQueueByMessageId.get(messageId);
 		if (!queue) return;
 		resumeQueueByMessageId.delete(messageId);
-		// Stable sort: only reorder events that both carry a numeric seq.
-		// Seq-less events (Redis-down graceful-degradation case) keep
-		// their insertion order instead of being forced to the front,
-		// which would misorder state transitions like replace/done.
-		queue.sort((a, b) => {
-			const ah = typeof a?.seq === 'number';
-			const bh = typeof b?.seq === 'number';
-			if (!ah || !bh) return 0;
-			return a.seq - b.seq;
-		});
+		// Partition into seq-bearing and seq-less events so the sort
+		// comparator is a strict ordering on its domain (avoids the
+		// engine-dependent behavior of returning 0 for mixed pairs).
+		// Apply seq-ordered events first, then seq-less (graceful
+		// degradation frames) in insertion order.
+		const withSeq = [];
+		const withoutSeq = [];
 		for (const event of queue) {
+			if (typeof event?.seq === 'number') withSeq.push(event);
+			else withoutSeq.push(event);
+		}
+		withSeq.sort((a, b) => a.seq - b.seq);
+		for (const event of [...withSeq, ...withoutSeq]) {
 			try {
 				await chatEventHandler(event);
 			} catch (e) {
