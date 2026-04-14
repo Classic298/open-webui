@@ -447,6 +447,22 @@
 			let message = history.messages[event.message_id];
 
 			if (message) {
+				// Stream resume log: the backend stamps each outbound WS
+				// envelope with a monotonic `seq` per message_id. Track the
+				// highest seq we've seen so that if this session reconnects
+				// mid-stream we can request a replay of only what we missed.
+				// Also drop out-of-order replays (seq <= lastSeq) to keep
+				// delta appends idempotent when live frames race replayed
+				// frames after a reconnect.
+				const incomingSeq = typeof event?.seq === 'number' ? event.seq : null;
+				if (incomingSeq !== null) {
+					const lastSeq = message.lastSeq ?? 0;
+					if (incomingSeq <= lastSeq) {
+						return;
+					}
+					message.lastSeq = incomingSeq;
+				}
+
 				const type = event?.data?.type ?? null;
 				const data = event?.data?.data ?? null;
 
@@ -608,6 +624,33 @@
 		}
 	};
 
+	// Ask the server to replay any WS events we missed for the given message.
+	// Used when loading a chat with a message still in progress (page refresh
+	// mid-stream) and when the socket reconnects after a drop. The server
+	// replies with events we haven't seen (seq > message.lastSeq) plus a
+	// `resume-stream:ack`. Safe to call redundantly — the seq idempotency
+	// guard in chatEventHandler drops anything already applied.
+	const requestResumeForMessage = (message) => {
+		if (!message || !message.id || message.done) return;
+		if (!$socket || !$socket.connected) return;
+		$socket.emit('resume-stream', {
+			chat_id: $chatId,
+			message_id: message.id,
+			last_seq: message.lastSeq ?? 0
+		});
+	};
+
+	const requestResumeForCurrentIfInProgress = () => {
+		const currentMessage = history?.currentId ? history.messages[history.currentId] : null;
+		if (
+			currentMessage &&
+			currentMessage.role === 'assistant' &&
+			!currentMessage.done
+		) {
+			requestResumeForMessage(currentMessage);
+		}
+	};
+
 	const onMessageHandler = async (event: {
 		origin: string;
 		data: { type: string; text: string };
@@ -699,6 +742,10 @@
 		console.log('mounted');
 		window.addEventListener('message', onMessageHandler);
 		$socket?.on('events', chatEventHandler);
+
+		// On socket reconnect, ask the server to replay anything we missed
+		// for the currently visible message if it's still streaming.
+		$socket?.on('connect', requestResumeForCurrentIfInProgress);
 
 		$audioQueue?.destroy();
 
@@ -816,6 +863,7 @@
 				selectedFolderSubscribe();
 				window.removeEventListener('message', onMessageHandler);
 				$socket?.off('events', chatEventHandler);
+				$socket?.off('connect', requestResumeForCurrentIfInProgress);
 				audioQueueInstance?.destroy();
 				audioQueue.set(null);
 			} catch (e) {
@@ -1391,6 +1439,20 @@
 					(!taskIds || taskIds.length === 0)
 				) {
 					currentMessage.done = true;
+				}
+
+				// Stream resume: if backend tasks are still active on this
+				// chat and the current assistant message is in progress, we
+				// may have missed WS frames while the page was reloading.
+				// Ask the server to replay anything we don't have yet.
+				if (
+					currentMessage &&
+					currentMessage.role === 'assistant' &&
+					!currentMessage.done &&
+					taskIds &&
+					taskIds.length > 0
+				) {
+					requestResumeForMessage(currentMessage);
 				}
 
 				await tick();

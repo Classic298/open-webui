@@ -1,4 +1,5 @@
 import asyncio
+import json
 import random
 
 import socketio
@@ -168,6 +169,96 @@ YDOC_MANAGER = YdocManager(
     redis=REDIS,
     redis_key_prefix=f'{REDIS_KEY_PREFIX}:ydoc:documents',
 )
+
+
+# ---------------------------------------------------------------------------
+# Stream resume log.
+#
+# Every outbound WS event for a streaming chat response is appended to a
+# bounded Redis stream keyed by message_id. A client that reconnects (e.g.
+# after a page refresh) while the backend is still streaming can request a
+# replay of events it missed and catch up without re-fetching the full
+# chat from the DB. Requires Redis; no-ops gracefully otherwise.
+# ---------------------------------------------------------------------------
+
+# Bounded to protect Redis memory. 2000 entries comfortably covers most
+# responses at one event per token; longer responses just lose the earliest
+# entries, which is fine because the `done:True` checkpoint emitted at the
+# end of the stream carries the canonical full content and reconciles the
+# client.
+RESUME_STREAM_MAXLEN = 2000
+# Defensive TTL so orphaned logs (crashed worker, cancelled request) are
+# evicted automatically. Completed streams are deleted eagerly below.
+RESUME_STREAM_TTL_SEC = 3600
+
+
+def _stream_key(message_id: str) -> str:
+    return f'{REDIS_KEY_PREFIX}:stream:{message_id}'
+
+
+async def _stream_log_append(message_id: str, envelope: dict, seq: int) -> None:
+    """Append an outbound WS envelope to the resume log."""
+    if REDIS is None or not message_id:
+        return
+    try:
+        await REDIS.xadd(
+            _stream_key(message_id),
+            {'seq': str(seq), 'payload': json.dumps(envelope)},
+            maxlen=RESUME_STREAM_MAXLEN,
+            approximate=True,
+        )
+        # Refresh TTL on every append so active streams don't expire mid-run.
+        await REDIS.expire(_stream_key(message_id), RESUME_STREAM_TTL_SEC)
+    except Exception as e:
+        log.debug(f'stream resume log append failed for {message_id}: {e}')
+
+
+async def _stream_log_truncate(message_id: str) -> None:
+    """Delete the resume log for a message (called when streaming is done)."""
+    if REDIS is None or not message_id:
+        return
+    try:
+        await REDIS.delete(_stream_key(message_id))
+    except Exception as e:
+        log.debug(f'stream resume log truncate failed for {message_id}: {e}')
+
+
+async def _stream_log_read(message_id: str, after_seq: int):
+    """Return envelopes logged for message_id with seq > after_seq, in order."""
+    if REDIS is None or not message_id:
+        return []
+    try:
+        entries = await REDIS.xrange(_stream_key(message_id), min='-', max='+')
+    except Exception as e:
+        log.debug(f'stream resume log read failed for {message_id}: {e}')
+        return []
+
+    def _field(fields, key):
+        # redis-py returns bytes by default but may return str depending on
+        # decode_responses config. Normalize both.
+        v = fields.get(key)
+        if v is None:
+            v = fields.get(key.encode() if isinstance(key, str) else key)
+        if isinstance(v, bytes):
+            v = v.decode('utf-8', 'replace')
+        return v
+
+    out = []
+    for _entry_id, fields in entries:
+        try:
+            seq = int(_field(fields, 'seq') or '0')
+        except (TypeError, ValueError):
+            continue
+        if seq <= after_seq:
+            continue
+        payload = _field(fields, 'payload')
+        if not payload:
+            continue
+        try:
+            out.append(json.loads(payload))
+        except Exception:
+            continue
+    return out
 
 
 async def periodic_session_pool_cleanup():
@@ -522,6 +613,71 @@ async def chat_events(sid, data):
         await Chats.update_chat_last_read_at_by_id(data['chat_id'], user['id'])
 
 
+@sio.on('resume-stream')
+async def resume_stream(sid, data):
+    """Replay WS events a client missed while disconnected.
+
+    Client payload: `{chat_id, message_id, last_seq}`.
+
+    Flow:
+      1. Authenticate the session and verify the user owns the chat.
+      2. Read entries from the Redis resume log for this message_id whose
+         `seq` is greater than `last_seq`.
+      3. Emit each entry as a normal `events` event to THIS session only
+         (via `to=sid`). Other sessions for the same user keep receiving
+         the live stream unchanged.
+      4. Send a final `resume-stream:ack` so the client can resolve its
+         pending resume state.
+
+    No-op when Redis is not configured — in that deployment mode, refresh
+    during streaming falls back to the existing behavior (wait for the
+    stream to complete and reload from the DB).
+    """
+    if REDIS is None:
+        return
+
+    user = SESSION_POOL.get(sid)
+    if not user:
+        return
+
+    user_id = user.get('id')
+    chat_id = data.get('chat_id')
+    message_id = data.get('message_id')
+    try:
+        last_seq = int(data.get('last_seq') or 0)
+    except (TypeError, ValueError):
+        last_seq = 0
+
+    if not user_id or not chat_id or not message_id:
+        return
+
+    # Auth: the stream log is keyed by message_id only, so a chat-ownership
+    # check is essential to prevent a client from reading another user's
+    # stream by guessing a message_id.
+    chat = await Chats.get_chat_by_id_and_user_id(chat_id, user_id)
+    if not chat:
+        return
+
+    envelopes = await _stream_log_read(message_id, last_seq)
+    for envelope in envelopes:
+        # Replay to the requesting session only. Live listeners in
+        # `user:{user_id}` are already receiving new frames via the normal
+        # emit path and must not see these duplicates.
+        await sio.emit('events', envelope, to=sid)
+
+    last_replayed_seq = envelopes[-1].get('seq') if envelopes else last_seq
+    await sio.emit(
+        'resume-stream:ack',
+        {
+            'chat_id': chat_id,
+            'message_id': message_id,
+            'replayed': len(envelopes),
+            'last_seq': last_replayed_seq,
+        },
+        to=sid,
+    )
+
+
 def normalize_document_id(document_id: str) -> str:
     """Canonicalize document IDs to prevent auth bypass via prefix variants.
 
@@ -812,20 +968,47 @@ async def disconnect(sid):
 
 
 async def get_event_emitter(request_info, update_db=True):
+    # Per-emitter monotonic seq. One emitter instance corresponds to a single
+    # streaming response for a single (chat_id, message_id) on a single
+    # worker, so a local counter is sufficient — no distributed consensus
+    # needed. Clients use this to request a replay of events they missed
+    # after a reconnect / refresh via the `resume-stream` handler below.
+    seq_counter = {'n': 0}
+
     async def __event_emitter__(event_data):
         user_id = request_info['user_id']
         chat_id = request_info['chat_id']
         message_id = request_info['message_id']
 
-        await sio.emit(
-            'events',
-            {
-                'chat_id': chat_id,
-                'message_id': message_id,
-                'data': event_data,
-            },
-            room=f'user:{user_id}',
-        )
+        seq_counter['n'] += 1
+        seq = seq_counter['n']
+
+        envelope = {
+            'chat_id': chat_id,
+            'message_id': message_id,
+            'seq': seq,
+            'data': event_data,
+        }
+
+        await sio.emit('events', envelope, room=f'user:{user_id}')
+
+        # Append to the resume log AFTER the live emit so reconnecting
+        # clients can only ever see what live clients already received.
+        await _stream_log_append(message_id, envelope, seq)
+
+        # If this event finalized the message, schedule log cleanup. Give
+        # reconnecting clients a short grace window to pick up the final
+        # frames before we delete the log (for anything beyond the grace
+        # window, the DB is already up to date and resume isn't needed).
+        if isinstance(event_data, dict) and event_data.get('data', {}).get('done') is True:
+            async def _delayed_truncate(mid):
+                try:
+                    await asyncio.sleep(30)
+                    await _stream_log_truncate(mid)
+                except Exception:
+                    pass
+
+            asyncio.create_task(_delayed_truncate(message_id))
 
         if update_db and message_id and not request_info.get('chat_id', '').startswith('local:'):
             event_type = event_data.get('type')
