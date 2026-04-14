@@ -1022,7 +1022,11 @@ async def get_event_emitter(request_info, update_db=True):
         # reconnecting clients a short grace window to pick up the final
         # frames before we delete the log (for anything beyond the grace
         # window, the DB is already up to date and resume isn't needed).
-        if isinstance(event_data, dict) and event_data.get('data', {}).get('done') is True:
+        # Narrow carefully: `event_data['data']` is a dict for most event
+        # types but can legitimately be a list/str/None for some custom
+        # pipeline-emitted events. Calling `.get` on those would raise.
+        inner = event_data.get('data') if isinstance(event_data, dict) else None
+        if isinstance(inner, dict) and inner.get('done') is True:
             async def _delayed_truncate(mid):
                 try:
                     await asyncio.sleep(30)

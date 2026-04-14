@@ -169,6 +169,13 @@
 
 	let taskIds = null;
 
+	// Per-message transport seq for the stream-resume protocol. Kept as a
+	// local Map (not a field on the message object) so this ephemeral
+	// bookkeeping never leaks into `history`, which is serialized and
+	// persisted via saveChatHandler. Values are refreshed in the WS event
+	// handler and consulted when requesting resume after a reconnect.
+	const resumeSeqByMessageId = new Map();
+
 	// Chat Input
 	let prompt = '';
 	let chatFiles = [];
@@ -453,14 +460,16 @@
 				// mid-stream we can request a replay of only what we missed.
 				// Also drop out-of-order replays (seq <= lastSeq) to keep
 				// delta appends idempotent when live frames race replayed
-				// frames after a reconnect.
+				// frames after a reconnect. Bookkeeping lives in the local
+				// `resumeSeqByMessageId` Map (not on the message object)
+				// to keep this transport metadata out of persisted state.
 				const incomingSeq = typeof event?.seq === 'number' ? event.seq : null;
 				if (incomingSeq !== null) {
-					const lastSeq = message.lastSeq ?? 0;
+					const lastSeq = resumeSeqByMessageId.get(event.message_id) ?? 0;
 					if (incomingSeq <= lastSeq) {
 						return;
 					}
-					message.lastSeq = incomingSeq;
+					resumeSeqByMessageId.set(event.message_id, incomingSeq);
 				}
 
 				const type = event?.data?.type ?? null;
@@ -627,16 +636,17 @@
 	// Ask the server to replay any WS events we missed for the given message.
 	// Used when loading a chat with a message still in progress (page refresh
 	// mid-stream) and when the socket reconnects after a drop. The server
-	// re-emits any events we haven't seen (seq > message.lastSeq) as normal
-	// `events` frames; no separate ack. Safe to call redundantly — the seq
-	// idempotency guard in chatEventHandler drops anything already applied.
+	// re-emits any events we haven't seen (seq > the client's tracked seq)
+	// as normal `events` frames; no separate ack. Safe to call redundantly
+	// — the seq idempotency guard in chatEventHandler drops anything
+	// already applied.
 	const requestResumeForMessage = (message) => {
 		if (!message || !message.id || message.done) return;
 		if (!$socket || !$socket.connected) return;
 		$socket.emit('resume-stream', {
 			chat_id: $chatId,
 			message_id: message.id,
-			last_seq: message.lastSeq ?? 0
+			last_seq: resumeSeqByMessageId.get(message.id) ?? 0
 		});
 	};
 
