@@ -614,13 +614,17 @@ async def chat_events(sid, data):
 
 @sio.on('resume-stream')
 async def resume_stream(sid, data):
-    """Replay log entries with seq > last_seq to the caller.
+    """Replay missed log entries in a single batch.
+
+    One emit carries all envelopes with seq > last_seq (possibly zero)
+    and also serves as the completion signal — the client clears its
+    live-frame fence in the batch handler. Always emitting exactly once
+    (even when Redis is unavailable or the log is empty) keeps the
+    client from deadlocking on a fence that never clears.
 
     Auth is implicit: the stream key is scoped by user_id, so an
     authenticated session can only ever read its own logs. No DB lookup.
     """
-    if REDIS is None:
-        return
     if not isinstance(data, dict):
         return
 
@@ -638,19 +642,14 @@ async def resume_stream(sid, data):
     if not user_id or not message_id:
         return
 
-    envelopes = await _stream_log_read(user_id, message_id, last_seq)
-    for envelope in envelopes:
-        # Tag as replayed. The client uses this to distinguish replay
-        # from live frames so it can buffer live frames during replay
-        # and avoid advancing its seq high-water on them (which would
-        # otherwise cause later replay frames to be dropped by the dedupe
-        # guard). Replay is session-scoped; live listeners in the user
-        # room are already served via the normal emit path.
-        await sio.emit('events', {**envelope, '_replayed': True}, to=sid)
-    # Signal replay complete so the client flushes its buffered live
-    # frames in seq order.
+    envelopes = []
+    if REDIS is not None:
+        envelopes = await _stream_log_read(user_id, message_id, last_seq)
+
     await sio.emit(
-        'resume-stream:complete', {'message_id': message_id}, to=sid
+        'resume-stream:replay',
+        {'message_id': message_id, 'envelopes': envelopes},
+        to=sid,
     )
 
 

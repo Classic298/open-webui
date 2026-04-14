@@ -643,32 +643,78 @@
 
 	// Ask the server to replay any frames we missed for a message.
 	// Idempotent — the seq guard in chatEventHandler drops duplicates.
+	// Safety net: if a resume-stream:replay ack never arrives (server
+	// crash mid-handler, network loss between emit and ack, handler not
+	// registered yet, etc.), clear the fence and flush anyway after this
+	// timeout so live UI updates don't freeze indefinitely.
+	const RESUME_FENCE_TIMEOUT_MS = 10000;
+	const resumeFenceTimerByMessageId = new Map();
+
+	const clearResumeFence = async (messageId) => {
+		const timer = resumeFenceTimerByMessageId.get(messageId);
+		if (timer) {
+			clearTimeout(timer);
+			resumeFenceTimerByMessageId.delete(messageId);
+		}
+		const queue = resumeQueueByMessageId.get(messageId);
+		if (!queue) return;
+		resumeQueueByMessageId.delete(messageId);
+		queue.sort((a, b) => (a?.seq ?? 0) - (b?.seq ?? 0));
+		for (const event of queue) {
+			try {
+				await chatEventHandler(event);
+			} catch (e) {
+				console.error('resume fence flush error', e);
+			}
+		}
+	};
+
 	const requestResumeForMessage = (message) => {
 		if (!message || !message.id || message.done) return;
 		if (!$socket || !$socket.connected) return;
-		// Raise the fence BEFORE emitting so any live frame that arrives
-		// while the server is still reading XRANGE gets buffered instead
-		// of racing the replay frames.
+		// Raise the fence BEFORE emitting so any live frame arriving
+		// while the server reads XRANGE is buffered, not raced past the
+		// replay frames.
 		if (!resumeQueueByMessageId.has(message.id)) {
 			resumeQueueByMessageId.set(message.id, []);
 		}
+		const existingTimer = resumeFenceTimerByMessageId.get(message.id);
+		if (existingTimer) clearTimeout(existingTimer);
+		resumeFenceTimerByMessageId.set(
+			message.id,
+			setTimeout(() => {
+				console.warn('resume-stream fence timed out for', message.id);
+				clearResumeFence(message.id);
+			}, RESUME_FENCE_TIMEOUT_MS)
+		);
 		$socket.emit('resume-stream', {
 			message_id: message.id,
 			last_seq: resumeSeqByMessageId.get(message.id) ?? 0
 		});
 	};
 
-	const onResumeStreamComplete = async (payload) => {
+	const onResumeStreamReplay = async (payload) => {
 		const messageId = payload?.message_id;
 		if (!messageId) return;
-		const queue = resumeQueueByMessageId.get(messageId);
-		if (!queue) return;
-		resumeQueueByMessageId.delete(messageId);
-		// Flush buffered live frames in seq order. chatEventHandler's
-		// dedupe guard will drop anything already covered by replay.
-		queue.sort((a, b) => (a?.seq ?? 0) - (b?.seq ?? 0));
-		for (const event of queue) {
-			await chatEventHandler(event);
+		const envelopes = Array.isArray(payload?.envelopes) ? payload.envelopes : [];
+		try {
+			// Replay frames bypass the fence (they're what the fence is
+			// waiting for) but still pass through chatEventHandler's
+			// dedupe guard so anything already applied is a no-op.
+			for (const envelope of envelopes) {
+				envelope._replayed = true;
+				await chatEventHandler(envelope);
+			}
+		} finally {
+			// Always clear the fence, even if replay application threw
+			// partway through, so live updates aren't frozen forever.
+			await clearResumeFence(messageId);
+		}
+	};
+
+	const clearAllResumeFences = () => {
+		for (const messageId of [...resumeQueueByMessageId.keys()]) {
+			clearResumeFence(messageId);
 		}
 	};
 
@@ -776,7 +822,12 @@
 
 		// Resume any in-flight streams on reconnect.
 		$socket?.on('connect', requestResumeForAllInProgress);
-		$socket?.on('resume-stream:complete', onResumeStreamComplete);
+		$socket?.on('resume-stream:replay', onResumeStreamReplay);
+		// Drop any stale fences on disconnect so the reconnect path
+		// starts from a clean slate instead of inheriting a timer that
+		// could fire after the new resume request has already raised a
+		// fresh fence.
+		$socket?.on('disconnect', clearAllResumeFences);
 
 		$audioQueue?.destroy();
 
@@ -895,7 +946,8 @@
 				window.removeEventListener('message', onMessageHandler);
 				$socket?.off('events', chatEventHandler);
 				$socket?.off('connect', requestResumeForAllInProgress);
-				$socket?.off('resume-stream:complete', onResumeStreamComplete);
+				$socket?.off('resume-stream:replay', onResumeStreamReplay);
+				$socket?.off('disconnect', clearAllResumeFences);
 				audioQueueInstance?.destroy();
 				audioQueue.set(null);
 			} catch (e) {
@@ -1159,7 +1211,7 @@
 	const initNewChat = async () => {
 		console.log('initNewChat');
 		resumeSeqByMessageId.clear();
-		resumeQueueByMessageId.clear();
+		clearAllResumeFences();
 
 		if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
 			await temporaryChatEnabled.set(true);
@@ -1399,7 +1451,7 @@
 		chatId.set(chatIdProp);
 
 		resumeSeqByMessageId.clear();
-		resumeQueueByMessageId.clear();
+		clearAllResumeFences();
 
 		if ($temporaryChatEnabled) {
 			temporaryChatEnabled.set(false);
