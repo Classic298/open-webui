@@ -178,25 +178,68 @@ RESUME_STREAM_TTL_SEC = 3600
 RESUME_STREAM_DONE_TTL_SEC = 30
 # Refresh TTL every N appends to keep the hot path at one Redis RTT.
 RESUME_STREAM_TTL_REFRESH_EVERY = 64
+# Upper bound on any single Redis call in the streaming hot path. If
+# Redis goes unhealthy we'd rather degrade resume gracefully than stall
+# live token delivery behind a slow RTT.
+RESUME_STREAM_REDIS_TIMEOUT_SEC = 0.5
 
 
 def _stream_key(user_id: str, message_id: str) -> str:
-    # user_id in the key scopes logs per user: only the owning user's
-    # session can construct the key, so resume doesn't need a DB
-    # chat/message auth check (which would fail when a pre-stream stub
-    # hasn't been persisted yet — the ENABLE_REALTIME_CHAT_SAVE=False
-    # refresh case this feature is for).
+    # user_id-scoped: only the owning user's session can construct the
+    # key, so resume doesn't need a DB chat/message auth check.
     return f'{REDIS_KEY_PREFIX}:stream:{user_id}:{message_id}'
+
+
+def _stream_seq_key(user_id: str, message_id: str) -> str:
+    # Separate key for the atomic seq counter so INCR is cheap and
+    # doesn't touch the stream. Lives and dies alongside the stream log.
+    return f'{REDIS_KEY_PREFIX}:stream:{user_id}:{message_id}:seq'
+
+
+async def _stream_seq_allocate(user_id: str, message_id: str):
+    """Atomically allocate the next seq for this message_id.
+
+    Global INCR (not a per-emitter counter) so overlapping emitters for
+    the same message_id can't both emit the same seq and cause client
+    dedupe to silently drop one of them as a duplicate.
+
+    Returns the allocated seq, or None if Redis is unavailable or the
+    call times out. Callers treat None as "emit without seq" — live
+    streaming continues but that frame isn't eligible for resume dedupe.
+    """
+    if REDIS is None or not user_id or not message_id:
+        return None
+    try:
+        key = _stream_seq_key(user_id, message_id)
+        seq = await asyncio.wait_for(
+            REDIS.incr(key), timeout=RESUME_STREAM_REDIS_TIMEOUT_SEC
+        )
+        # Set TTL on first INCR; EXPIRE is NX-like in effect (idempotent
+        # enough here — occasional reset is fine).
+        if seq == 1:
+            try:
+                await asyncio.wait_for(
+                    REDIS.expire(key, RESUME_STREAM_TTL_SEC),
+                    timeout=RESUME_STREAM_REDIS_TIMEOUT_SEC,
+                )
+            except Exception:
+                pass
+        return int(seq)
+    except asyncio.TimeoutError:
+        log.warning(f'stream resume seq alloc timed out for {message_id}')
+        return None
+    except Exception as e:
+        log.warning(f'stream resume seq alloc failed for {message_id}: {e}')
+        return None
 
 
 async def _stream_log_append(user_id: str, message_id: str, envelope: dict, seq: int) -> None:
     """Append an envelope to the resume log.
 
-    Uses Redis-generated stream IDs (the default `*`) so overlapping
-    emitters for the same message_id — continuation, crash-retry, etc. —
-    cannot collide with each other's IDs. The seq lives in the entry
-    fields instead, and the read path filters by it. Pipelined with the
-    periodic EXPIRE.
+    Uses Redis-generated stream IDs so overlapping emitters can't collide.
+    Pipelined with the periodic EXPIRE. Wrapped in a short timeout so a
+    slow Redis can't block live token delivery for the user — on timeout
+    we drop the log entry and let the emit proceed.
     """
     if REDIS is None or not user_id or not message_id:
         return
@@ -212,37 +255,13 @@ async def _stream_log_append(user_id: str, message_id: str, envelope: dict, seq:
         )
         if refresh_ttl:
             pipe.expire(key, RESUME_STREAM_TTL_SEC)
-        await pipe.execute()
+        await asyncio.wait_for(
+            pipe.execute(), timeout=RESUME_STREAM_REDIS_TIMEOUT_SEC
+        )
+    except asyncio.TimeoutError:
+        log.warning(f'stream resume log append timed out for {message_id}')
     except Exception as e:
         log.warning(f'stream resume log append failed for {message_id}: {e}')
-
-
-async def _stream_log_max_seq(user_id: str, message_id: str) -> int:
-    """Return the highest seq field currently in the log, or 0 if empty.
-
-    Used to seed a fresh emitter's seq counter so retries / continuations
-    for the same message_id keep the sequence monotonic across emitter
-    lifetimes. Without this, a second emitter would restart at 1 and the
-    client's dedupe guard would drop every new frame because its lastSeq
-    from the prior emitter is already larger.
-    """
-    if REDIS is None or not user_id or not message_id:
-        return 0
-    try:
-        # XREVRANGE + COUNT 1 returns the newest entry cheaply.
-        entries = await REDIS.xrevrange(_stream_key(user_id, message_id), count=1)
-        if not entries:
-            return 0
-        _, fields = entries[0]
-        seq_val = fields.get('seq')
-        if seq_val is None:
-            seq_val = fields.get(b'seq')
-        if isinstance(seq_val, bytes):
-            seq_val = seq_val.decode('utf-8', 'replace')
-        return int(seq_val or 0)
-    except Exception as e:
-        log.warning(f'stream resume log max-seq lookup failed for {message_id}: {e}')
-        return 0
 
 
 async def _stream_log_read(user_id: str, message_id: str, after_seq: int):
@@ -974,47 +993,44 @@ async def disconnect(sid):
 
 
 async def get_event_emitter(request_info, update_db=True):
-    # Seed the seq counter from any existing log so retry/continuation
-    # for the same message_id stays monotonic across emitter lifetimes.
-    # If we reset to 0, the client's dedupe guard would drop every new
-    # frame (lastSeq from the prior run is already larger).
-    ri_user_id = request_info.get('user_id') if isinstance(request_info, dict) else None
-    ri_message_id = request_info.get('message_id') if isinstance(request_info, dict) else None
-    initial_seq = 0
-    if ri_user_id and ri_message_id and REDIS is not None:
-        initial_seq = await _stream_log_max_seq(ri_user_id, ri_message_id)
-    seq_counter = {'n': initial_seq}
-
     async def __event_emitter__(event_data):
         user_id = request_info['user_id']
         chat_id = request_info['chat_id']
         message_id = request_info['message_id']
 
-        seq_counter['n'] += 1
-        seq = seq_counter['n']
+        # Atomically allocate this frame's seq. Global INCR (not an
+        # in-process counter) so overlapping emitters for the same
+        # message_id can't both produce the same seq. If Redis is
+        # unavailable or slow, seq is None and we emit without it — live
+        # streaming continues, but this frame is excluded from resume
+        # dedupe and replay (graceful degradation).
+        seq = await _stream_seq_allocate(user_id, message_id)
 
         envelope = {
             'chat_id': chat_id,
             'message_id': message_id,
-            'seq': seq,
             'data': event_data,
         }
-
-        # Log before emit: an inverted order could let a reconnecting
-        # client resume-read before the append lands and permanently miss
-        # the frame. Duplicates are dropped by the client seq guard.
-        await _stream_log_append(user_id, message_id, envelope, seq)
+        if seq is not None:
+            envelope['seq'] = seq
+            # Log before emit: an inverted order could let a reconnecting
+            # client resume-read before the append lands and permanently
+            # miss the frame. Duplicates are dropped by the client seq
+            # guard.
+            await _stream_log_append(user_id, message_id, envelope, seq)
         await sio.emit('events', envelope, room=f'user:{user_id}')
 
-        # On done, shorten TTL so the log self-evicts. EXPIRE is race-safe
-        # vs. a retry-emitter's truncate-then-XADD; a background DELETE
-        # would not be.
+        # On done, shorten TTL on both the stream log and the seq counter
+        # so they self-evict together after the grace window.
         inner = event_data.get('data') if isinstance(event_data, dict) else None
         if isinstance(inner, dict) and inner.get('done') is True:
             if REDIS is not None and user_id and message_id:
                 try:
-                    await REDIS.expire(
-                        _stream_key(user_id, message_id), RESUME_STREAM_DONE_TTL_SEC
+                    pipe = REDIS.pipeline(transaction=False)
+                    pipe.expire(_stream_key(user_id, message_id), RESUME_STREAM_DONE_TTL_SEC)
+                    pipe.expire(_stream_seq_key(user_id, message_id), RESUME_STREAM_DONE_TTL_SEC)
+                    await asyncio.wait_for(
+                        pipe.execute(), timeout=RESUME_STREAM_REDIS_TIMEOUT_SEC
                     )
                 except Exception as e:
                     log.warning(f'stream resume log done-TTL shorten failed for {message_id}: {e}')

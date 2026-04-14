@@ -173,10 +173,10 @@
 	// persisted `history`.
 	const resumeSeqByMessageId = new Map();
 	// While a resume replay is in flight for a message, live frames for
-	// that message are buffered here and applied after the server's
-	// `resume-stream:complete` ack. Prevents a racing live frame from
-	// advancing seq past unreplayed frames and causing them to be dropped
-	// by the dedupe guard.
+	// that message are buffered here and flushed after the server's
+	// single-batch `resume-stream:replay` arrives. Prevents a racing
+	// live frame from advancing seq past unreplayed frames and causing
+	// them to be dropped by the dedupe guard.
 	const resumeQueueByMessageId = new Map();
 
 	// Chat Input
