@@ -181,7 +181,7 @@ RESUME_STREAM_DONE_TTL_SEC = 30
 RESUME_STREAM_TTL_REFRESH_EVERY = 64
 # Tight upper bound on any Redis call in the streaming hot path so a
 # slow Redis degrades resume but can't stall live token delivery.
-RESUME_STREAM_REDIS_TIMEOUT_SEC = 0.2
+RESUME_STREAM_REDIS_TIMEOUT_SEC = 0.1
 
 
 def _stream_key(user_id: str, message_id: str) -> str:
@@ -233,6 +233,7 @@ async def _stream_log_append(user_id: str, message_id: str, envelope: dict, seq:
     try:
         refresh_ttl = (seq == 1) or (seq % RESUME_STREAM_TTL_REFRESH_EVERY == 0)
         key = _stream_key(user_id, message_id)
+        seq_key = _stream_seq_key(user_id, message_id)
         pipe = REDIS.pipeline(transaction=False)
         pipe.xadd(
             key,
@@ -241,7 +242,11 @@ async def _stream_log_append(user_id: str, message_id: str, envelope: dict, seq:
             approximate=True,
         )
         if refresh_ttl:
+            # Refresh both keys together — without this the seq counter
+            # can expire mid-stream on responses longer than the TTL and
+            # INCR restarts at 1, corrupting replay ordering.
             pipe.expire(key, RESUME_STREAM_TTL_SEC)
+            pipe.expire(seq_key, RESUME_STREAM_TTL_SEC)
         await asyncio.wait_for(
             pipe.execute(), timeout=RESUME_STREAM_REDIS_TIMEOUT_SEC
         )
