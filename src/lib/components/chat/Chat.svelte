@@ -172,6 +172,12 @@
 	// Last-seen WS seq per message. Off-message so it never hits the
 	// persisted `history`.
 	const resumeSeqByMessageId = new Map();
+	// While a resume replay is in flight for a message, live frames for
+	// that message are buffered here and applied after the server's
+	// `resume-stream:complete` ack. Prevents a racing live frame from
+	// advancing seq past unreplayed frames and causing them to be dropped
+	// by the dedupe guard.
+	const resumeQueueByMessageId = new Map();
 
 	// Chat Input
 	let prompt = '';
@@ -451,6 +457,17 @@
 			let message = history.messages[event.message_id];
 
 			if (message) {
+				// If a replay is in flight for this message, buffer any
+				// live (non-replayed) frame until the server's complete
+				// ack arrives. Otherwise a live frame with seq > missed
+				// replay frames would advance lastSeq and cause the
+				// replay frames to be dropped by the dedupe guard.
+				const queue = resumeQueueByMessageId.get(event.message_id);
+				if (queue && !event?._replayed) {
+					queue.push(event);
+					return;
+				}
+
 				// Track highest seq and drop replays we've already applied.
 				const incomingSeq = typeof event?.seq === 'number' ? event.seq : null;
 				if (incomingSeq !== null) {
@@ -629,10 +646,30 @@
 	const requestResumeForMessage = (message) => {
 		if (!message || !message.id || message.done) return;
 		if (!$socket || !$socket.connected) return;
+		// Raise the fence BEFORE emitting so any live frame that arrives
+		// while the server is still reading XRANGE gets buffered instead
+		// of racing the replay frames.
+		if (!resumeQueueByMessageId.has(message.id)) {
+			resumeQueueByMessageId.set(message.id, []);
+		}
 		$socket.emit('resume-stream', {
 			message_id: message.id,
 			last_seq: resumeSeqByMessageId.get(message.id) ?? 0
 		});
+	};
+
+	const onResumeStreamComplete = async (payload) => {
+		const messageId = payload?.message_id;
+		if (!messageId) return;
+		const queue = resumeQueueByMessageId.get(messageId);
+		if (!queue) return;
+		resumeQueueByMessageId.delete(messageId);
+		// Flush buffered live frames in seq order. chatEventHandler's
+		// dedupe guard will drop anything already covered by replay.
+		queue.sort((a, b) => (a?.seq ?? 0) - (b?.seq ?? 0));
+		for (const event of queue) {
+			await chatEventHandler(event);
+		}
 	};
 
 	// Iterate all in-flight assistants so arena siblings aren't missed.
@@ -739,6 +776,7 @@
 
 		// Resume any in-flight streams on reconnect.
 		$socket?.on('connect', requestResumeForAllInProgress);
+		$socket?.on('resume-stream:complete', onResumeStreamComplete);
 
 		$audioQueue?.destroy();
 
@@ -857,6 +895,7 @@
 				window.removeEventListener('message', onMessageHandler);
 				$socket?.off('events', chatEventHandler);
 				$socket?.off('connect', requestResumeForAllInProgress);
+				$socket?.off('resume-stream:complete', onResumeStreamComplete);
 				audioQueueInstance?.destroy();
 				audioQueue.set(null);
 			} catch (e) {
@@ -1120,6 +1159,7 @@
 	const initNewChat = async () => {
 		console.log('initNewChat');
 		resumeSeqByMessageId.clear();
+		resumeQueueByMessageId.clear();
 
 		if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
 			await temporaryChatEnabled.set(true);
@@ -1359,6 +1399,7 @@
 		chatId.set(chatIdProp);
 
 		resumeSeqByMessageId.clear();
+		resumeQueueByMessageId.clear();
 
 		if ($temporaryChatEnabled) {
 			temporaryChatEnabled.set(false);
@@ -1438,10 +1479,12 @@
 					currentMessage.done = true;
 				}
 
-				// Resume any in-flight streams on refresh mid-stream.
-				if (taskIds && taskIds.length > 0) {
-					requestResumeForAllInProgress();
-				}
+				// Resume any in-flight streams. Not gated on taskIds —
+				// that call can fail or race and is not authoritative;
+				// requestResumeForAllInProgress already filters to
+				// unfinished assistants and the server no-ops when no
+				// log exists.
+				requestResumeForAllInProgress();
 
 				await tick();
 

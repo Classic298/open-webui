@@ -640,9 +640,18 @@ async def resume_stream(sid, data):
 
     envelopes = await _stream_log_read(user_id, message_id, last_seq)
     for envelope in envelopes:
-        # Replay to this session only; live listeners in the user room
-        # are already served via the normal emit path.
-        await sio.emit('events', envelope, to=sid)
+        # Tag as replayed. The client uses this to distinguish replay
+        # from live frames so it can buffer live frames during replay
+        # and avoid advancing its seq high-water on them (which would
+        # otherwise cause later replay frames to be dropped by the dedupe
+        # guard). Replay is session-scoped; live listeners in the user
+        # room are already served via the normal emit path.
+        await sio.emit('events', {**envelope, '_replayed': True}, to=sid)
+    # Signal replay complete so the client flushes its buffered live
+    # frames in seq order.
+    await sio.emit(
+        'resume-stream:complete', {'message_id': message_id}, to=sid
+    )
 
 
 def normalize_document_id(document_id: str) -> str:
