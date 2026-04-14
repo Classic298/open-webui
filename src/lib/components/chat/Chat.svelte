@@ -485,12 +485,10 @@
 						// Set all response messages to done
 						for (const messageId of history.messages[message.parentId].childrenIds) {
 							history.messages[messageId].done = true;
-							resumeSeqByMessageId.delete(messageId);
 						}
 						await processNextInQueue($chatId);
 					} else {
 						message.done = true;
-						resumeSeqByMessageId.delete(message.id);
 					}
 				} else if (type === 'chat:message:delta' || type === 'message') {
 					message.content += data.content;
@@ -1908,8 +1906,6 @@
 		if (done) {
 			message.done = true;
 
-			resumeSeqByMessageId.delete(message.id);
-
 			if ($settings.responseAutoCopy) {
 				copyToClipboard(message.content);
 			}
@@ -2541,7 +2537,6 @@
 			};
 
 			responseMessage.done = true;
-			resumeSeqByMessageId.delete(responseMessageId);
 
 			history.messages[responseMessageId] = responseMessage;
 			history.currentId = responseMessageId;
@@ -2609,7 +2604,6 @@
 			content: $i18n.t(`Uh-oh! There was an issue with the response.`) + '\n' + errorMessage
 		};
 		responseMessage.done = true;
-		resumeSeqByMessageId.delete(responseMessage.id);
 
 		if (responseMessage.statusHistory) {
 			responseMessage.statusHistory = responseMessage.statusHistory.filter(
@@ -2643,7 +2637,6 @@
 			if (responseMessage.parentId && history.messages[responseMessage.parentId]) {
 				for (const messageId of history.messages[responseMessage.parentId].childrenIds) {
 					history.messages[messageId].done = true;
-					resumeSeqByMessageId.delete(messageId);
 				}
 			}
 

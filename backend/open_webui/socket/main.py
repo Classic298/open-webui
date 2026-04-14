@@ -671,36 +671,30 @@ async def chat_events(sid, data):
 
 @sio.on('resume-stream')
 async def resume_stream(sid, data):
-    """One `resume-stream:replay` batch emit (payload + completion signal).
+    """Batch replay emit; also serves as the client's fence-clear signal.
 
-    Sent whenever we have a valid (user, message_id); auth-rejection
-    branches drop silently since the client never raised a fence for
-    those. Key scoping by user_id means no DB auth check is needed.
+    Reply whenever we have a message_id to target so the client fence
+    clears deterministically — even on auth failure. Silent drops only
+    happen when the client couldn't have raised a fence in the first
+    place (malformed payload, no message_id).
     """
     if not isinstance(data, dict):
         return
-
-    user = SESSION_POOL.get(sid)
-    if not user:
-        return
-
-    user_id = user.get('id')
     message_id = data.get('message_id')
-    request_id = data.get('request_id')
-    try:
-        last_seq = int(data.get('last_seq') or 0)
-    except (TypeError, ValueError):
-        last_seq = 0
-
-    if not user_id or not message_id:
+    if not message_id:
         return
 
+    request_id = data.get('request_id')
     envelopes = []
-    if REDIS is not None:
+    user = SESSION_POOL.get(sid)
+    user_id = user.get('id') if user else None
+    if user_id and REDIS is not None:
+        try:
+            last_seq = int(data.get('last_seq') or 0)
+        except (TypeError, ValueError):
+            last_seq = 0
         envelopes = await _stream_log_read(user_id, message_id, last_seq)
 
-    # Echo request_id so the client can ignore stale replies that
-    # correspond to a superseded request (reconnect churn).
     await sio.emit(
         'resume-stream:replay',
         {
@@ -1033,19 +1027,27 @@ async def get_event_emitter(request_info, update_db=True):
             await _stream_log_append(user_id, message_id, envelope, seq)
         await sio.emit('events', envelope, room=f'user:{user_id}')
 
-        # On done, shorten TTL so log + seq counter self-evict together.
+        # Any terminal event shortens TTL so log + seq self-evict together.
+        # Covers normal completion (done:True), explicit cancel, and
+        # errored completions — all end-of-stream flows that the client
+        # will no longer replay against.
+        outer_type = event_data.get('type') if isinstance(event_data, dict) else None
         inner = event_data.get('data') if isinstance(event_data, dict) else None
-        if isinstance(inner, dict) and inner.get('done') is True:
-            if REDIS is not None and user_id and message_id:
-                try:
-                    pipe = REDIS.pipeline(transaction=False)
-                    pipe.expire(_stream_key(user_id, message_id), RESUME_STREAM_DONE_TTL_SEC)
-                    pipe.expire(_stream_seq_key(user_id, message_id), RESUME_STREAM_DONE_TTL_SEC)
-                    await asyncio.wait_for(
-                        pipe.execute(), timeout=RESUME_STREAM_REDIS_TIMEOUT_SEC
-                    )
-                except Exception as e:
-                    log.warning(f'stream resume log done-TTL shorten failed for {message_id}: {e}')
+        is_terminal = (
+            (isinstance(inner, dict) and inner.get('done') is True)
+            or outer_type == 'chat:tasks:cancel'
+            or (isinstance(inner, dict) and inner.get('error'))
+        )
+        if is_terminal and REDIS is not None and user_id and message_id:
+            try:
+                pipe = REDIS.pipeline(transaction=False)
+                pipe.expire(_stream_key(user_id, message_id), RESUME_STREAM_DONE_TTL_SEC)
+                pipe.expire(_stream_seq_key(user_id, message_id), RESUME_STREAM_DONE_TTL_SEC)
+                await asyncio.wait_for(
+                    pipe.execute(), timeout=RESUME_STREAM_REDIS_TIMEOUT_SEC
+                )
+            except Exception as e:
+                log.warning(f'stream resume log terminal-TTL shorten failed for {message_id}: {e}')
 
         if update_db and message_id and not request_info.get('chat_id', '').startswith('local:'):
             event_type = event_data.get('type')
