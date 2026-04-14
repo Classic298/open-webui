@@ -627,9 +627,9 @@
 	// Ask the server to replay any WS events we missed for the given message.
 	// Used when loading a chat with a message still in progress (page refresh
 	// mid-stream) and when the socket reconnects after a drop. The server
-	// replies with events we haven't seen (seq > message.lastSeq) plus a
-	// `resume-stream:ack`. Safe to call redundantly — the seq idempotency
-	// guard in chatEventHandler drops anything already applied.
+	// re-emits any events we haven't seen (seq > message.lastSeq) as normal
+	// `events` frames; no separate ack. Safe to call redundantly — the seq
+	// idempotency guard in chatEventHandler drops anything already applied.
 	const requestResumeForMessage = (message) => {
 		if (!message || !message.id || message.done) return;
 		if (!$socket || !$socket.connected) return;
@@ -640,14 +640,17 @@
 		});
 	};
 
-	const requestResumeForCurrentIfInProgress = () => {
-		const currentMessage = history?.currentId ? history.messages[history.currentId] : null;
-		if (
-			currentMessage &&
-			currentMessage.role === 'assistant' &&
-			!currentMessage.done
-		) {
-			requestResumeForMessage(currentMessage);
+	// Resume every assistant message that isn't done yet, not just the
+	// "current" one. Multi-model (arena) chats have multiple sibling
+	// assistant responses streaming at once; without iterating them all,
+	// non-current siblings would silently lose any deltas that landed
+	// during the disconnect window.
+	const requestResumeForAllInProgress = () => {
+		if (!history?.messages) return;
+		for (const message of Object.values(history.messages)) {
+			if (message && message.role === 'assistant' && !message.done) {
+				requestResumeForMessage(message);
+			}
 		}
 	};
 
@@ -744,8 +747,9 @@
 		$socket?.on('events', chatEventHandler);
 
 		// On socket reconnect, ask the server to replay anything we missed
-		// for the currently visible message if it's still streaming.
-		$socket?.on('connect', requestResumeForCurrentIfInProgress);
+		// for every assistant message that's still streaming (including
+		// multi-model siblings, not just the currently visible one).
+		$socket?.on('connect', requestResumeForAllInProgress);
 
 		$audioQueue?.destroy();
 
@@ -863,7 +867,7 @@
 				selectedFolderSubscribe();
 				window.removeEventListener('message', onMessageHandler);
 				$socket?.off('events', chatEventHandler);
-				$socket?.off('connect', requestResumeForCurrentIfInProgress);
+				$socket?.off('connect', requestResumeForAllInProgress);
 				audioQueueInstance?.destroy();
 				audioQueue.set(null);
 			} catch (e) {
@@ -1442,17 +1446,12 @@
 				}
 
 				// Stream resume: if backend tasks are still active on this
-				// chat and the current assistant message is in progress, we
-				// may have missed WS frames while the page was reloading.
-				// Ask the server to replay anything we don't have yet.
-				if (
-					currentMessage &&
-					currentMessage.role === 'assistant' &&
-					!currentMessage.done &&
-					taskIds &&
-					taskIds.length > 0
-				) {
-					requestResumeForMessage(currentMessage);
+				// chat, ask the server to replay any frames we missed for
+				// every assistant message still in progress. Covers both
+				// the single-response case and multi-model (arena) chats
+				// where several sibling assistants stream concurrently.
+				if (taskIds && taskIds.length > 0) {
+					requestResumeForAllInProgress();
 				}
 
 				await tick();
