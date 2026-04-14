@@ -634,6 +634,9 @@
 	// Fallback timer in case the replay ack never arrives.
 	const RESUME_FENCE_TIMEOUT_MS = 10000;
 	const resumeFenceTimerByMessageId = new Map();
+	// Active request_id per message — lets us ignore stale replay
+	// responses from superseded requests (reconnect churn).
+	const resumeActiveRequestIdByMessageId = new Map();
 
 	// Drop fence + timer without flushing (lifecycle transitions).
 	const dropResumeFence = (messageId) => {
@@ -643,6 +646,7 @@
 			resumeFenceTimerByMessageId.delete(messageId);
 		}
 		resumeQueueByMessageId.delete(messageId);
+		resumeActiveRequestIdByMessageId.delete(messageId);
 	};
 
 	// Drop fence AND flush buffered events (happy path + timeout).
@@ -683,8 +687,14 @@
 				clearResumeFence(message.id);
 			}, RESUME_FENCE_TIMEOUT_MS)
 		);
+		const requestId =
+			typeof crypto !== 'undefined' && crypto.randomUUID
+				? crypto.randomUUID()
+				: `${message.id}-${Date.now()}-${Math.random()}`;
+		resumeActiveRequestIdByMessageId.set(message.id, requestId);
 		$socket.emit('resume-stream', {
 			message_id: message.id,
+			request_id: requestId,
 			last_seq: resumeSeqByMessageId.get(message.id) ?? 0
 		});
 	};
@@ -692,6 +702,13 @@
 	const onResumeStreamReplay = async (payload) => {
 		const messageId = payload?.message_id;
 		if (!messageId) return;
+		// Drop stale replies from superseded requests so they can't
+		// clear a fence that belongs to a newer in-flight request.
+		const expected = resumeActiveRequestIdByMessageId.get(messageId);
+		if (expected && payload?.request_id && payload.request_id !== expected) {
+			return;
+		}
+		resumeActiveRequestIdByMessageId.delete(messageId);
 		const envelopes = Array.isArray(payload?.envelopes) ? payload.envelopes : [];
 		try {
 			for (const envelope of envelopes) {

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import random
 
 import socketio
@@ -179,9 +180,16 @@ RESUME_STREAM_MAXLEN = 2000
 RESUME_STREAM_TTL_SEC = 3600
 RESUME_STREAM_DONE_TTL_SEC = 30
 RESUME_STREAM_TTL_REFRESH_EVERY = 64
-# Tight upper bound on any Redis call in the streaming hot path so a
-# slow Redis degrades resume but can't stall live token delivery.
-RESUME_STREAM_REDIS_TIMEOUT_SEC = 0.1
+# Hot-path timeout: tight so a slow Redis can't stall live tokens.
+# Replay read timeout: looser since a resume is user-blocking anyway
+# and silent timeout here is worse than a brief extra wait. Both
+# configurable for infra where Redis isn't colocated.
+RESUME_STREAM_REDIS_TIMEOUT_SEC = float(
+    os.environ.get('RESUME_STREAM_REDIS_TIMEOUT_SEC', '0.1')
+)
+RESUME_STREAM_READ_TIMEOUT_SEC = float(
+    os.environ.get('RESUME_STREAM_READ_TIMEOUT_SEC', '1.0')
+)
 
 
 def _stream_key(user_id: str, message_id: str) -> str:
@@ -268,7 +276,7 @@ async def _stream_log_read(user_id: str, message_id: str, after_seq: int):
     try:
         entries = await asyncio.wait_for(
             REDIS.xrange(_stream_key(user_id, message_id), min='-', max='+'),
-            timeout=RESUME_STREAM_REDIS_TIMEOUT_SEC,
+            timeout=RESUME_STREAM_READ_TIMEOUT_SEC,
         )
     except asyncio.TimeoutError:
         log.warning(f'stream resume log read timed out for {message_id}')
@@ -678,6 +686,7 @@ async def resume_stream(sid, data):
 
     user_id = user.get('id')
     message_id = data.get('message_id')
+    request_id = data.get('request_id')
     try:
         last_seq = int(data.get('last_seq') or 0)
     except (TypeError, ValueError):
@@ -690,9 +699,15 @@ async def resume_stream(sid, data):
     if REDIS is not None:
         envelopes = await _stream_log_read(user_id, message_id, last_seq)
 
+    # Echo request_id so the client can ignore stale replies that
+    # correspond to a superseded request (reconnect churn).
     await sio.emit(
         'resume-stream:replay',
-        {'message_id': message_id, 'envelopes': envelopes},
+        {
+            'message_id': message_id,
+            'request_id': request_id,
+            'envelopes': envelopes,
+        },
         to=sid,
     )
 
@@ -987,6 +1002,17 @@ async def disconnect(sid):
 
 
 async def get_event_emitter(request_info, update_db=True):
+    # A single emitter's calls are serial (the streaming loop awaits each
+    # before the next), so seq ordering is guaranteed within one emitter.
+    # CONCURRENT emitters for the same (user_id, message_id) — e.g. a
+    # duplicate request leaking past frontend dedup, or a retry path that
+    # overlaps with the original — can interleave INCR/XADD/emit across
+    # tasks and cause live frames to arrive out of seq order. Replay
+    # reads already sort by seq so resume is safe, but live streaming in
+    # that edge case can drop a frame via the client dedupe guard. Fixing
+    # it properly needs either a distributed per-message lock or a
+    # client-side reorder buffer; neither is worth the complexity for a
+    # configuration OWUI doesn't normally produce.
     async def __event_emitter__(event_data):
         user_id = request_info['user_id']
         chat_id = request_info['chat_id']
