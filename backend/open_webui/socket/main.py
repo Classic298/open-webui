@@ -214,16 +214,35 @@ async def _stream_log_append(user_id: str, message_id: str, envelope: dict, seq:
             pipe.expire(key, RESUME_STREAM_TTL_SEC)
         await pipe.execute()
     except Exception as e:
-        log.debug(f'stream resume log append failed for {message_id}: {e}')
+        log.warning(f'stream resume log append failed for {message_id}: {e}')
 
 
-async def _stream_log_truncate(user_id: str, message_id: str) -> None:
+async def _stream_log_max_seq(user_id: str, message_id: str) -> int:
+    """Return the highest seq field currently in the log, or 0 if empty.
+
+    Used to seed a fresh emitter's seq counter so retries / continuations
+    for the same message_id keep the sequence monotonic across emitter
+    lifetimes. Without this, a second emitter would restart at 1 and the
+    client's dedupe guard would drop every new frame because its lastSeq
+    from the prior emitter is already larger.
+    """
     if REDIS is None or not user_id or not message_id:
-        return
+        return 0
     try:
-        await REDIS.delete(_stream_key(user_id, message_id))
+        # XREVRANGE + COUNT 1 returns the newest entry cheaply.
+        entries = await REDIS.xrevrange(_stream_key(user_id, message_id), count=1)
+        if not entries:
+            return 0
+        _, fields = entries[0]
+        seq_val = fields.get('seq')
+        if seq_val is None:
+            seq_val = fields.get(b'seq')
+        if isinstance(seq_val, bytes):
+            seq_val = seq_val.decode('utf-8', 'replace')
+        return int(seq_val or 0)
     except Exception as e:
-        log.debug(f'stream resume log truncate failed for {message_id}: {e}')
+        log.warning(f'stream resume log max-seq lookup failed for {message_id}: {e}')
+        return 0
 
 
 async def _stream_log_read(user_id: str, message_id: str, after_seq: int):
@@ -242,7 +261,7 @@ async def _stream_log_read(user_id: str, message_id: str, after_seq: int):
             max='+',
         )
     except Exception as e:
-        log.debug(f'stream resume log read failed for {message_id}: {e}')
+        log.warning(f'stream resume log read failed for {message_id}: {e}')
         return []
 
     def _field(fields, key):
@@ -955,9 +974,16 @@ async def disconnect(sid):
 
 
 async def get_event_emitter(request_info, update_db=True):
-    # Per-emitter monotonic seq for the resume log. Lives in the entry's
-    # `seq` field (Redis auto-generates the stream IDs).
-    seq_counter = {'n': 0}
+    # Seed the seq counter from any existing log so retry/continuation
+    # for the same message_id stays monotonic across emitter lifetimes.
+    # If we reset to 0, the client's dedupe guard would drop every new
+    # frame (lastSeq from the prior run is already larger).
+    ri_user_id = request_info.get('user_id') if isinstance(request_info, dict) else None
+    ri_message_id = request_info.get('message_id') if isinstance(request_info, dict) else None
+    initial_seq = 0
+    if ri_user_id and ri_message_id and REDIS is not None:
+        initial_seq = await _stream_log_max_seq(ri_user_id, ri_message_id)
+    seq_counter = {'n': initial_seq}
 
     async def __event_emitter__(event_data):
         user_id = request_info['user_id']
@@ -991,7 +1017,7 @@ async def get_event_emitter(request_info, update_db=True):
                         _stream_key(user_id, message_id), RESUME_STREAM_DONE_TTL_SEC
                     )
                 except Exception as e:
-                    log.debug(f'stream resume log done-TTL shorten failed for {message_id}: {e}')
+                    log.warning(f'stream resume log done-TTL shorten failed for {message_id}: {e}')
 
         if update_db and message_id and not request_info.get('chat_id', '').startswith('local:'):
             event_type = event_data.get('type')
