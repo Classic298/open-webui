@@ -211,6 +211,12 @@ async def _stream_log_append(message_id: str, envelope: dict, seq: int) -> None:
     Uses a Redis pipeline to collapse XADD + (occasional) EXPIRE into a
     single network round-trip per call, keeping the added latency on the
     streaming hot path bounded to one Redis RTT.
+
+    Uses an explicit stream ID of `0-{seq}` so that the resume read path
+    can start XRANGE at the caller's cursor (`0-{last_seq+1}`) instead of
+    scanning the whole stream. The `0-` prefix is arbitrary — we only
+    need the IDs to be strictly monotonic per stream, which our
+    per-emitter seq counter guarantees.
     """
     if REDIS is None or not message_id:
         return
@@ -220,7 +226,8 @@ async def _stream_log_append(message_id: str, envelope: dict, seq: int) -> None:
         pipe = REDIS.pipeline(transaction=False)
         pipe.xadd(
             key,
-            {'seq': str(seq), 'payload': json.dumps(envelope)},
+            {'payload': json.dumps(envelope)},
+            id=f'0-{seq}',
             maxlen=RESUME_STREAM_MAXLEN,
             approximate=True,
         )
@@ -242,11 +249,23 @@ async def _stream_log_truncate(message_id: str) -> None:
 
 
 async def _stream_log_read(message_id: str, after_seq: int):
-    """Return envelopes logged for message_id with seq > after_seq, in order."""
+    """Return envelopes logged for message_id with seq > after_seq, in order.
+
+    Stream IDs are `0-{seq}`, so we can start the XRANGE at
+    `0-{after_seq+1}` and let Redis skip everything already delivered
+    instead of scanning from the start every call. Near-tail resumes
+    (the common case for reconnects) become O(missed frames) instead of
+    O(MAXLEN).
+    """
     if REDIS is None or not message_id:
         return []
     try:
-        entries = await REDIS.xrange(_stream_key(message_id), min='-', max='+')
+        start_seq = max(0, after_seq) + 1
+        entries = await REDIS.xrange(
+            _stream_key(message_id),
+            min=f'0-{start_seq}',
+            max='+',
+        )
     except Exception as e:
         log.debug(f'stream resume log read failed for {message_id}: {e}')
         return []
@@ -263,12 +282,6 @@ async def _stream_log_read(message_id: str, after_seq: int):
 
     out = []
     for _entry_id, fields in entries:
-        try:
-            seq = int(_field(fields, 'seq') or '0')
-        except (TypeError, ValueError):
-            continue
-        if seq <= after_seq:
-            continue
         payload = _field(fields, 'payload')
         if not payload:
             continue
@@ -1012,11 +1025,20 @@ async def get_event_emitter(request_info, update_db=True):
             'data': event_data,
         }
 
-        await sio.emit('events', envelope, room=f'user:{user_id}')
-
-        # Append to the resume log AFTER the live emit so reconnecting
-        # clients can only ever see what live clients already received.
+        # Append to the resume log BEFORE the live emit. If we emitted
+        # first, a client that disconnects in the window between `sio.emit`
+        # and `_stream_log_append` could reconnect and issue resume-stream
+        # before the frame is logged, never see that frame in the replay,
+        # and then never ask again — permanently losing it (particularly
+        # painful for the terminal done:True frame).
+        #
+        # Logging first inverts the window: a reconnecting client MIGHT
+        # see a replayed frame before the live emit reaches their new
+        # session, but the seq idempotency guard in chatEventHandler drops
+        # the subsequent duplicate harmlessly. Duplicates are safe, losses
+        # are not.
         await _stream_log_append(message_id, envelope, seq)
+        await sio.emit('events', envelope, room=f'user:{user_id}')
 
         # If this event finalized the message, schedule log cleanup. Give
         # reconnecting clients a short grace window to pick up the final

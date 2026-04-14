@@ -1140,6 +1140,11 @@
 
 	const initNewChat = async () => {
 		console.log('initNewChat');
+		// Reset transport bookkeeping — the new chat has no in-flight
+		// resume state, and anything carried over would be for messages
+		// that no longer exist in this view.
+		resumeSeqByMessageId.clear();
+
 		if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
 			await temporaryChatEnabled.set(true);
 		}
@@ -1376,6 +1381,10 @@
 
 	const loadChat = async () => {
 		chatId.set(chatIdProp);
+
+		// Clear any seq bookkeeping carried over from a previous chat
+		// before populating history with this chat's messages.
+		resumeSeqByMessageId.clear();
 
 		if ($temporaryChatEnabled) {
 			temporaryChatEnabled.set(false);
@@ -1826,6 +1835,10 @@
 
 		if (done) {
 			message.done = true;
+
+			// Resume log entry is no longer needed; drop it so the map
+			// doesn't accumulate dead keys over long-lived sessions.
+			resumeSeqByMessageId.delete(message.id);
 
 			if ($settings.responseAutoCopy) {
 				copyToClipboard(message.content);
