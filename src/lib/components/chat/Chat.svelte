@@ -169,15 +169,9 @@
 
 	let taskIds = null;
 
-	// Last-seen WS seq per message. Off-message so it never hits the
-	// persisted `history`.
-	const resumeSeqByMessageId = new Map();
-	// While a resume replay is in flight for a message, live frames for
-	// that message are buffered here and flushed after the server's
-	// single-batch `resume-stream:replay` arrives. Prevents a racing
-	// live frame from advancing seq past unreplayed frames and causing
-	// them to be dropped by the dedupe guard.
-	const resumeQueueByMessageId = new Map();
+	// Resume-protocol state. Off-message so it doesn't leak into `history`.
+	const resumeSeqByMessageId = new Map(); // highest seq applied
+	const resumeQueueByMessageId = new Map(); // live frames buffered during replay
 
 	// Chat Input
 	let prompt = '';
@@ -457,18 +451,14 @@
 			let message = history.messages[event.message_id];
 
 			if (message) {
-				// If a replay is in flight for this message, buffer any
-				// live (non-replayed) frame until the server's complete
-				// ack arrives. Otherwise a live frame with seq > missed
-				// replay frames would advance lastSeq and cause the
-				// replay frames to be dropped by the dedupe guard.
+				// Buffer live frames during replay; _replayed frames skip the fence.
 				const queue = resumeQueueByMessageId.get(event.message_id);
 				if (queue && !event?._replayed) {
 					queue.push(event);
 					return;
 				}
 
-				// Track highest seq and drop replays we've already applied.
+				// Dedupe.
 				const incomingSeq = typeof event?.seq === 'number' ? event.seq : null;
 				if (incomingSeq !== null) {
 					const lastSeq = resumeSeqByMessageId.get(event.message_id) ?? 0;
@@ -641,18 +631,11 @@
 		}
 	};
 
-	// Ask the server to replay any frames we missed for a message.
-	// Idempotent — the seq guard in chatEventHandler drops duplicates.
-	// Safety net: if a resume-stream:replay ack never arrives (server
-	// crash mid-handler, network loss between emit and ack, handler not
-	// registered yet, etc.), clear the fence and flush anyway after this
-	// timeout so live UI updates don't freeze indefinitely.
+	// Fallback timer in case the replay ack never arrives.
 	const RESUME_FENCE_TIMEOUT_MS = 10000;
 	const resumeFenceTimerByMessageId = new Map();
 
-	// Drop the fence + timer without applying any buffered events.
-	// Used on disconnect / chat-change / init transitions where the
-	// buffered events are about state that is about to become stale.
+	// Drop fence + timer without flushing (lifecycle transitions).
 	const dropResumeFence = (messageId) => {
 		const timer = resumeFenceTimerByMessageId.get(messageId);
 		if (timer) {
@@ -662,8 +645,10 @@
 		resumeQueueByMessageId.delete(messageId);
 	};
 
-	// Drop fence AND flush buffered events through chatEventHandler.
-	// Used on the happy path (replay ack arrived) and on timeout fallback.
+	// Drop fence AND flush buffered events (happy path + timeout).
+	// Flush in insertion order: live frames were emitted sequentially by
+	// one emitter and preserved by socket.io, so push-order == seq-order
+	// and no sort is needed (mixing with seq-less frames would reorder).
 	const clearResumeFence = async (messageId) => {
 		const timer = resumeFenceTimerByMessageId.get(messageId);
 		if (timer) {
@@ -673,19 +658,7 @@
 		const queue = resumeQueueByMessageId.get(messageId);
 		if (!queue) return;
 		resumeQueueByMessageId.delete(messageId);
-		// Partition into seq-bearing and seq-less events so the sort
-		// comparator is a strict ordering on its domain (avoids the
-		// engine-dependent behavior of returning 0 for mixed pairs).
-		// Apply seq-ordered events first, then seq-less (graceful
-		// degradation frames) in insertion order.
-		const withSeq = [];
-		const withoutSeq = [];
 		for (const event of queue) {
-			if (typeof event?.seq === 'number') withSeq.push(event);
-			else withoutSeq.push(event);
-		}
-		withSeq.sort((a, b) => a.seq - b.seq);
-		for (const event of [...withSeq, ...withoutSeq]) {
 			try {
 				await chatEventHandler(event);
 			} catch (e) {
@@ -697,9 +670,7 @@
 	const requestResumeForMessage = (message) => {
 		if (!message || !message.id || message.done) return;
 		if (!$socket || !$socket.connected) return;
-		// Raise the fence BEFORE emitting so any live frame arriving
-		// while the server reads XRANGE is buffered, not raced past the
-		// replay frames.
+		// Fence up before emit so racing live frames get buffered.
 		if (!resumeQueueByMessageId.has(message.id)) {
 			resumeQueueByMessageId.set(message.id, []);
 		}
@@ -723,16 +694,12 @@
 		if (!messageId) return;
 		const envelopes = Array.isArray(payload?.envelopes) ? payload.envelopes : [];
 		try {
-			// Replay frames bypass the fence (they're what the fence is
-			// waiting for) but still pass through chatEventHandler's
-			// dedupe guard so anything already applied is a no-op.
 			for (const envelope of envelopes) {
 				envelope._replayed = true;
 				await chatEventHandler(envelope);
 			}
 		} finally {
-			// Always clear the fence, even if replay application threw
-			// partway through, so live updates aren't frozen forever.
+			// Finally-clear so a mid-replay throw can't freeze live updates.
 			await clearResumeFence(messageId);
 		}
 	};
@@ -848,10 +815,7 @@
 		// Resume any in-flight streams on reconnect.
 		$socket?.on('connect', requestResumeForAllInProgress);
 		$socket?.on('resume-stream:replay', onResumeStreamReplay);
-		// Drop any stale fences on disconnect so the reconnect path
-		// starts from a clean slate instead of inheriting a timer that
-		// could fire after the new resume request has already raised a
-		// fresh fence.
+		// Clean slate on reconnect so stale timers don't fire across runs.
 		$socket?.on('disconnect', dropAllResumeFences);
 
 		$audioQueue?.destroy();
@@ -973,6 +937,7 @@
 				$socket?.off('connect', requestResumeForAllInProgress);
 				$socket?.off('resume-stream:replay', onResumeStreamReplay);
 				$socket?.off('disconnect', dropAllResumeFences);
+				dropAllResumeFences();
 				audioQueueInstance?.destroy();
 				audioQueue.set(null);
 			} catch (e) {
