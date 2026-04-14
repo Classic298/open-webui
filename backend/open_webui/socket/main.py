@@ -192,8 +192,11 @@ def _stream_key(user_id: str, message_id: str) -> str:
 async def _stream_log_append(user_id: str, message_id: str, envelope: dict, seq: int) -> None:
     """Append an envelope to the resume log.
 
-    Uses explicit stream ID `0-{seq}` so XRANGE can start at the client's
-    cursor on resume. Pipelined with the periodic EXPIRE.
+    Uses Redis-generated stream IDs (the default `*`) so overlapping
+    emitters for the same message_id — continuation, crash-retry, etc. —
+    cannot collide with each other's IDs. The seq lives in the entry
+    fields instead, and the read path filters by it. Pipelined with the
+    periodic EXPIRE.
     """
     if REDIS is None or not user_id or not message_id:
         return
@@ -203,8 +206,7 @@ async def _stream_log_append(user_id: str, message_id: str, envelope: dict, seq:
         pipe = REDIS.pipeline(transaction=False)
         pipe.xadd(
             key,
-            {'payload': json.dumps(envelope)},
-            id=f'0-{seq}',
+            {'seq': str(seq), 'payload': json.dumps(envelope)},
             maxlen=RESUME_STREAM_MAXLEN,
             approximate=True,
         )
@@ -225,14 +227,18 @@ async def _stream_log_truncate(user_id: str, message_id: str) -> None:
 
 
 async def _stream_log_read(user_id: str, message_id: str, after_seq: int):
-    """Return envelopes with seq > after_seq, in order."""
+    """Return envelopes with seq > after_seq, in order.
+
+    Full scan bounded by MAXLEN; Python filters by seq because auto IDs
+    don't encode it. With MAXLEN=2000 this is a few ms at worst and
+    resume is a rare, user-driven event so the cost is fine.
+    """
     if REDIS is None or not user_id or not message_id:
         return []
     try:
-        start_seq = max(0, after_seq) + 1
         entries = await REDIS.xrange(
             _stream_key(user_id, message_id),
-            min=f'0-{start_seq}',
+            min='-',
             max='+',
         )
     except Exception as e:
@@ -250,6 +256,12 @@ async def _stream_log_read(user_id: str, message_id: str, after_seq: int):
 
     out = []
     for _entry_id, fields in entries:
+        try:
+            entry_seq = int(_field(fields, 'seq') or '0')
+        except (TypeError, ValueError):
+            continue
+        if entry_seq <= after_seq:
+            continue
         payload = _field(fields, 'payload')
         if not payload:
             continue
@@ -943,14 +955,9 @@ async def disconnect(sid):
 
 
 async def get_event_emitter(request_info, update_db=True):
-    # Per-emitter monotonic seq for the resume log (explicit ID 0-{seq}).
+    # Per-emitter monotonic seq for the resume log. Lives in the entry's
+    # `seq` field (Redis auto-generates the stream IDs).
     seq_counter = {'n': 0}
-    # Wipe any prior log so fresh XADDs (starting at 0-1) don't collide
-    # with a retry/continuation's leftover IDs.
-    ri_user_id = request_info.get('user_id') if isinstance(request_info, dict) else None
-    ri_message_id = request_info.get('message_id') if isinstance(request_info, dict) else None
-    if ri_user_id and ri_message_id and REDIS is not None:
-        await _stream_log_truncate(ri_user_id, ri_message_id)
 
     async def __event_emitter__(event_data):
         user_id = request_info['user_id']

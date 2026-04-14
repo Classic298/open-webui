@@ -650,6 +650,20 @@
 	const RESUME_FENCE_TIMEOUT_MS = 10000;
 	const resumeFenceTimerByMessageId = new Map();
 
+	// Drop the fence + timer without applying any buffered events.
+	// Used on disconnect / chat-change / init transitions where the
+	// buffered events are about state that is about to become stale.
+	const dropResumeFence = (messageId) => {
+		const timer = resumeFenceTimerByMessageId.get(messageId);
+		if (timer) {
+			clearTimeout(timer);
+			resumeFenceTimerByMessageId.delete(messageId);
+		}
+		resumeQueueByMessageId.delete(messageId);
+	};
+
+	// Drop fence AND flush buffered events through chatEventHandler.
+	// Used on the happy path (replay ack arrived) and on timeout fallback.
 	const clearResumeFence = async (messageId) => {
 		const timer = resumeFenceTimerByMessageId.get(messageId);
 		if (timer) {
@@ -712,9 +726,9 @@
 		}
 	};
 
-	const clearAllResumeFences = () => {
+	const dropAllResumeFences = () => {
 		for (const messageId of [...resumeQueueByMessageId.keys()]) {
-			clearResumeFence(messageId);
+			dropResumeFence(messageId);
 		}
 	};
 
@@ -827,7 +841,7 @@
 		// starts from a clean slate instead of inheriting a timer that
 		// could fire after the new resume request has already raised a
 		// fresh fence.
-		$socket?.on('disconnect', clearAllResumeFences);
+		$socket?.on('disconnect', dropAllResumeFences);
 
 		$audioQueue?.destroy();
 
@@ -947,7 +961,7 @@
 				$socket?.off('events', chatEventHandler);
 				$socket?.off('connect', requestResumeForAllInProgress);
 				$socket?.off('resume-stream:replay', onResumeStreamReplay);
-				$socket?.off('disconnect', clearAllResumeFences);
+				$socket?.off('disconnect', dropAllResumeFences);
 				audioQueueInstance?.destroy();
 				audioQueue.set(null);
 			} catch (e) {
@@ -1211,7 +1225,7 @@
 	const initNewChat = async () => {
 		console.log('initNewChat');
 		resumeSeqByMessageId.clear();
-		clearAllResumeFences();
+		dropAllResumeFences();
 
 		if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
 			await temporaryChatEnabled.set(true);
@@ -1451,7 +1465,7 @@
 		chatId.set(chatIdProp);
 
 		resumeSeqByMessageId.clear();
-		clearAllResumeFences();
+		dropAllResumeFences();
 
 		if ($temporaryChatEnabled) {
 			temporaryChatEnabled.set(false);
