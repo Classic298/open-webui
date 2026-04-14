@@ -673,7 +673,16 @@
 		const queue = resumeQueueByMessageId.get(messageId);
 		if (!queue) return;
 		resumeQueueByMessageId.delete(messageId);
-		queue.sort((a, b) => (a?.seq ?? 0) - (b?.seq ?? 0));
+		// Stable sort: only reorder events that both carry a numeric seq.
+		// Seq-less events (Redis-down graceful-degradation case) keep
+		// their insertion order instead of being forced to the front,
+		// which would misorder state transitions like replace/done.
+		queue.sort((a, b) => {
+			const ah = typeof a?.seq === 'number';
+			const bh = typeof b?.seq === 'number';
+			if (!ah || !bh) return 0;
+			return a.seq - b.seq;
+		});
 		for (const event of queue) {
 			try {
 				await chatEventHandler(event);

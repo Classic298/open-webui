@@ -274,11 +274,13 @@ async def _stream_log_read(user_id: str, message_id: str, after_seq: int):
     if REDIS is None or not user_id or not message_id:
         return []
     try:
-        entries = await REDIS.xrange(
-            _stream_key(user_id, message_id),
-            min='-',
-            max='+',
+        entries = await asyncio.wait_for(
+            REDIS.xrange(_stream_key(user_id, message_id), min='-', max='+'),
+            timeout=RESUME_STREAM_REDIS_TIMEOUT_SEC,
         )
+    except asyncio.TimeoutError:
+        log.warning(f'stream resume log read timed out for {message_id}')
+        return []
     except Exception as e:
         log.warning(f'stream resume log read failed for {message_id}: {e}')
         return []
@@ -666,13 +668,18 @@ async def chat_events(sid, data):
 async def resume_stream(sid, data):
     """Replay missed log entries in a single batch.
 
-    One emit carries all envelopes with seq > last_seq (possibly zero)
-    and also serves as the completion signal — the client clears its
-    live-frame fence in the batch handler. Always emitting exactly once
-    (even when Redis is unavailable or the log is empty) keeps the
-    client from deadlocking on a fence that never clears.
+    One `resume-stream:replay` emit carries all envelopes with seq >
+    last_seq (possibly zero) and serves as the completion signal. Sent
+    whenever we have a message_id to target — including the Redis-down
+    and no-log cases — so the client's fence clears reliably instead of
+    waiting on its fallback timeout.
 
-    Auth is implicit: the stream key is scoped by user_id, so an
+    Auth-rejection branches (non-dict payload, missing session, missing
+    message_id) intentionally return without a reply: the client either
+    never raised a fence for this call (because it had no message_id)
+    or isn't a legitimate session, so a silent drop is correct there.
+
+    Stream auth is implicit: the key is scoped by user_id, so an
     authenticated session can only ever read its own logs. No DB lookup.
     """
     if not isinstance(data, dict):
