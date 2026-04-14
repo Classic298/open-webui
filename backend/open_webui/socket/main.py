@@ -1009,6 +1009,17 @@ async def get_event_emitter(request_info, update_db=True):
     # needed. Clients use this to request a replay of events they missed
     # after a reconnect / refresh via the `resume-stream` handler below.
     seq_counter = {'n': 0}
+    # Reset any stale resume log for this message_id. Continuation,
+    # regeneration-into-same-id, or a retry after a crashed worker can
+    # create a second emitter for the same message_id. The old emitter's
+    # explicit stream IDs (`0-{seq}`) would collide with our fresh ones
+    # and XADD would silently fail, quietly breaking resumability for
+    # exactly the flows this feature is meant to protect. Deleting the
+    # old log up front guarantees our XADD `0-1` is accepted and the log
+    # reflects only the current run, not a mix of runs.
+    message_id = request_info.get('message_id') if isinstance(request_info, dict) else None
+    if message_id and REDIS is not None:
+        await _stream_log_truncate(message_id)
 
     async def __event_emitter__(event_data):
         user_id = request_info['user_id']
