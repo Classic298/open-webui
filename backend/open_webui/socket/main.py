@@ -188,8 +188,10 @@ YDOC_MANAGER = YdocManager(
 # client.
 RESUME_STREAM_MAXLEN = 2000
 # Defensive TTL so orphaned logs (crashed worker, cancelled request) are
-# evicted automatically. Completed streams are deleted eagerly below.
+# evicted automatically. Completed streams shorten their TTL on done so
+# the key disappears faster once no live clients need it.
 RESUME_STREAM_TTL_SEC = 3600
+RESUME_STREAM_DONE_TTL_SEC = 30
 
 
 def _stream_key(message_id: str) -> str:
@@ -1051,23 +1053,30 @@ async def get_event_emitter(request_info, update_db=True):
         await _stream_log_append(message_id, envelope, seq)
         await sio.emit('events', envelope, room=f'user:{user_id}')
 
-        # If this event finalized the message, schedule log cleanup. Give
-        # reconnecting clients a short grace window to pick up the final
-        # frames before we delete the log (for anything beyond the grace
-        # window, the DB is already up to date and resume isn't needed).
+        # If this event finalized the message, shorten the log's TTL so
+        # it self-evicts shortly. A brief grace window lets clients that
+        # reconnect right after completion still catch the terminal
+        # frames via replay; anything beyond the window loads the
+        # already-persisted message from the DB.
+        #
+        # Using EXPIRE here (rather than scheduling an asyncio.create_task
+        # that calls DELETE later) is race-free: if a second emitter for
+        # the same message_id starts before the TTL fires, its eager
+        # truncate at emitter creation resets the key and subsequent
+        # EXPIRE calls in _stream_log_append extend the TTL normally. A
+        # pending background DELETE would instead wipe the new run's log
+        # mid-stream.
+        #
         # Narrow carefully: `event_data['data']` is a dict for most event
         # types but can legitimately be a list/str/None for some custom
         # pipeline-emitted events. Calling `.get` on those would raise.
         inner = event_data.get('data') if isinstance(event_data, dict) else None
         if isinstance(inner, dict) and inner.get('done') is True:
-            async def _delayed_truncate(mid):
+            if REDIS is not None and message_id:
                 try:
-                    await asyncio.sleep(30)
-                    await _stream_log_truncate(mid)
-                except Exception:
-                    pass
-
-            asyncio.create_task(_delayed_truncate(message_id))
+                    await REDIS.expire(_stream_key(message_id), RESUME_STREAM_DONE_TTL_SEC)
+                except Exception as e:
+                    log.debug(f'stream resume log done-TTL shorten failed for {message_id}: {e}')
 
         if update_db and message_id and not request_info.get('chat_id', '').startswith('local:'):
             event_type = event_data.get('type')
