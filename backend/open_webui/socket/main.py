@@ -180,6 +180,12 @@ YDOC_MANAGER = YdocManager(
 RESUME_STREAM_MAXLEN = 2000
 RESUME_STREAM_TTL_SEC = 3600
 RESUME_STREAM_DONE_TTL_SEC = 30
+# Upper bound on bytes in a single resume-stream:replay payload so we
+# stay under Socket.IO's default 1MB buffer. When the log exceeds this,
+# we emit only the most recent entries (older ones are already reflected
+# in the DB-backed content loaded at refresh time, and the final done
+# checkpoint reconciles anything else).
+RESUME_STREAM_REPLAY_MAX_BYTES = 900_000
 # Hot-path timeout: tight so a slow Redis can't stall live tokens.
 # Replay read timeout: looser since a resume is user-blocking anyway
 # and silent timeout here is worse than a brief extra wait. Both
@@ -747,7 +753,11 @@ async def resume_stream(sid, data):
     if not isinstance(data, dict):
         return
     message_id = data.get('message_id')
-    if not message_id:
+    chat_id = data.get('chat_id')
+    if not message_id or not chat_id:
+        # Both IDs are required: chat_id drives the ownership check, and
+        # without it a buggy/malicious client could bypass chat-level
+        # validation and rely only on the user-scoped key guarantee.
         return
 
     request_id = data.get('request_id')
@@ -763,33 +773,42 @@ async def resume_stream(sid, data):
             last_seq = int(data.get('last_seq') or 0)
         except (TypeError, ValueError):
             last_seq = 0
-        # Defense-in-depth: validate chat ownership when chat_id is
-        # present. The message-in-chat lookup can legitimately fail for
-        # in-flight assistants that haven't been persisted to DB yet
-        # (ENABLE_REALTIME_CHAT_SAVE=False flow), which is exactly the
-        # case this feature is meant to recover — so we don't gate
-        # replay on message presence. The user-scoped log key already
-        # prevents cross-user access regardless. Fails CLOSED on DB
-        # errors or when the user doesn't own the supplied chat_id.
-        chat_id = data.get('chat_id')
-        chat_ok = True
-        if chat_id:
-            try:
-                chat = await Chats.get_chat_by_id_and_user_id(chat_id, user_id)
-                if not chat:
-                    chat_ok = False
-            except Exception as e:
-                log.warning(f'resume-stream chat ownership check failed: {e}')
-                chat_ok = False
+        # Defense-in-depth: validate chat ownership. The message-in-chat
+        # check would reject legitimate in-flight resumes because the
+        # assistant stub isn't persisted to DB until after streaming
+        # completes, so we rely on user-scoped log keys for that layer.
+        # Fails CLOSED on DB errors or unowned chat.
+        chat_ok = False
+        try:
+            chat = await Chats.get_chat_by_id_and_user_id(chat_id, user_id)
+            chat_ok = chat is not None
+        except Exception as e:
+            log.warning(f'resume-stream chat ownership check failed: {e}')
         if chat_ok:
             envelopes = await _stream_log_read(user_id, message_id, last_seq)
+
+    # Cap payload bytes. Keep the newest entries that fit; older ones
+    # are either already in the DB-backed content or will arrive via the
+    # final done:True checkpoint.
+    total_bytes = 0
+    capped = []
+    for env in reversed(envelopes):
+        try:
+            size = len(json.dumps(env))
+        except Exception:
+            continue
+        if total_bytes + size > RESUME_STREAM_REPLAY_MAX_BYTES and capped:
+            break
+        capped.append(env)
+        total_bytes += size
+    capped.reverse()
 
     await sio.emit(
         'resume-stream:replay',
         {
             'message_id': message_id,
             'request_id': request_id,
-            'envelopes': envelopes,
+            'envelopes': capped,
         },
         to=sid,
     )
