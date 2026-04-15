@@ -648,9 +648,12 @@
 	};
 
 	// Drop fence AND flush buffered events (happy path + timeout).
-	// Flush in insertion order: live frames were emitted sequentially by
-	// one emitter and preserved by socket.io, so push-order == seq-order
-	// and no sort is needed (mixing with seq-less frames would reorder).
+	// Drains via shift() and keeps the queue live in the map while
+	// draining: chatEventHandler awaits `tick()`, yielding control.
+	// A live frame arriving during that yield must keep buffering (so
+	// it stays ordered after still-queued earlier frames); otherwise
+	// it would bypass the queue, advance lastSeq, and cause the queued
+	// frames to be dropped by the dedupe guard when we get back to them.
 	const clearResumeFence = async (messageId) => {
 		const timer = resumeFenceTimerByMessageId.get(messageId);
 		if (timer) {
@@ -659,14 +662,16 @@
 		}
 		const queue = resumeQueueByMessageId.get(messageId);
 		if (!queue) return;
-		resumeQueueByMessageId.delete(messageId);
-		for (const event of queue) {
+		while (queue.length > 0) {
+			const event = queue.shift();
 			try {
 				await chatEventHandler(event);
 			} catch (e) {
 				console.error('resume fence flush error', e);
 			}
 		}
+		resumeQueueByMessageId.delete(messageId);
+		resumeActiveRequestIdByMessageId.delete(messageId);
 	};
 
 	const requestResumeForMessage = (message) => {
