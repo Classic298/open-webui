@@ -224,7 +224,10 @@ def _stream_key(user_id: str, message_id: str) -> str:
 
 
 def _stream_seq_key(user_id: str, message_id: str) -> str:
-    return f'{REDIS_KEY_PREFIX}:stream:{user_id}:{message_id}:seq'
+    # Distinct top-level namespace (`streamseq`, not `stream`) so a
+    # message_id containing delimiter-like characters can't collide the
+    # seq key of one message with the stream key of another.
+    return f'{REDIS_KEY_PREFIX}:streamseq:{user_id}:{message_id}'
 
 
 async def _stream_seq_allocate(user_id: str, message_id: str):

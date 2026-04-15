@@ -648,29 +648,31 @@
 	};
 
 	// Drop fence AND flush buffered events (happy path + timeout).
-	// Drain via shift(), keeping the queue present in the map so live
-	// frames arriving during an await inside chatEventHandler keep
-	// buffering into the same queue instead of racing ahead. Flushed
-	// events are marked `_replayed` before dispatch so chatEventHandler's
-	// fence-buffering branch short-circuits and doesn't re-queue them
-	// (which would be an infinite loop).
+	// Swap the queue array out for an empty one each batch so live frames
+	// arriving during an await keep buffering (into the fresh empty
+	// array that's still in the map) instead of racing ahead. Iterate
+	// the captured batch linearly, then loop until no new frames came
+	// in. O(N) drain instead of O(N²) from shift().
 	const clearResumeFence = async (messageId) => {
 		const timer = resumeFenceTimerByMessageId.get(messageId);
 		if (timer) {
 			clearTimeout(timer);
 			resumeFenceTimerByMessageId.delete(messageId);
 		}
-		const queue = resumeQueueByMessageId.get(messageId);
-		if (!queue) return;
-		while (queue.length > 0) {
-			const event = queue.shift();
-			if (event && typeof event === 'object') {
-				event._replayed = true;
-			}
-			try {
-				await chatEventHandler(event);
-			} catch (e) {
-				console.error('resume fence flush error', e);
+		if (!resumeQueueByMessageId.has(messageId)) return;
+		while (true) {
+			const batch = resumeQueueByMessageId.get(messageId);
+			if (!batch || batch.length === 0) break;
+			resumeQueueByMessageId.set(messageId, []);
+			for (const event of batch) {
+				if (event && typeof event === 'object') {
+					event._replayed = true;
+				}
+				try {
+					await chatEventHandler(event);
+				} catch (e) {
+					console.error('resume fence flush error', e);
+				}
 			}
 		}
 		resumeQueueByMessageId.delete(messageId);
