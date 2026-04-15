@@ -1112,10 +1112,17 @@ async def get_event_emitter(request_info, update_db=True):
         # will no longer replay against.
         outer_type = event_data.get('type') if isinstance(event_data, dict) else None
         inner = event_data.get('data') if isinstance(event_data, dict) else None
+        # Only the specific chat:completion-with-error shape is terminal;
+        # a generic `error` field on some other event type could be a
+        # transient warning and shouldn't age the keys out early.
         is_terminal = (
             (isinstance(inner, dict) and inner.get('done') is True)
             or outer_type == 'chat:tasks:cancel'
-            or (isinstance(inner, dict) and inner.get('error'))
+            or (
+                outer_type == 'chat:completion'
+                and isinstance(inner, dict)
+                and inner.get('error')
+            )
         )
         if is_terminal and REDIS is not None and user_id and message_id:
             try:

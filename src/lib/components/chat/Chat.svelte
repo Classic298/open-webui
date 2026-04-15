@@ -724,7 +724,11 @@
 		if (expected && payload?.request_id !== expected) {
 			return;
 		}
-		resumeActiveRequestIdByMessageId.delete(messageId);
+		// Don't delete the active request_id here: a NEWER request could
+		// start during replay and set its own id. The finally below only
+		// clears the fence if we're still the active request; if a newer
+		// request has taken over, let its own lifecycle handle cleanup.
+		const ownRequestId = payload?.request_id;
 		const envelopes = Array.isArray(payload?.envelopes) ? payload.envelopes : [];
 		try {
 			for (const envelope of envelopes) {
@@ -733,8 +737,10 @@
 				await chatEventHandler(envelope);
 			}
 		} finally {
-			// Finally-clear so a mid-replay throw can't freeze live updates.
-			await clearResumeFence(messageId);
+			const current = resumeActiveRequestIdByMessageId.get(messageId);
+			if (current === ownRequestId || current == null) {
+				await clearResumeFence(messageId);
+			}
 		}
 	};
 
@@ -745,10 +751,12 @@
 	};
 
 	// Iterate all in-flight assistants so arena siblings aren't missed.
+	// Strict `done === false` so legacy messages with a missing `done`
+	// field don't get fanned out as unnecessary resume requests.
 	const requestResumeForAllInProgress = () => {
 		if (!history?.messages) return;
 		for (const message of Object.values(history.messages)) {
-			if (message && message.role === 'assistant' && !message.done) {
+			if (message && message.role === 'assistant' && message.done === false) {
 				requestResumeForMessage(message);
 			}
 		}
