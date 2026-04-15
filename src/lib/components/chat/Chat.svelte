@@ -699,6 +699,7 @@
 				: `${message.id}-${Date.now()}-${Math.random()}`;
 		resumeActiveRequestIdByMessageId.set(message.id, requestId);
 		$socket.emit('resume-stream', {
+			chat_id: $chatId,
 			message_id: message.id,
 			request_id: requestId,
 			last_seq: resumeSeqByMessageId.get(message.id) ?? 0
@@ -708,10 +709,12 @@
 	const onResumeStreamReplay = async (payload) => {
 		const messageId = payload?.message_id;
 		if (!messageId) return;
-		// Drop stale replies from superseded requests so they can't
-		// clear a fence that belongs to a newer in-flight request.
+		// Drop stale replies. If an active request_id is set for this
+		// message, require an exact match — a reply without a request_id,
+		// or with a mismatched one, belongs to a superseded request and
+		// must not clear the active fence.
 		const expected = resumeActiveRequestIdByMessageId.get(messageId);
-		if (expected && payload?.request_id && payload.request_id !== expected) {
+		if (expected && payload?.request_id !== expected) {
 			return;
 		}
 		resumeActiveRequestIdByMessageId.delete(messageId);

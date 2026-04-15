@@ -719,12 +719,31 @@ async def resume_stream(sid, data):
     envelopes = []
     user = SESSION_POOL.get(sid)
     user_id = user.get('id') if user else None
-    if user_id and REDIS is not None:
+    # Gate read on REALTIME mode to match the write-side gate. Otherwise
+    # stale logs written before the flag was flipped (or by a mixed-
+    # version peer) would still get replayed on top of DB-backed content
+    # and double-apply.
+    if user_id and REDIS is not None and not ENABLE_REALTIME_CHAT_SAVE:
         try:
             last_seq = int(data.get('last_seq') or 0)
         except (TypeError, ValueError):
             last_seq = 0
-        envelopes = await _stream_log_read(user_id, message_id, last_seq)
+        # Defense-in-depth: validate chat ownership even though the log
+        # key is already user-scoped. Rejects only when we can *prove*
+        # ownership fails — a missing/unknown chat_id falls through to
+        # the user-scoped key guarantee so we don't regress the "stub
+        # not yet persisted in DB" refresh case.
+        chat_id = data.get('chat_id')
+        chat_ok = True
+        if chat_id:
+            try:
+                chat = await Chats.get_chat_by_id_and_user_id(chat_id, user_id)
+                chat_ok = chat is not None
+            except Exception as e:
+                log.warning(f'resume-stream chat ownership check failed: {e}')
+                chat_ok = True  # fail open to not regress legitimate callers
+        if chat_ok:
+            envelopes = await _stream_log_read(user_id, message_id, last_seq)
 
     await sio.emit(
         'resume-stream:replay',
