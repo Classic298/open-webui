@@ -257,28 +257,32 @@ def _breaker_record_failure() -> None:
         _hot_path_breaker['open_until'] = time.time() + _HOT_PATH_BREAKER_COOLDOWN_SEC
 
 
-def _stream_key(user_id: str, message_id: str) -> str:
-    # user_id-scoped key — auth is implicit from the session's user.
-    return f'{REDIS_KEY_PREFIX}:stream:{user_id}:{message_id}'
+def _stream_key(user_id: str, chat_id: str, message_id: str) -> str:
+    # Keyed by (user, chat, message). The chat segment binds the message
+    # to its chat at the key level — a resume request for a different
+    # chat_id reads a non-existent key and returns empty. Cleaner than a
+    # DB binding check (no extra round-trip, no "stub not yet persisted"
+    # false negatives).
+    return f'{REDIS_KEY_PREFIX}:stream:{user_id}:{chat_id}:{message_id}'
 
 
-def _stream_seq_key(user_id: str, message_id: str) -> str:
+def _stream_seq_key(user_id: str, chat_id: str, message_id: str) -> str:
     # Distinct top-level namespace (`streamseq`, not `stream`) so a
     # message_id containing delimiter-like characters can't collide the
     # seq key of one message with the stream key of another.
-    return f'{REDIS_KEY_PREFIX}:streamseq:{user_id}:{message_id}'
+    return f'{REDIS_KEY_PREFIX}:streamseq:{user_id}:{chat_id}:{message_id}'
 
 
-async def _stream_seq_allocate(user_id: str, message_id: str):
+async def _stream_seq_allocate(user_id: str, chat_id: str, message_id: str):
     """Allocate the next seq via atomic INCR, or None when resume is off."""
     if ENABLE_REALTIME_CHAT_SAVE:
         return None
-    if REDIS is None or not user_id or not message_id:
+    if REDIS is None or not user_id or not chat_id or not message_id:
         return None
     if _breaker_open():
         return None
     try:
-        key = _stream_seq_key(user_id, message_id)
+        key = _stream_seq_key(user_id, chat_id, message_id)
         seq = await asyncio.wait_for(
             REDIS.incr(key), timeout=RESUME_STREAM_REDIS_TIMEOUT_SEC
         )
@@ -306,15 +310,15 @@ async def _stream_seq_allocate(user_id: str, message_id: str):
         return None
 
 
-async def _stream_log_append(user_id: str, message_id: str, envelope: dict, seq: int) -> None:
+async def _stream_log_append(user_id: str, chat_id: str, message_id: str, envelope: dict, seq: int) -> None:
     """Append envelope to resume log. Timeout drops the entry, not the emit."""
-    if REDIS is None or not user_id or not message_id:
+    if REDIS is None or not user_id or not chat_id or not message_id:
         return
     if _breaker_open():
         return
     try:
-        key = _stream_key(user_id, message_id)
-        seq_key = _stream_seq_key(user_id, message_id)
+        key = _stream_key(user_id, chat_id, message_id)
+        seq_key = _stream_seq_key(user_id, chat_id, message_id)
         pipe = REDIS.pipeline(transaction=False)
         pipe.xadd(
             key,
@@ -340,18 +344,13 @@ async def _stream_log_append(user_id: str, message_id: str, envelope: dict, seq:
         log.warning(f'stream resume log append failed for {message_id}: {e}')
 
 
-async def _stream_log_read(user_id: str, message_id: str, after_seq: int):
-    """Return envelopes with seq > after_seq, in order.
-
-    Full scan bounded by MAXLEN; Python filters by seq because auto IDs
-    don't encode it. With MAXLEN=2000 this is a few ms at worst and
-    resume is a rare, user-driven event so the cost is fine.
-    """
-    if REDIS is None or not user_id or not message_id:
+async def _stream_log_read(user_id: str, chat_id: str, message_id: str, after_seq: int):
+    """Return envelopes with seq > after_seq, in order."""
+    if REDIS is None or not user_id or not chat_id or not message_id:
         return []
     try:
         entries = await asyncio.wait_for(
-            REDIS.xrange(_stream_key(user_id, message_id), min='-', max='+'),
+            REDIS.xrange(_stream_key(user_id, chat_id, message_id), min='-', max='+'),
             timeout=RESUME_STREAM_READ_TIMEOUT_SEC,
         )
     except asyncio.TimeoutError:
@@ -789,7 +788,7 @@ async def resume_stream(sid, data):
         except Exception as e:
             log.warning(f'resume-stream chat ownership check failed: {e}')
         if chat_ok:
-            envelopes = await _stream_log_read(user_id, message_id, last_seq)
+            envelopes = await _stream_log_read(user_id, chat_id, message_id, last_seq)
 
     # Cap payload bytes. Keep the newest entries that fit; older ones
     # are either already in the DB-backed content or will arrive via the
@@ -1126,7 +1125,7 @@ async def get_event_emitter(request_info, update_db=True):
         message_id = request_info['message_id']
 
         async with _emit_lock_for(user_id, message_id):
-            seq = await _stream_seq_allocate(user_id, message_id)
+            seq = await _stream_seq_allocate(user_id, chat_id, message_id)
 
             envelope = {
                 'chat_id': chat_id,
@@ -1138,7 +1137,7 @@ async def get_event_emitter(request_info, update_db=True):
             # duplicates from the inverted race.
             if seq is not None:
                 envelope['seq'] = seq
-                await _stream_log_append(user_id, message_id, envelope, seq)
+                await _stream_log_append(user_id, chat_id, message_id, envelope, seq)
             await sio.emit('events', envelope, room=f'user:{user_id}')
 
         # Any terminal event shortens TTL so log + seq self-evict together.
@@ -1159,11 +1158,11 @@ async def get_event_emitter(request_info, update_db=True):
                 and inner.get('error')
             )
         )
-        if is_terminal and REDIS is not None and user_id and message_id:
+        if is_terminal and REDIS is not None and user_id and chat_id and message_id:
             try:
                 pipe = REDIS.pipeline(transaction=False)
-                pipe.expire(_stream_key(user_id, message_id), RESUME_STREAM_DONE_TTL_SEC)
-                pipe.expire(_stream_seq_key(user_id, message_id), RESUME_STREAM_DONE_TTL_SEC)
+                pipe.expire(_stream_key(user_id, chat_id, message_id), RESUME_STREAM_DONE_TTL_SEC)
+                pipe.expire(_stream_seq_key(user_id, chat_id, message_id), RESUME_STREAM_DONE_TTL_SEC)
                 await asyncio.wait_for(
                     pipe.execute(), timeout=RESUME_STREAM_REDIS_TIMEOUT_SEC
                 )
