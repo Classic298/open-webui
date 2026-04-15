@@ -180,7 +180,6 @@ YDOC_MANAGER = YdocManager(
 RESUME_STREAM_MAXLEN = 2000
 RESUME_STREAM_TTL_SEC = 3600
 RESUME_STREAM_DONE_TTL_SEC = 30
-RESUME_STREAM_TTL_REFRESH_EVERY = 64
 # Hot-path timeout: tight so a slow Redis can't stall live tokens.
 # Replay read timeout: looser since a resume is user-blocking anyway
 # and silent timeout here is worse than a brief extra wait. Both
@@ -304,7 +303,6 @@ async def _stream_log_append(user_id: str, message_id: str, envelope: dict, seq:
     if _breaker_open():
         return
     try:
-        refresh_ttl = (seq == 1) or (seq % RESUME_STREAM_TTL_REFRESH_EVERY == 0)
         key = _stream_key(user_id, message_id)
         seq_key = _stream_seq_key(user_id, message_id)
         pipe = REDIS.pipeline(transaction=False)
@@ -314,12 +312,12 @@ async def _stream_log_append(user_id: str, message_id: str, envelope: dict, seq:
             maxlen=RESUME_STREAM_MAXLEN,
             approximate=True,
         )
-        if refresh_ttl:
-            # Refresh both keys together — without this the seq counter
-            # can expire mid-stream on responses longer than the TTL and
-            # INCR restarts at 1, corrupting replay ordering.
-            pipe.expire(key, RESUME_STREAM_TTL_SEC)
-            pipe.expire(seq_key, RESUME_STREAM_TTL_SEC)
+        # Refresh both keys every append. Pipelined with XADD so no extra
+        # round-trip; guarantees sparse / slow streams (where the seq
+        # counter might otherwise idle past the TTL and INCR would
+        # restart at 1) stay alive as long as the stream is active.
+        pipe.expire(key, RESUME_STREAM_TTL_SEC)
+        pipe.expire(seq_key, RESUME_STREAM_TTL_SEC)
         await asyncio.wait_for(
             pipe.execute(), timeout=RESUME_STREAM_REDIS_TIMEOUT_SEC
         )
@@ -765,13 +763,14 @@ async def resume_stream(sid, data):
             last_seq = int(data.get('last_seq') or 0)
         except (TypeError, ValueError):
             last_seq = 0
-        # Defense-in-depth: validate chat ownership AND message-in-chat
-        # binding even though the log key is already user-scoped. Fails
-        # CLOSED on DB errors so an infra hiccup can't skip the check.
-        # When chat_id is absent we fall through to the user-scoped key
-        # guarantee so legacy clients that don't send chat_id still work.
-        # Either way we reply with (at worst) empty envelopes below so
-        # the client fence clears deterministically.
+        # Defense-in-depth: validate chat ownership when chat_id is
+        # present. The message-in-chat lookup can legitimately fail for
+        # in-flight assistants that haven't been persisted to DB yet
+        # (ENABLE_REALTIME_CHAT_SAVE=False flow), which is exactly the
+        # case this feature is meant to recover — so we don't gate
+        # replay on message presence. The user-scoped log key already
+        # prevents cross-user access regardless. Fails CLOSED on DB
+        # errors or when the user doesn't own the supplied chat_id.
         chat_id = data.get('chat_id')
         chat_ok = True
         if chat_id:
@@ -779,16 +778,8 @@ async def resume_stream(sid, data):
                 chat = await Chats.get_chat_by_id_and_user_id(chat_id, user_id)
                 if not chat:
                     chat_ok = False
-                else:
-                    # Reuse the chat record for the message-in-chat check
-                    # so we don't pay a second DB round-trip.
-                    messages = (
-                        getattr(chat, 'chat', {}) or {}
-                    ).get('history', {}).get('messages', {}) or {}
-                    if message_id not in messages:
-                        chat_ok = False
             except Exception as e:
-                log.warning(f'resume-stream chat/message check failed: {e}')
+                log.warning(f'resume-stream chat ownership check failed: {e}')
                 chat_ok = False
         if chat_ok:
             envelopes = await _stream_log_read(user_id, message_id, last_seq)
