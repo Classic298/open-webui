@@ -185,15 +185,21 @@ RESUME_STREAM_TTL_REFRESH_EVERY = 64
 # Replay read timeout: looser since a resume is user-blocking anyway
 # and silent timeout here is worse than a brief extra wait. Both
 # configurable for infra where Redis isn't colocated.
-def _float_env(name: str, default: float) -> float:
+def _float_env(name: str, default: float, minimum: float = 0.0) -> float:
     val = os.environ.get(name)
     if val is None or val == '':
         return default
     try:
-        return float(val)
+        parsed = float(val)
     except (TypeError, ValueError):
         log.warning(f'Invalid {name}={val!r}; using default {default}')
         return default
+    if parsed <= minimum:
+        log.warning(
+            f'{name}={parsed} is not positive (must be > {minimum}); using default {default}'
+        )
+        return default
+    return parsed
 
 
 RESUME_STREAM_REDIS_TIMEOUT_SEC = _float_env('RESUME_STREAM_REDIS_TIMEOUT_SEC', 0.1)
