@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import random
+import weakref
 
 import socketio
 import logging
@@ -200,6 +201,26 @@ RESUME_STREAM_READ_TIMEOUT_SEC = float(
 _HOT_PATH_BREAKER_FAILURE_THRESHOLD = 3
 _HOT_PATH_BREAKER_COOLDOWN_SEC = 10.0
 _hot_path_breaker = {'failures': 0, 'open_until': 0.0}
+
+# Per-message emitter lock. Serializes the seq-alloc + log-append + emit
+# sequence within a worker so two overlapping emitters for the same
+# (user_id, message_id) can't interleave and produce out-of-seq live
+# frames. Doesn't cover cross-worker concurrency, but concurrent
+# emitters for the same message_id on different workers is an even
+# rarer scenario. WeakValueDictionary cleans up entries automatically
+# once no coroutine holds the lock (i.e., no one is inside the critical
+# section and no one is waiting to enter).
+_emit_locks = weakref.WeakValueDictionary()
+
+
+def _emit_lock_for(user_id: str, message_id: str) -> asyncio.Lock:
+    key = f'{user_id}:{message_id}'
+    lock = _emit_locks.get(key)
+    if lock is None:
+        # setdefault is atomic under the GIL; races resolve to a single
+        # Lock and subsequent calls see it via the first branch.
+        lock = _emit_locks.setdefault(key, asyncio.Lock())
+    return lock
 
 
 def _breaker_open() -> bool:
@@ -732,10 +753,12 @@ async def resume_stream(sid, data):
         except (TypeError, ValueError):
             last_seq = 0
         # Defense-in-depth: validate chat ownership even though the log
-        # key is already user-scoped. Rejects only when we can *prove*
-        # ownership fails — a missing/unknown chat_id falls through to
-        # the user-scoped key guarantee so we don't regress the "stub
-        # not yet persisted in DB" refresh case.
+        # key is already user-scoped. Fails CLOSED on DB errors so an
+        # infra hiccup can't skip the ownership check. When chat_id is
+        # absent we fall through to the user-scoped key guarantee so
+        # legacy clients that don't send chat_id still work. Either way
+        # we reply with (at worst) empty envelopes below so the client
+        # fence clears deterministically.
         chat_id = data.get('chat_id')
         chat_ok = True
         if chat_id:
@@ -744,7 +767,7 @@ async def resume_stream(sid, data):
                 chat_ok = chat is not None
             except Exception as e:
                 log.warning(f'resume-stream chat ownership check failed: {e}')
-                chat_ok = True  # fail open to not regress legitimate callers
+                chat_ok = False
         if chat_ok:
             envelopes = await _stream_log_read(user_id, message_id, last_seq)
 
@@ -1049,36 +1072,32 @@ async def disconnect(sid):
 
 
 async def get_event_emitter(request_info, update_db=True):
-    # A single emitter's calls are serial (the streaming loop awaits each
-    # before the next), so seq ordering is guaranteed within one emitter.
-    # CONCURRENT emitters for the same (user_id, message_id) — e.g. a
-    # duplicate request leaking past frontend dedup, or a retry path that
-    # overlaps with the original — can interleave INCR/XADD/emit across
-    # tasks and cause live frames to arrive out of seq order. Replay
-    # reads already sort by seq so resume is safe, but live streaming in
-    # that edge case can drop a frame via the client dedupe guard. Fixing
-    # it properly needs either a distributed per-message lock or a
-    # client-side reorder buffer; neither is worth the complexity for a
-    # configuration OWUI doesn't normally produce.
+    # Concurrency note: within one worker the _emit_lock_for serializes
+    # seq-alloc + log-append + emit per (user_id, message_id), so
+    # overlapping emitters can't interleave and produce out-of-seq live
+    # frames. Cross-worker concurrent emitters for the same message_id
+    # are still unprotected (would need a distributed lock), but that's
+    # a configuration OWUI doesn't normally produce.
     async def __event_emitter__(event_data):
         user_id = request_info['user_id']
         chat_id = request_info['chat_id']
         message_id = request_info['message_id']
 
-        seq = await _stream_seq_allocate(user_id, message_id)
+        async with _emit_lock_for(user_id, message_id):
+            seq = await _stream_seq_allocate(user_id, message_id)
 
-        envelope = {
-            'chat_id': chat_id,
-            'message_id': message_id,
-            'data': event_data,
-        }
-        # Log before emit so a reconnecting client can't resume-read past
-        # a frame that hasn't been persisted yet. Client seq guard drops
-        # duplicates from the inverted race.
-        if seq is not None:
-            envelope['seq'] = seq
-            await _stream_log_append(user_id, message_id, envelope, seq)
-        await sio.emit('events', envelope, room=f'user:{user_id}')
+            envelope = {
+                'chat_id': chat_id,
+                'message_id': message_id,
+                'data': event_data,
+            }
+            # Log before emit so a reconnecting client can't resume-read past
+            # a frame that hasn't been persisted yet. Client seq guard drops
+            # duplicates from the inverted race.
+            if seq is not None:
+                envelope['seq'] = seq
+                await _stream_log_append(user_id, message_id, envelope, seq)
+            await sio.emit('events', envelope, room=f'user:{user_id}')
 
         # Any terminal event shortens TTL so log + seq self-evict together.
         # Covers normal completion (done:True), explicit cancel, and

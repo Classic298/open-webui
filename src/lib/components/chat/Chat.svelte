@@ -452,9 +452,12 @@
 
 			if (message) {
 				// Buffer live frames during replay; _replayed frames skip the fence.
+				// Store the ack callback alongside the event so Socket.IO
+				// call-style events (confirmation/execute/input) don't lose
+				// their response path when buffered and later replayed.
 				const queue = resumeQueueByMessageId.get(event.message_id);
 				if (queue && !event?._replayed) {
-					queue.push(event);
+					queue.push({ event, cb });
 					return;
 				}
 
@@ -664,12 +667,14 @@
 			const batch = resumeQueueByMessageId.get(messageId);
 			if (!batch || batch.length === 0) break;
 			resumeQueueByMessageId.set(messageId, []);
-			for (const event of batch) {
+			for (const item of batch) {
+				const event = item?.event;
+				const cb = item?.cb;
 				if (event && typeof event === 'object') {
 					event._replayed = true;
 				}
 				try {
-					await chatEventHandler(event);
+					await chatEventHandler(event, cb);
 				} catch (e) {
 					console.error('resume fence flush error', e);
 				}
