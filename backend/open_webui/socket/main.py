@@ -282,7 +282,11 @@ async def _stream_seq_allocate(user_id: str, message_id: str):
         seq = await asyncio.wait_for(
             REDIS.incr(key), timeout=RESUME_STREAM_REDIS_TIMEOUT_SEC
         )
-        _breaker_record_success()
+        # Don't record breaker success here — only append success counts
+        # as "Redis is healthy end-to-end." If INCR kept succeeding but
+        # XADD kept failing, counting INCR successes would reset the
+        # breaker on every frame and it would never trip for the exact
+        # failure mode we're trying to short-circuit.
         if seq == 1:
             try:
                 await asyncio.wait_for(
@@ -806,6 +810,7 @@ async def resume_stream(sid, data):
         capped.append(env)
         total_bytes += size
     capped.reverse()
+    truncated = len(capped) < len(envelopes)
 
     await sio.emit(
         'resume-stream:replay',
@@ -813,6 +818,7 @@ async def resume_stream(sid, data):
             'message_id': message_id,
             'request_id': request_id,
             'envelopes': capped,
+            'truncated': truncated,
         },
         to=sid,
     )

@@ -738,6 +738,13 @@
 		// clears the fence if we're still the active request; if a newer
 		// request has taken over, let its own lifecycle handle cleanup.
 		const ownRequestId = payload?.request_id;
+		if (payload?.truncated) {
+			// Replay omitted older entries that wouldn't fit in the Socket.IO
+			// buffer. The final done checkpoint reconciles most content;
+			// non-DB-backed side-channel events (sources/embeds) may be
+			// missing until a full chat reload.
+			console.warn('resume-stream replay truncated for', messageId);
+		}
 		const envelopes = Array.isArray(payload?.envelopes) ? payload.envelopes : [];
 		try {
 			for (const envelope of envelopes) {
