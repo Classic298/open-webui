@@ -648,12 +648,12 @@
 	};
 
 	// Drop fence AND flush buffered events (happy path + timeout).
-	// Drains via shift() and keeps the queue live in the map while
-	// draining: chatEventHandler awaits `tick()`, yielding control.
-	// A live frame arriving during that yield must keep buffering (so
-	// it stays ordered after still-queued earlier frames); otherwise
-	// it would bypass the queue, advance lastSeq, and cause the queued
-	// frames to be dropped by the dedupe guard when we get back to them.
+	// Drain via shift(), keeping the queue present in the map so live
+	// frames arriving during an await inside chatEventHandler keep
+	// buffering into the same queue instead of racing ahead. Flushed
+	// events are marked `_replayed` before dispatch so chatEventHandler's
+	// fence-buffering branch short-circuits and doesn't re-queue them
+	// (which would be an infinite loop).
 	const clearResumeFence = async (messageId) => {
 		const timer = resumeFenceTimerByMessageId.get(messageId);
 		if (timer) {
@@ -664,6 +664,9 @@
 		if (!queue) return;
 		while (queue.length > 0) {
 			const event = queue.shift();
+			if (event && typeof event === 'object') {
+				event._replayed = true;
+			}
 			try {
 				await chatEventHandler(event);
 			} catch (e) {

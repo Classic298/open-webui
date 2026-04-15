@@ -191,6 +191,32 @@ RESUME_STREAM_READ_TIMEOUT_SEC = float(
     os.environ.get('RESUME_STREAM_READ_TIMEOUT_SEC', '1.0')
 )
 
+# Module-level circuit breaker for the streaming hot path. After N
+# consecutive Redis failures/timeouts, short-circuit seq/log calls for
+# a cool-down window so every outgoing frame doesn't pay the timeout
+# wall-clock cost during a sustained outage. Global (not per-message)
+# because when Redis is the thing that's unhealthy, it's unhealthy for
+# everyone.
+_HOT_PATH_BREAKER_FAILURE_THRESHOLD = 3
+_HOT_PATH_BREAKER_COOLDOWN_SEC = 10.0
+_hot_path_breaker = {'failures': 0, 'open_until': 0.0}
+
+
+def _breaker_open() -> bool:
+    return time.time() < _hot_path_breaker['open_until']
+
+
+def _breaker_record_success() -> None:
+    if _hot_path_breaker['failures']:
+        _hot_path_breaker['failures'] = 0
+        _hot_path_breaker['open_until'] = 0.0
+
+
+def _breaker_record_failure() -> None:
+    _hot_path_breaker['failures'] += 1
+    if _hot_path_breaker['failures'] >= _HOT_PATH_BREAKER_FAILURE_THRESHOLD:
+        _hot_path_breaker['open_until'] = time.time() + _HOT_PATH_BREAKER_COOLDOWN_SEC
+
 
 def _stream_key(user_id: str, message_id: str) -> str:
     # user_id-scoped key — auth is implicit from the session's user.
@@ -202,21 +228,19 @@ def _stream_seq_key(user_id: str, message_id: str) -> str:
 
 
 async def _stream_seq_allocate(user_id: str, message_id: str):
-    """Allocate the next seq via atomic INCR, or None when resume is off.
-
-    Returns None when Redis is unavailable, times out, or
-    ENABLE_REALTIME_CHAT_SAVE is set. Callers emit without seq in that
-    case — live streaming continues, no dedupe/resume for that frame.
-    """
+    """Allocate the next seq via atomic INCR, or None when resume is off."""
     if ENABLE_REALTIME_CHAT_SAVE:
         return None
     if REDIS is None or not user_id or not message_id:
+        return None
+    if _breaker_open():
         return None
     try:
         key = _stream_seq_key(user_id, message_id)
         seq = await asyncio.wait_for(
             REDIS.incr(key), timeout=RESUME_STREAM_REDIS_TIMEOUT_SEC
         )
+        _breaker_record_success()
         if seq == 1:
             try:
                 await asyncio.wait_for(
@@ -227,9 +251,11 @@ async def _stream_seq_allocate(user_id: str, message_id: str):
                 pass
         return int(seq)
     except asyncio.TimeoutError:
+        _breaker_record_failure()
         log.warning(f'stream resume seq alloc timed out for {message_id}')
         return None
     except Exception as e:
+        _breaker_record_failure()
         log.warning(f'stream resume seq alloc failed for {message_id}: {e}')
         return None
 
@@ -237,6 +263,8 @@ async def _stream_seq_allocate(user_id: str, message_id: str):
 async def _stream_log_append(user_id: str, message_id: str, envelope: dict, seq: int) -> None:
     """Append envelope to resume log. Timeout drops the entry, not the emit."""
     if REDIS is None or not user_id or not message_id:
+        return
+    if _breaker_open():
         return
     try:
         refresh_ttl = (seq == 1) or (seq % RESUME_STREAM_TTL_REFRESH_EVERY == 0)
@@ -258,9 +286,12 @@ async def _stream_log_append(user_id: str, message_id: str, envelope: dict, seq:
         await asyncio.wait_for(
             pipe.execute(), timeout=RESUME_STREAM_REDIS_TIMEOUT_SEC
         )
+        _breaker_record_success()
     except asyncio.TimeoutError:
+        _breaker_record_failure()
         log.warning(f'stream resume log append timed out for {message_id}')
     except Exception as e:
+        _breaker_record_failure()
         log.warning(f'stream resume log append failed for {message_id}: {e}')
 
 
