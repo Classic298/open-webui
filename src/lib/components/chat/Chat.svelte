@@ -721,6 +721,7 @@
 		const envelopes = Array.isArray(payload?.envelopes) ? payload.envelopes : [];
 		try {
 			for (const envelope of envelopes) {
+				if (!envelope || typeof envelope !== 'object') continue;
 				envelope._replayed = true;
 				await chatEventHandler(envelope);
 			}
