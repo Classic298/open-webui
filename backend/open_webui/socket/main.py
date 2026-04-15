@@ -759,21 +759,30 @@ async def resume_stream(sid, data):
             last_seq = int(data.get('last_seq') or 0)
         except (TypeError, ValueError):
             last_seq = 0
-        # Defense-in-depth: validate chat ownership even though the log
-        # key is already user-scoped. Fails CLOSED on DB errors so an
-        # infra hiccup can't skip the ownership check. When chat_id is
-        # absent we fall through to the user-scoped key guarantee so
-        # legacy clients that don't send chat_id still work. Either way
-        # we reply with (at worst) empty envelopes below so the client
-        # fence clears deterministically.
+        # Defense-in-depth: validate chat ownership AND message-in-chat
+        # binding even though the log key is already user-scoped. Fails
+        # CLOSED on DB errors so an infra hiccup can't skip the check.
+        # When chat_id is absent we fall through to the user-scoped key
+        # guarantee so legacy clients that don't send chat_id still work.
+        # Either way we reply with (at worst) empty envelopes below so
+        # the client fence clears deterministically.
         chat_id = data.get('chat_id')
         chat_ok = True
         if chat_id:
             try:
                 chat = await Chats.get_chat_by_id_and_user_id(chat_id, user_id)
-                chat_ok = chat is not None
+                if not chat:
+                    chat_ok = False
+                else:
+                    # Reuse the chat record for the message-in-chat check
+                    # so we don't pay a second DB round-trip.
+                    messages = (
+                        getattr(chat, 'chat', {}) or {}
+                    ).get('history', {}).get('messages', {}) or {}
+                    if message_id not in messages:
+                        chat_ok = False
             except Exception as e:
-                log.warning(f'resume-stream chat ownership check failed: {e}')
+                log.warning(f'resume-stream chat/message check failed: {e}')
                 chat_ok = False
         if chat_ok:
             envelopes = await _stream_log_read(user_id, message_id, last_seq)

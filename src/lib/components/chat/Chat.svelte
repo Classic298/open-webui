@@ -687,10 +687,14 @@
 	const requestResumeForMessage = (message) => {
 		if (!message || !message.id || message.done) return;
 		if (!$socket || !$socket.connected) return;
-		// Fence up before emit so racing live frames get buffered.
-		if (!resumeQueueByMessageId.has(message.id)) {
-			resumeQueueByMessageId.set(message.id, []);
-		}
+		// Don't stack resume requests. If a fence already exists for
+		// this message, an earlier request is in flight (or will be
+		// resolved by its fallback timer). Stacking would reset the
+		// timer on every reconnect and, under mixed-version deployments
+		// where an old backend doesn't echo request_id, leave the fence
+		// stuck with request_ids that never match.
+		if (resumeQueueByMessageId.has(message.id)) return;
+		resumeQueueByMessageId.set(message.id, []);
 		const existingTimer = resumeFenceTimerByMessageId.get(message.id);
 		if (existingTimer) clearTimeout(existingTimer);
 		resumeFenceTimerByMessageId.set(
