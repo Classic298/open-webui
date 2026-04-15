@@ -1544,6 +1544,15 @@
 					taskIds = taskRes.task_ids;
 				}
 
+				// Request resume BEFORE marking messages done. The
+				// interrupted-generation heuristic below flips `done=true`
+				// when getTaskIdsByChatId returns empty/null, which can
+				// happen on API failure too; asking for resume first lets
+				// us recover when the stream is actually still alive.
+				// Server replies empty if no log exists, so a spurious
+				// request costs one round trip.
+				requestResumeForAllInProgress();
+
 				// If no active tasks and current message is incomplete, generation was interrupted
 				const currentMessage = history.currentId ? history.messages[history.currentId] : null;
 				if (
@@ -1554,13 +1563,6 @@
 				) {
 					currentMessage.done = true;
 				}
-
-				// Resume any in-flight streams. Not gated on taskIds —
-				// that call can fail or race and is not authoritative;
-				// requestResumeForAllInProgress already filters to
-				// unfinished assistants and the server no-ops when no
-				// log exists.
-				requestResumeForAllInProgress();
 
 				await tick();
 

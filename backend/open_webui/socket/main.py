@@ -185,12 +185,19 @@ RESUME_STREAM_TTL_REFRESH_EVERY = 64
 # Replay read timeout: looser since a resume is user-blocking anyway
 # and silent timeout here is worse than a brief extra wait. Both
 # configurable for infra where Redis isn't colocated.
-RESUME_STREAM_REDIS_TIMEOUT_SEC = float(
-    os.environ.get('RESUME_STREAM_REDIS_TIMEOUT_SEC', '0.1')
-)
-RESUME_STREAM_READ_TIMEOUT_SEC = float(
-    os.environ.get('RESUME_STREAM_READ_TIMEOUT_SEC', '1.0')
-)
+def _float_env(name: str, default: float) -> float:
+    val = os.environ.get(name)
+    if val is None or val == '':
+        return default
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        log.warning(f'Invalid {name}={val!r}; using default {default}')
+        return default
+
+
+RESUME_STREAM_REDIS_TIMEOUT_SEC = _float_env('RESUME_STREAM_REDIS_TIMEOUT_SEC', 0.1)
+RESUME_STREAM_READ_TIMEOUT_SEC = _float_env('RESUME_STREAM_READ_TIMEOUT_SEC', 1.0)
 
 # Module-level circuit breaker for the streaming hot path. After N
 # consecutive Redis failures/timeouts, short-circuit seq/log calls for
