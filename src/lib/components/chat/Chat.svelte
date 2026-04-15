@@ -464,14 +464,17 @@
 					return;
 				}
 
-				// Dedupe.
+				// Dedupe check only — advance lastSeq at the end of the
+				// handler, not here. If a downstream handler throws (e.g.,
+				// chat:tags fetch fails), leaving lastSeq unchanged lets
+				// a subsequent replay retry that seq instead of silently
+				// skipping it.
 				const incomingSeq = typeof event?.seq === 'number' ? event.seq : null;
 				if (incomingSeq !== null) {
 					const lastSeq = resumeSeqByMessageId.get(event.message_id) ?? 0;
 					if (incomingSeq <= lastSeq) {
 						return;
 					}
-					resumeSeqByMessageId.set(event.message_id, incomingSeq);
 				}
 
 				const type = event?.data?.type ?? null;
@@ -628,6 +631,17 @@
 				}
 
 				history.messages[event.message_id] = message;
+
+				// Handler completed without throwing — safe to commit the
+				// seq now. Use max() against the current value so a
+				// concurrent higher-seq handler that committed during our
+				// awaits doesn't get clobbered.
+				if (incomingSeq !== null) {
+					const current = resumeSeqByMessageId.get(event.message_id) ?? 0;
+					if (incomingSeq > current) {
+						resumeSeqByMessageId.set(event.message_id, incomingSeq);
+					}
+				}
 			}
 		} else {
 			// Non-active chat completion: queue stays in the global store.
@@ -635,8 +649,12 @@
 		}
 	};
 
-	// Fallback timer in case the replay ack never arrives.
-	const RESUME_FENCE_TIMEOUT_MS = 10000;
+	// Fallback timer in case the replay ack never arrives. 5s balances:
+	// a legitimately slow Redis XRANGE at RESUME_STREAM_READ_TIMEOUT_SEC
+	// (1s default), versus how long the UI should hold live frames if
+	// a peer backend silently drops the request (mixed-version rollout,
+	// handler not registered, etc).
+	const RESUME_FENCE_TIMEOUT_MS = 5000;
 	const resumeFenceTimerByMessageId = new Map();
 	// Active request_id per message — lets us ignore stale replay
 	// responses from superseded requests (reconnect churn).
