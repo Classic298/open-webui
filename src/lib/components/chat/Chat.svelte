@@ -451,12 +451,15 @@
 			let message = history.messages[event.message_id];
 
 			if (message) {
-				// Buffer live frames during replay; _replayed frames skip the fence.
-				// Store the ack callback alongside the event so Socket.IO
-				// call-style events (confirmation/execute/input) don't lose
-				// their response path when buffered and later replayed.
+				// Buffer live frames during replay; _replayed frames skip
+				// the fence. Call-style events that carry an ack callback
+				// ALSO skip the fence — the server is waiting on the ack
+				// and buffering could exceed WEBSOCKET_EVENT_CALLER_TIMEOUT
+				// (up to RESUME_FENCE_TIMEOUT_MS of delay). Ack events
+				// don't carry seq and don't mutate streamed content, so
+				// bypassing is safe against the original replay race.
 				const queue = resumeQueueByMessageId.get(event.message_id);
-				if (queue && !event?._replayed) {
+				if (queue && !event?._replayed && !cb) {
 					queue.push({ event, cb });
 					return;
 				}
@@ -701,7 +704,9 @@
 			message.id,
 			setTimeout(() => {
 				console.warn('resume-stream fence timed out for', message.id);
-				clearResumeFence(message.id);
+				clearResumeFence(message.id).catch((e) =>
+					console.error('resume fence timeout flush failed', e)
+				);
 			}, RESUME_FENCE_TIMEOUT_MS)
 		);
 		const requestId =

@@ -789,7 +789,9 @@ async def resume_stream(sid, data):
 
     # Cap payload bytes. Keep the newest entries that fit; older ones
     # are either already in the DB-backed content or will arrive via the
-    # final done:True checkpoint.
+    # final done:True checkpoint. A single envelope larger than the cap
+    # is skipped rather than allowed through — forcing it past the cap
+    # would still exceed Socket.IO's buffer.
     total_bytes = 0
     capped = []
     for env in reversed(envelopes):
@@ -797,7 +799,9 @@ async def resume_stream(sid, data):
             size = len(json.dumps(env))
         except Exception:
             continue
-        if total_bytes + size > RESUME_STREAM_REPLAY_MAX_BYTES and capped:
+        if size > RESUME_STREAM_REPLAY_MAX_BYTES:
+            continue
+        if total_bytes + size > RESUME_STREAM_REPLAY_MAX_BYTES:
             break
         capped.append(env)
         total_bytes += size
