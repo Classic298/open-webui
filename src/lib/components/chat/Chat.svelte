@@ -768,7 +768,14 @@
 			for (const envelope of envelopes) {
 				if (!envelope || typeof envelope !== 'object') continue;
 				envelope._replayed = true;
-				await chatEventHandler(envelope);
+				try {
+					await chatEventHandler(envelope);
+				} catch (e) {
+					// Per-envelope catch so one bad frame doesn't abort
+					// the rest of the replay batch and silently lose the
+					// envelopes that come after it.
+					console.error('resume replay envelope error', e);
+				}
 			}
 		} finally {
 			const current = resumeActiveRequestIdByMessageId.get(messageId);
