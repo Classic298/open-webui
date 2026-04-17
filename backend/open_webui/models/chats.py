@@ -95,7 +95,8 @@ class ChatTag(Base):
             name='fk_chat_tag_tag',
             ondelete='CASCADE',
         ),
-        # chat_id-only lookups are covered by the PK's leading column.
+        # No chat_id-only index: PK's leading column covers it. Name must
+        # match migration 17a6d37e23d2.
         Index('chat_tag_user_tag_idx', 'user_id', 'tag_id'),
     )
 
@@ -501,31 +502,47 @@ class ChatTable:
             # would otherwise hit a composite-PK error in ensure_tags_exist.
             display_name_by_tag_id: dict[str, str] = {}
             for raw_tag_name in tags:
+                if not isinstance(raw_tag_name, str):
+                    continue
                 tag_id = normalize_tag_id(raw_tag_name)
-                if tag_id == 'none':
+                if not tag_id or tag_id == 'none':
                     continue
                 display_name_by_tag_id.setdefault(tag_id, raw_tag_name)
             new_tag_ids = list(display_name_by_tag_id.keys())
-            new_tag_display_names = list(display_name_by_tag_id.values())
+            new_tag_ids_set = set(new_tag_ids)
 
             previous_tag_id_rows = await db.execute(
                 select(ChatTag.tag_id).filter_by(chat_id=id, user_id=user.id)
             )
             previous_tag_ids = {row[0] for row in previous_tag_id_rows.all()}
 
-            # commit=False keeps the tag ensure + chat_tag rewrite atomic.
-            await Tags.ensure_tags_exist(new_tag_display_names, user.id, db=db, commit=False)
-            await db.execute(delete(ChatTag).filter_by(chat_id=id, user_id=user.id))
-            if new_tag_ids:
-                db.add_all(
-                    [ChatTag(chat_id=id, tag_id=tag_id, user_id=user.id) for tag_id in new_tag_ids]
+            to_add = new_tag_ids_set - previous_tag_ids
+            to_remove = previous_tag_ids - new_tag_ids_set
+
+            # commit=False keeps the tag ensure + chat_tag diff atomic.
+            if to_add:
+                await Tags.ensure_tags_exist(
+                    [display_name_by_tag_id[tag_id] for tag_id in to_add],
+                    user.id,
+                    db=db,
+                    commit=False,
                 )
+                db.add_all(
+                    [ChatTag(chat_id=id, tag_id=tag_id, user_id=user.id) for tag_id in to_add]
+                )
+            if to_remove:
+                await db.execute(
+                    delete(ChatTag).where(
+                        ChatTag.chat_id == id,
+                        ChatTag.user_id == user.id,
+                        ChatTag.tag_id.in_(to_remove),
+                    )
+                )
+            if to_add or to_remove:
+                await db.commit()
 
-            await db.commit()
-
-            removed_tag_ids = previous_tag_ids - set(new_tag_ids)
-            if removed_tag_ids:
-                await self.delete_orphan_tags_for_user(list(removed_tag_ids), user.id, db=db)
+            if to_remove:
+                await self.delete_orphan_tags_for_user(list(to_remove), user.id, db=db)
 
             # Response-only meta overlay for back-compat with ChatModel.meta.tags readers.
             response = ChatModel.model_validate(chat)
@@ -1274,19 +1291,19 @@ class ChatTable:
             # 'tag:none' = no associations; 'tag:X tag:Y' = has both.
             # ChatTag.user_id filter is defense-in-depth + index alignment.
             if 'none' in tag_ids:
-                chat_has_any_tag = select(ChatTag.chat_id).where(
+                any_tag_subquery = select(ChatTag.chat_id).where(
                     ChatTag.chat_id == Chat.id,
                     ChatTag.user_id == user_id,
                 )
-                stmt = stmt.filter(~exists(chat_has_any_tag))
+                stmt = stmt.filter(~exists(any_tag_subquery))
             elif tag_ids:
                 for required_tag_id in tag_ids:
-                    chat_has_this_tag = select(ChatTag.chat_id).where(
+                    required_tag_subquery = select(ChatTag.chat_id).where(
                         ChatTag.chat_id == Chat.id,
                         ChatTag.user_id == user_id,
                         ChatTag.tag_id == required_tag_id,
                     )
-                    stmt = stmt.filter(exists(chat_has_this_tag))
+                    stmt = stmt.filter(exists(required_tag_subquery))
 
             # Perform pagination at the SQL level
             stmt = stmt.offset(skip).limit(limit)
@@ -1395,8 +1412,9 @@ class ChatTable:
     async def get_chat_tags_by_id_and_user_id(
         self, id: str, user_id: str, db: Optional[AsyncSession] = None
     ) -> list[TagModel]:
-        tag_ids = await self.get_chat_tag_ids_by_id_and_user_id(id, user_id, db=db)
-        return await Tags.get_tags_by_ids_and_user_id(tag_ids, user_id, db=db)
+        async with get_async_db_context(db) as db:
+            tag_ids = await self.get_chat_tag_ids_by_id_and_user_id(id, user_id, db=db)
+            return await Tags.get_tags_by_ids_and_user_id(tag_ids, user_id, db=db)
 
     async def get_chat_list_by_user_id_and_tag_name(
         self,
@@ -1409,10 +1427,12 @@ class ChatTable:
         async with get_async_db_context(db) as db:
             tag_id = normalize_tag_id(tag_name)
 
+            # ChatTag.user_id filter is defense-in-depth + index alignment
+            # with chat_tag_user_tag_idx.
             chat_list_query = (
                 select(Chat.id, Chat.title, Chat.updated_at, Chat.created_at, Chat.last_read_at)
                 .join(ChatTag, ChatTag.chat_id == Chat.id)
-                .where(Chat.user_id == user_id, ChatTag.tag_id == tag_id)
+                .where(Chat.user_id == user_id, ChatTag.user_id == user_id, ChatTag.tag_id == tag_id)
                 .order_by(Chat.updated_at.desc(), Chat.id)
             )
 
@@ -1463,7 +1483,8 @@ class ChatTable:
                     'tags': await self.get_chat_tag_ids_by_id_and_user_id(id, user_id, db=db),
                 }
                 return response
-        except Exception:
+        except Exception as e:
+            log.exception(f'add_chat_tag failed for chat={id} tag={tag_name}: {e}')
             return None
 
     async def count_chats_by_tag_name_and_user_id(
@@ -1476,6 +1497,7 @@ class ChatTable:
                 .join(ChatTag, ChatTag.chat_id == Chat.id)
                 .where(
                     Chat.user_id == user_id,
+                    ChatTag.user_id == user_id,
                     ChatTag.tag_id == tag_id,
                     Chat.archived.is_(False),
                 )
@@ -1502,14 +1524,16 @@ class ChatTable:
                 select(ChatTag.tag_id, func.count(Chat.id))
                 .join(Chat, Chat.id == ChatTag.chat_id)
                 .where(
+                    ChatTag.user_id == user_id,
                     Chat.user_id == user_id,
                     Chat.archived.is_(False),
                     ChatTag.tag_id.in_(tag_ids),
                 )
                 .group_by(ChatTag.tag_id)
             )
-            reference_count_rows = (await db.execute(reference_count_query)).all()
-            reference_count_by_tag_id = {row[0]: row[1] for row in reference_count_rows}
+            reference_count_by_tag_id = {
+                row[0]: row[1] for row in (await db.execute(reference_count_query)).all()
+            }
             orphan_tag_ids = [
                 tag_id
                 for tag_id in tag_ids
@@ -1573,7 +1597,7 @@ class ChatTable:
             async with get_async_db_context(db) as db:
                 await db.execute(update(AutomationRun).filter_by(chat_id=id).values(chat_id=None))
                 await db.execute(delete(ChatMessage).filter_by(chat_id=id))
-                await db.execute(delete(ChatTag).filter_by(chat_id=id, user_id=user_id))
+                await db.execute(delete(ChatTag).filter_by(chat_id=id))
                 await db.execute(delete(Chat).filter_by(id=id, user_id=user_id))
                 await db.commit()
 

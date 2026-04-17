@@ -225,7 +225,6 @@ def upgrade() -> None:
         f'{meta_rows_stripped} meta rows stripped'
     )
 
-    # chat_id-only lookups are covered by the PK's leading column.
     op.create_index('chat_tag_user_tag_idx', 'chat_tag', ['user_id', 'tag_id'])
 
 
