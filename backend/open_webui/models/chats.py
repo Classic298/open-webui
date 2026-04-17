@@ -418,34 +418,37 @@ class ChatTable:
 
             # Dual-write tags from chat.meta['tags'] to chat_tag. Without this,
             # imported/cloned chats would have meta['tags'] set but no chat_tag
-            # rows, so they wouldn't appear in tag-filtered lists.
+            # rows, so they wouldn't appear in tag-filtered lists. Errors here
+            # leave meta['tags'] already committed but chat_tag unwritten;
+            # that divergence is what the log.error below alerts on.
             try:
                 tag_assocs: list[ChatTag] = []
-                raw_names_by_user: dict[str, list[str]] = {}
+                raw_names: set[str] = set()
                 for chat_obj in chats:
                     meta = chat_obj.meta or {}
                     raw_tags = meta.get('tags') if isinstance(meta, dict) else None
                     if not isinstance(raw_tags, list):
                         continue
-                    seen: set = set()
-                    for raw in raw_tags:
-                        if not isinstance(raw, str):
+                    seen_in_chat: set = set()
+                    for raw_tag_name in raw_tags:
+                        if not isinstance(raw_tag_name, str):
                             continue
-                        tid = raw.replace(' ', '_').lower()
-                        if not tid or tid in seen:
+                        tid = raw_tag_name.replace(' ', '_').lower()
+                        if not tid or tid in seen_in_chat:
                             continue
-                        seen.add(tid)
-                        raw_names_by_user.setdefault(user_id, []).append(raw)
+                        seen_in_chat.add(tid)
+                        raw_names.add(raw_tag_name)
                         tag_assocs.append(
                             ChatTag(chat_id=chat_obj.id, tag_id=tid, user_id=user_id)
                         )
-                for uid, names in raw_names_by_user.items():
-                    await Tags.ensure_tags_exist(names, uid, db=db)
+                if raw_names:
+                    await Tags.ensure_tags_exist(list(raw_names), user_id, db=db)
                 if tag_assocs:
                     db.add_all(tag_assocs)
                     await db.commit()
             except Exception as e:
-                log.warning(f'Failed to write imported chat tags to chat_tag table: {e}')
+                await db.rollback()
+                log.error(f'Failed to write imported chat tags to chat_tag table: {e}')
 
             return [ChatModel.model_validate(chat) for chat in chats]
 
@@ -499,17 +502,34 @@ class ChatTable:
             if chat is None:
                 return None
 
-            old_tags = chat.meta.get('tags', [])
-            new_tags = [t for t in tags if t.replace(' ', '_').lower() != 'none']
-            # Dedupe preserving order.
-            new_tag_ids = list(dict.fromkeys(t.replace(' ', '_').lower() for t in new_tags))
+            # Dedupe (id, display name) pairs together, keyed by the normalized
+            # id and keeping the first display name seen. Without this,
+            # callers passing ['My Tag', 'my tag'] would hit a composite-PK
+            # IntegrityError inside ensure_tags_exist because both entries
+            # normalize to the same tag id.
+            unique_by_id: dict[str, str] = {}
+            for raw in tags:
+                tag_id = raw.replace(' ', '_').lower()
+                if tag_id == 'none':
+                    continue
+                unique_by_id.setdefault(tag_id, raw)
+            new_tag_ids = list(unique_by_id.keys())
+            new_tag_names = list(unique_by_id.values())
+
+            # Source old tag ids from chat_tag (the new source of truth) so
+            # orphan cleanup stays correct even if meta and chat_tag have
+            # drifted for this row.
+            old_result = await db.execute(
+                select(ChatTag.tag_id).filter_by(chat_id=id, user_id=user.id)
+            )
+            old_tag_ids = {row[0] for row in old_result.all()}
 
             # Write chat.meta and chat_tag rows atomically: a crash between the
             # meta update and the association rewrite would otherwise leave the
             # two stores disagreeing, and since chat_tag is now the source of
             # truth for list/count queries, that's a user-visible bug.
             chat.meta = {**chat.meta, 'tags': new_tag_ids}
-            await Tags.ensure_tags_exist(new_tags, user.id, db=db)
+            await Tags.ensure_tags_exist(new_tag_names, user.id, db=db)
             await db.execute(delete(ChatTag).filter_by(chat_id=id, user_id=user.id))
             if new_tag_ids:
                 db.add_all(
@@ -519,7 +539,7 @@ class ChatTable:
             await db.commit()
             await db.refresh(chat)
 
-            removed = set(old_tags) - set(new_tag_ids)
+            removed = old_tag_ids - set(new_tag_ids)
             if removed:
                 await self.delete_orphan_tags_for_user(list(removed), user.id, db=db)
 
@@ -1444,11 +1464,17 @@ class ChatTable:
         tag_id = tag_name.replace(' ', '_').lower()
         try:
             async with get_async_db_context(db) as db:
+                # Check the chat exists before adding anything to the session -
+                # otherwise ensure_tags_exist would queue a tag row that no
+                # caller is going to use.
+                chat = await db.get(Chat, id)
+                if chat is None:
+                    return None
+
                 # Inside the same session so a failure below also rolls back
                 # any newly-created tag row.
                 await Tags.ensure_tags_exist([tag_name], user_id, db=db)
 
-                chat = await db.get(Chat, id)
                 if tag_id not in chat.meta.get('tags', []):
                     chat.meta = {
                         **chat.meta,
@@ -1484,7 +1510,7 @@ class ChatTable:
                 .where(Chat.user_id == user_id, Chat.archived.is_(False), ChatTag.tag_id == tag_id)
             )
             result = await db.execute(stmt)
-            return result.scalar() or 0
+            return result.scalar()
 
     async def delete_orphan_tags_for_user(
         self,

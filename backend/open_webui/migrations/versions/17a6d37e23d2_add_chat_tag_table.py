@@ -23,10 +23,19 @@ depends_on: Union[str, Sequence[str], None] = None
 
 # Keyset chunk size. Each chunk is fully materialized with .fetchall() and the
 # associated INSERTs run as bulk dialect-specific upserts, so no server-side
-# cursor stays open across chunks and no per-row savepoints are created.
-# Earlier migrations that used yield_per streaming held a single cursor for
-# the full run, which caused OOM / connection resets on large PostgreSQL
-# deployments.
+# cursor stays open across chunks. Earlier migrations that used yield_per
+# streaming held a single cursor for the full run, which caused OOM /
+# connection resets on large PostgreSQL deployments.
+#
+# 1000 is a balance between round-trip overhead (too small) and per-chunk
+# memory plus Postgres' ~32k bind-parameter limit on bulk INSERT (too large);
+# at 3 columns per row that caps us well below the limit and keeps working
+# memory bounded.
+#
+# Note for very large (>10M chat rows) deployments: this migration runs
+# inside Alembic's default transaction, so the WAL write grows with row
+# count. Run during a maintenance window, or split DDL from backfill by
+# disabling transactional_ddl on this revision.
 CHUNK_SIZE = 1000
 LOG_EVERY = 50_000
 
@@ -36,11 +45,13 @@ def _normalize_tag_id(raw: str) -> str:
 
 
 def _bulk_insert_ignore(conn, table, rows, conflict_cols):
-    """Dialect-aware bulk INSERT that ignores duplicate key conflicts.
+    """Dialect-aware bulk INSERT that skips duplicate key conflicts.
 
     Postgres: INSERT ... ON CONFLICT (...) DO NOTHING.
     SQLite:   INSERT OR IGNORE.
-    Other:    fall back to a portable INSERT inside a savepoint.
+    Other dialects are not supported - open-webui officially targets PG and
+    SQLite only, and a savepoint fallback here would silently swallow real
+    data-integrity errors alongside the intended duplicate-key skip.
     """
     if not rows:
         return
@@ -52,22 +63,9 @@ def _bulk_insert_ignore(conn, table, rows, conflict_cols):
         stmt = sqlite.insert(table).values(rows).prefix_with('OR IGNORE')
         conn.execute(stmt)
     else:
-        # Portable fallback: wrap the bulk insert in a savepoint so a dup key
-        # doesn't poison the outer migration transaction.
-        sp = conn.begin_nested()
-        try:
-            conn.execute(sa.insert(table).values(rows))
-            sp.commit()
-        except Exception:
-            sp.rollback()
-            # Row-by-row fallback under savepoints.
-            for row in rows:
-                rp = conn.begin_nested()
-                try:
-                    conn.execute(sa.insert(table).values(**row))
-                    rp.commit()
-                except Exception:
-                    rp.rollback()
+        raise NotImplementedError(
+            f'chat_tag backfill: unsupported dialect {dialect!r}; only postgresql and sqlite are supported'
+        )
 
 
 def upgrade() -> None:
@@ -119,8 +117,8 @@ def upgrade() -> None:
 
     last_id: Union[str, None] = None
     processed = 0
-    assoc_batched = 0
-    tags_batched = 0
+    assoc_queued = 0
+    tags_queued = 0
     next_log_at = LOG_EVERY
 
     while True:
@@ -135,10 +133,12 @@ def upgrade() -> None:
         if not rows:
             break
 
-        # Collect the first raw display name seen per (tag_id, user_id) so
-        # freshly created tag rows keep the user's capitalization/spacing
-        # instead of the normalized id.
-        tag_display: dict[tuple, str] = {}
+        # First raw display name seen per (tag_id, user_id) "wins" and becomes
+        # the name on any newly-created tag row. Chunks iterate rows in
+        # chat.id order, so the winner is deterministic but otherwise
+        # arbitrary if the same tag exists under multiple casings across
+        # different chats. Pre-existing tag rows are never overwritten.
+        tag_display: dict[tuple[str, str], str] = {}
         assoc_rows: list[dict] = []
 
         for row in rows:
@@ -156,15 +156,15 @@ def upgrade() -> None:
                 continue
 
             seen_in_chat: set = set()
-            for raw in tag_names:
-                if not isinstance(raw, str):
+            for raw_tag_name in tag_names:
+                if not isinstance(raw_tag_name, str):
                     continue
-                tag_id = _normalize_tag_id(raw)
+                tag_id = _normalize_tag_id(raw_tag_name)
                 if not tag_id or tag_id in seen_in_chat:
                     continue
                 seen_in_chat.add(tag_id)
 
-                tag_display.setdefault((tag_id, row.user_id), raw)
+                tag_display.setdefault((tag_id, row.user_id), raw_tag_name)
                 assoc_rows.append(
                     {'chat_id': row.id, 'tag_id': tag_id, 'user_id': row.user_id}
                 )
@@ -202,7 +202,7 @@ def upgrade() -> None:
             ]
             if new_tag_rows:
                 _bulk_insert_ignore(conn, tag, new_tag_rows, conflict_cols=['id', 'user_id'])
-                tags_batched += len(new_tag_rows)
+                tags_queued += len(new_tag_rows)
 
         # Bulk-insert chat_tag associations. Dedupe payload list first; duplicate
         # PK collisions (e.g. re-run after partial failure) are swallowed by the
@@ -214,7 +214,7 @@ def upgrade() -> None:
             _bulk_insert_ignore(
                 conn, chat_tag, unique_assocs, conflict_cols=['chat_id', 'tag_id', 'user_id']
             )
-            assoc_batched += len(unique_assocs)
+            assoc_queued += len(unique_assocs)
 
         last_id = rows[-1].id
         processed += len(rows)
@@ -222,14 +222,14 @@ def upgrade() -> None:
         if processed >= next_log_at:
             log.info(
                 f'chat_tag backfill progress: {processed} chats processed, '
-                f'{assoc_batched} associations queued, {tags_batched} tags queued, '
+                f'{assoc_queued} associations queued, {tags_queued} tags queued, '
                 f'last_id={last_id}'
             )
             next_log_at += LOG_EVERY
 
     log.info(
         f'chat_tag backfill complete: {processed} chats processed, '
-        f'{assoc_batched} associations queued, {tags_batched} tags queued'
+        f'{assoc_queued} associations queued, {tags_queued} tags queued'
     )
 
 
