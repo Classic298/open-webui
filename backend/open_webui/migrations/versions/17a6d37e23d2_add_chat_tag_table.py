@@ -114,8 +114,8 @@ def upgrade() -> None:
 
     last_chat_id: Union[str, None] = None
     chats_processed = 0
-    chat_tag_rows_inserted = 0
-    tag_rows_inserted = 0
+    chat_tag_rows_submitted = 0
+    tag_rows_submitted = 0
     meta_rows_stripped = 0
     next_log_threshold = 0  # log the first page unconditionally
 
@@ -202,14 +202,14 @@ def upgrade() -> None:
             ]
             if new_tag_rows:
                 _bulk_insert_on_conflict_nothing(conn, tag, new_tag_rows, index_elements=['id', 'user_id'])
-                tag_rows_inserted += len(new_tag_rows)
+                tag_rows_submitted += len(new_tag_rows)
 
         if chat_tag_payload:
             _bulk_insert_on_conflict_nothing(
                 conn, chat_tag, chat_tag_payload,
                 index_elements=['chat_id', 'tag_id', 'user_id'],
             )
-            chat_tag_rows_inserted += len(chat_tag_payload)
+            chat_tag_rows_submitted += len(chat_tag_payload)
 
         if meta_strip_payload:
             # Paginated; a single full-table UPDATE holds write locks too long.
@@ -223,15 +223,15 @@ def upgrade() -> None:
         if chats_processed >= next_log_threshold:
             log.info(
                 f'chat_tag backfill progress: {chats_processed} chats processed, '
-                f'{chat_tag_rows_inserted} associations inserted, '
-                f'{tag_rows_inserted} tags inserted, '
+                f'{chat_tag_rows_submitted} associations submitted, '
+                f'{tag_rows_submitted} tags submitted, '
                 f'{meta_rows_stripped} meta rows stripped, last_chat_id={last_chat_id}'
             )
             next_log_threshold = chats_processed + LOG_EVERY_CHATS
 
     log.info(
         f'chat_tag backfill complete: {chats_processed} chats processed, '
-        f'{chat_tag_rows_inserted} associations inserted, {tag_rows_inserted} tags inserted, '
+        f'{chat_tag_rows_submitted} associations submitted, {tag_rows_submitted} tags submitted, '
         f'{meta_rows_stripped} meta rows stripped'
     )
 
@@ -292,6 +292,8 @@ def downgrade() -> None:
         chat_ids_in_page = [row.id for row in page_rows]
         existing_meta_by_chat_id = {row.id: row.meta for row in page_rows}
 
+        # ORDER BY tag.name gives deterministic meta['tags'] ordering across
+        # downgrade runs (row order from chat_tag is otherwise undefined).
         tag_rows = conn.execute(
             sa.select(chat_tag.c.chat_id, tag.c.name)
             .select_from(
@@ -304,6 +306,7 @@ def downgrade() -> None:
                 )
             )
             .where(chat_tag.c.chat_id.in_(chat_ids_in_page))
+            .order_by(chat_tag.c.chat_id, tag.c.name)
         ).fetchall()
         tag_names_by_chat_id: dict[str, list[str]] = {cid: [] for cid in chat_ids_in_page}
         for tag_row in tag_rows:

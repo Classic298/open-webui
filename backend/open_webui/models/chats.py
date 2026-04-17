@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import exists
 from sqlalchemy.sql.expression import bindparam
 from open_webui.internal.db import (
+    _INSERT_BATCH_ROWS,
     Base,
     JSONField,
     get_async_db_context,
@@ -570,8 +571,7 @@ class ChatTable:
                         ChatTag.tag_id.in_(to_remove),
                     )
                 )
-            if to_add or to_remove:
-                await db.commit()
+            await db.commit()
 
             if to_remove:
                 await self.delete_orphan_tags_for_user(list(to_remove), user.id, db=db)
@@ -681,6 +681,10 @@ class ChatTable:
     async def insert_shared_chat_by_chat_id(
         self, chat_id: str, db: Optional[AsyncSession] = None
     ) -> Optional[ChatModel]:
+        # Source chat's chat_tag rows are intentionally NOT copied to the
+        # shared scope. Pre-PR the origin's meta['tags'] was copied via the
+        # meta JSON blob; tags are personal organization metadata and don't
+        # belong on a public snapshot.
         async with get_async_db_context(db) as db:
             # Get the existing chat to share
             chat = await db.get(Chat, chat_id)
@@ -1426,19 +1430,23 @@ class ChatTable:
     async def get_chat_tag_ids_by_chat_ids_and_user_id(
         self, chat_ids: list[str], user_id: str, db: Optional[AsyncSession] = None
     ) -> dict[str, list[str]]:
+        if not chat_ids:
+            return {}
         # Every chat_id is present in the result; callers can look up without .get().
         tag_ids_by_chat_id: dict[str, list[str]] = {chat_id: [] for chat_id in chat_ids}
-        if not chat_ids:
-            return tag_ids_by_chat_id
+        # Chunk the IN predicate so a very large caller list can't push it
+        # past the Postgres 65,535 bind-param ceiling.
         async with get_async_db_context(db) as db:
-            rows = await db.execute(
-                select(ChatTag.chat_id, ChatTag.tag_id).where(
-                    ChatTag.chat_id.in_(chat_ids),
-                    ChatTag.user_id == user_id,
+            for start in range(0, len(chat_ids), _INSERT_BATCH_ROWS):
+                batch_ids = chat_ids[start:start + _INSERT_BATCH_ROWS]
+                rows = await db.execute(
+                    select(ChatTag.chat_id, ChatTag.tag_id).where(
+                        ChatTag.chat_id.in_(batch_ids),
+                        ChatTag.user_id == user_id,
+                    )
                 )
-            )
-            for chat_id, tag_id in rows.all():
-                tag_ids_by_chat_id[chat_id].append(tag_id)
+                for chat_id, tag_id in rows.all():
+                    tag_ids_by_chat_id[chat_id].append(tag_id)
         return tag_ids_by_chat_id
 
     async def get_chat_tags_by_id_and_user_id(
