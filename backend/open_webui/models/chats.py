@@ -72,6 +72,13 @@ class Chat(Base):
     )
 
 
+# Normalized chat/tag association. Introduced to replace the denormalized
+# chat.meta['tags'] JSON array; meta['tags'] is still dual-written for
+# rollback safety and should be removed in a follow-up migration once all
+# deployments are past revision 17a6d37e23d2. When that happens, remove the
+# meta['tags'] writes in the methods below and switch any remaining readers
+# (e.g. the tag filters in get_chats_by_user_id_and_search_text) to join
+# ChatTag instead of scanning JSON.
 class ChatTag(Base):
     __tablename__ = 'chat_tag'
 
@@ -81,9 +88,17 @@ class ChatTag(Base):
 
     __table_args__ = (
         PrimaryKeyConstraint('chat_id', 'tag_id', 'user_id', name='pk_chat_tag'),
-        ForeignKeyConstraint(['chat_id'], ['chat.id'], name='fk_chat_tag_chat_id', ondelete='CASCADE'),
         ForeignKeyConstraint(
-            ['tag_id', 'user_id'], ['tag.id', 'tag.user_id'], name='fk_chat_tag_tag', ondelete='CASCADE'
+            ['chat_id'],
+            ['chat.id'],
+            name='fk_chat_tag_chat_id',
+            ondelete='CASCADE',
+        ),
+        ForeignKeyConstraint(
+            ['tag_id', 'user_id'],
+            ['tag.id', 'tag.user_id'],
+            name='fk_chat_tag_tag',
+            ondelete='CASCADE',
         ),
         Index('chat_tag_user_tag_idx', 'user_id', 'tag_id'),
         Index('chat_tag_chat_idx', 'chat_id'),
@@ -401,6 +416,37 @@ class ChatTable:
             except Exception as e:
                 log.warning(f'Failed to write imported messages to chat_message table: {e}')
 
+            # Dual-write tags from chat.meta['tags'] to chat_tag. Without this,
+            # imported/cloned chats would have meta['tags'] set but no chat_tag
+            # rows, so they wouldn't appear in tag-filtered lists.
+            try:
+                tag_assocs: list[ChatTag] = []
+                raw_names_by_user: dict[str, list[str]] = {}
+                for chat_obj in chats:
+                    meta = chat_obj.meta or {}
+                    raw_tags = meta.get('tags') if isinstance(meta, dict) else None
+                    if not isinstance(raw_tags, list):
+                        continue
+                    seen: set = set()
+                    for raw in raw_tags:
+                        if not isinstance(raw, str):
+                            continue
+                        tid = raw.replace(' ', '_').lower()
+                        if not tid or tid in seen:
+                            continue
+                        seen.add(tid)
+                        raw_names_by_user.setdefault(user_id, []).append(raw)
+                        tag_assocs.append(
+                            ChatTag(chat_id=chat_obj.id, tag_id=tid, user_id=user_id)
+                        )
+                for uid, names in raw_names_by_user.items():
+                    await Tags.ensure_tags_exist(names, uid, db=db)
+                if tag_assocs:
+                    db.add_all(tag_assocs)
+                    await db.commit()
+            except Exception as e:
+                log.warning(f'Failed to write imported chat tags to chat_tag table: {e}')
+
             return [ChatModel.model_validate(chat) for chat in chats]
 
     async def update_chat_by_id(self, id: str, chat: dict, db: Optional[AsyncSession] = None) -> Optional[ChatModel]:
@@ -455,21 +501,23 @@ class ChatTable:
 
             old_tags = chat.meta.get('tags', [])
             new_tags = [t for t in tags if t.replace(' ', '_').lower() != 'none']
+            # Dedupe preserving order.
             new_tag_ids = list(dict.fromkeys(t.replace(' ', '_').lower() for t in new_tags))
 
+            # Write chat.meta and chat_tag rows atomically: a crash between the
+            # meta update and the association rewrite would otherwise leave the
+            # two stores disagreeing, and since chat_tag is now the source of
+            # truth for list/count queries, that's a user-visible bug.
             chat.meta = {**chat.meta, 'tags': new_tag_ids}
-            await db.commit()
-            await db.refresh(chat)
-
             await Tags.ensure_tags_exist(new_tags, user.id, db=db)
-
-            # Rewrite the normalized chat_tag association rows for this chat.
             await db.execute(delete(ChatTag).filter_by(chat_id=id, user_id=user.id))
             if new_tag_ids:
                 db.add_all(
                     [ChatTag(chat_id=id, tag_id=tag_id, user_id=user.id) for tag_id in new_tag_ids]
                 )
+
             await db.commit()
+            await db.refresh(chat)
 
             removed = set(old_tags) - set(new_tag_ids)
             if removed:
@@ -1350,13 +1398,6 @@ class ChatTable:
         async with get_async_db_context(db) as db:
             result = await db.execute(select(ChatTag.tag_id).filter_by(chat_id=id, user_id=user_id))
             tag_ids = [row[0] for row in result.all()]
-            if not tag_ids:
-                # Transitional fallback for chats whose normalized chat_tag rows
-                # haven't been populated yet (e.g. before the backfill migration
-                # ran for this chat's row, or data written by old code paths).
-                chat = await db.get(Chat, id)
-                if chat is not None:
-                    tag_ids = chat.meta.get('tags', []) or []
             return await Tags.get_tags_by_ids_and_user_id(tag_ids, user_id, db=db)
 
     async def get_chat_list_by_user_id_and_tag_name(
@@ -1401,20 +1442,26 @@ class ChatTable:
         self, id: str, user_id: str, tag_name: str, db: Optional[AsyncSession] = None
     ) -> Optional[ChatModel]:
         tag_id = tag_name.replace(' ', '_').lower()
-        await Tags.ensure_tags_exist([tag_name], user_id, db=db)
         try:
             async with get_async_db_context(db) as db:
+                # Inside the same session so a failure below also rolls back
+                # any newly-created tag row.
+                await Tags.ensure_tags_exist([tag_name], user_id, db=db)
+
                 chat = await db.get(Chat, id)
                 if tag_id not in chat.meta.get('tags', []):
                     chat.meta = {
                         **chat.meta,
-                        'tags': list(set(chat.meta.get('tags', []) + [tag_id])),
+                        # Dedupe preserving order.
+                        'tags': list(dict.fromkeys(chat.meta.get('tags', []) + [tag_id])),
                     }
 
-                existing = await db.execute(
-                    select(ChatTag).filter_by(chat_id=id, tag_id=tag_id, user_id=user_id)
+                has_assoc = await db.execute(
+                    select(ChatTag.chat_id).filter_by(
+                        chat_id=id, tag_id=tag_id, user_id=user_id
+                    )
                 )
-                if existing.scalar_one_or_none() is None:
+                if has_assoc.first() is None:
                     db.add(ChatTag(chat_id=id, tag_id=tag_id, user_id=user_id))
 
                 await db.commit()
@@ -1428,10 +1475,13 @@ class ChatTable:
     ) -> int:
         async with get_async_db_context(db) as db:
             tag_id = tag_name.replace(' ', '_').lower()
+            # Join condition includes user_id so the chat_tag_user_tag_idx
+            # composite index is used; chat.id alone would also be correct
+            # (PK implies user_id) but defeats that index.
             stmt = (
                 select(func.count(Chat.id))
                 .join(ChatTag, and_(ChatTag.chat_id == Chat.id, ChatTag.user_id == Chat.user_id))
-                .where(Chat.user_id == user_id, Chat.archived == False, ChatTag.tag_id == tag_id)  # noqa: E712
+                .where(Chat.user_id == user_id, Chat.archived.is_(False), ChatTag.tag_id == tag_id)
             )
             result = await db.execute(stmt)
             return result.scalar() or 0
@@ -1509,6 +1559,12 @@ class ChatTable:
             return False
 
     async def delete_chat_by_id(self, id: str, db: Optional[AsyncSession] = None) -> bool:
+        # NOTE: ChatMessage / ChatTag rows are deleted explicitly rather than
+        # relying on the FK ON DELETE CASCADE because SQLite only enforces
+        # foreign-key cascades when `PRAGMA foreign_keys = ON` is set, which
+        # the open-webui runtime doesn't universally guarantee. The same
+        # defensive pattern is used for ChatMessage in the sibling methods
+        # below - keep these in sync.
         try:
             async with get_async_db_context(db) as db:
                 await db.execute(update(AutomationRun).filter_by(chat_id=id).values(chat_id=None))
