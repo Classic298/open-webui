@@ -5,13 +5,16 @@ import logging
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
+from collections import Counter
+
 from open_webui.models.chat_messages import ChatMessages, ChatMessageModel
-from open_webui.models.chats import Chats
+from open_webui.models.chats import Chats, ChatTag
 from open_webui.models.groups import Groups
 from open_webui.models.users import Users
 from open_webui.models.feedbacks import Feedbacks
 from open_webui.utils.auth import get_admin_user
-from open_webui.internal.db import get_async_session
+from open_webui.internal.db import get_async_session, sql_param_batch
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
@@ -428,15 +431,19 @@ async def get_model_overview(
             )
             current += timedelta(days=1)
 
-    # Get chat tags
-    tag_counts: dict[str, int] = defaultdict(int)
-    for chat_id in chat_ids:
-        chat = await Chats.get_chat_by_id(chat_id, db=db)
-        if chat and chat.meta:
-            for tag in chat.meta.get('tags', []):
-                tag_counts[tag] += 1
-
-    # Sort by count and take top 10
-    tags = [TagEntry(tag=tag, count=count) for tag, count in sorted(tag_counts.items(), key=lambda x: -x[1])[:10]]
+    # Chunk the IN clause to respect each dialect's bind-param ceiling,
+    # then aggregate in Python.
+    tag_counts: Counter[str] = Counter()
+    batch_size = sql_param_batch(db.get_bind().dialect.name)
+    for start in range(0, len(chat_ids), batch_size):
+        batch = chat_ids[start:start + batch_size]
+        rows = (await db.execute(
+            select(ChatTag.tag_id, func.count())
+            .where(ChatTag.chat_id.in_(batch))
+            .group_by(ChatTag.tag_id)
+        )).all()
+        for tag_id, count in rows:
+            tag_counts[tag_id] += count
+    tags = [TagEntry(tag=t, count=c) for t, c in tag_counts.most_common(10)]
 
     return ModelOverviewResponse(history=history, tags=tags)

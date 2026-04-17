@@ -5,7 +5,7 @@ from typing import Optional
 
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from open_webui.internal.db import Base, JSONField, get_async_db_context
+from open_webui.internal.db import Base, JSONField, get_async_db_context, insert_all_on_conflict_nothing
 
 
 from pydantic import BaseModel, ConfigDict
@@ -19,6 +19,18 @@ log = logging.getLogger(__name__)
 # To name a thing is to claim it. The creator has
 # already named everything stored in this table.
 ####################
+# Reserved tag_id used as a sentinel by the tag:none search filter
+# ("chat has no tags"). Writers must reject it so it can never become a
+# real association.
+RESERVED_TAG_ID_NONE = 'none'
+
+
+def normalize_tag_id(raw: str) -> str:
+    """Canonical tag_id form. This is the PK for tag and chat_tag, so every
+    call site that derives an id from a user-supplied name must use this."""
+    return raw.replace(' ', '_').lower()
+
+
 class Tag(Base):
     __tablename__ = 'tag'
     id = Column(String)
@@ -30,9 +42,6 @@ class Tag(Base):
         PrimaryKeyConstraint('id', 'user_id', name='pk_id_user_id'),
         Index('user_id_idx', 'user_id'),
     )
-
-    # Unique constraint ensuring (id, user_id) is unique, not just the `id` column
-    __table_args__ = (PrimaryKeyConstraint('id', 'user_id', name='pk_id_user_id'),)
 
 
 class TagModel(BaseModel):
@@ -56,7 +65,7 @@ class TagChatIdForm(BaseModel):
 class TagTable:
     async def insert_new_tag(self, name: str, user_id: str, db: Optional[AsyncSession] = None) -> Optional[TagModel]:
         async with get_async_db_context(db) as db:
-            id = name.replace(' ', '_').lower()
+            id = normalize_tag_id(name)
             tag = TagModel(**{'id': id, 'user_id': user_id, 'name': name})
             try:
                 result = Tag(**tag.model_dump())
@@ -75,7 +84,7 @@ class TagTable:
         self, name: str, user_id: str, db: Optional[AsyncSession] = None
     ) -> Optional[TagModel]:
         try:
-            id = name.replace(' ', '_').lower()
+            id = normalize_tag_id(name)
             async with get_async_db_context(db) as db:
                 result = await db.execute(select(Tag).filter_by(id=id, user_id=user_id))
                 tag = result.scalars().first()
@@ -98,7 +107,7 @@ class TagTable:
     async def delete_tag_by_name_and_user_id(self, name: str, user_id: str, db: Optional[AsyncSession] = None) -> bool:
         try:
             async with get_async_db_context(db) as db:
-                id = name.replace(' ', '_').lower()
+                id = normalize_tag_id(name)
                 result = await db.execute(delete(Tag).filter_by(id=id, user_id=user_id))
                 log.debug(f'res: {result.rowcount}')
                 await db.commit()
@@ -122,19 +131,37 @@ class TagTable:
             log.error(f'delete_tags_by_ids: {e}')
             return False
 
-    async def ensure_tags_exist(self, names: list[str], user_id: str, db: Optional[AsyncSession] = None) -> None:
-        """Create tag rows for any *names* that don't already exist for *user_id*."""
+    async def ensure_tags_exist(
+        self,
+        names: list[str],
+        user_id: str,
+        db: Optional[AsyncSession] = None,
+        commit: bool = True,
+    ) -> None:
+        """Create tag rows for any *names* that don't already exist for *user_id*.
+
+        Pass ``commit=False`` when the caller owns a larger transaction that
+        must remain atomic (e.g. a dual-write that also touches chat_tag);
+        the caller is then responsible for committing the session.
+        """
+        if not commit and db is None:
+            raise ValueError('ensure_tags_exist(commit=False) requires an explicit db session')
         if not names:
             return
-        ids = [n.replace(' ', '_').lower() for n in names]
+        # Dedupe on normalized id, first display name wins. ON CONFLICT DO
+        # NOTHING handles the concurrent-insert race so we don't need the
+        # old SELECT-then-add check.
+        values_by_tag_id: dict[str, dict] = {}
+        for name in names:
+            tag_id = normalize_tag_id(name)
+            values_by_tag_id.setdefault(
+                tag_id, {'id': tag_id, 'name': name, 'user_id': user_id}
+            )
         async with get_async_db_context(db) as db:
-            result = await db.execute(select(Tag.id).filter(Tag.id.in_(ids), Tag.user_id == user_id))
-            existing = {row[0] for row in result.all()}
-            new_tags = [
-                Tag(id=tag_id, name=name, user_id=user_id) for tag_id, name in zip(ids, names) if tag_id not in existing
-            ]
-            if new_tags:
-                db.add_all(new_tags)
+            await insert_all_on_conflict_nothing(
+                db, Tag, list(values_by_tag_id.values()), index_elements=['id', 'user_id']
+            )
+            if commit:
                 await db.commit()
 
 

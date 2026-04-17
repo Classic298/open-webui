@@ -25,6 +25,7 @@ from open_webui.env import (
 )
 from peewee_migrate import Router
 from sqlalchemy import Dialect, create_engine, MetaData, event, types
+from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import scoped_session, sessionmaker, Session
@@ -300,3 +301,67 @@ async def get_async_db_context(db: Optional[AsyncSession] = None):
     else:
         async with get_async_db() as session:
             yield session
+
+
+def _insert_for_dialect(dialect_name: str):
+    if dialect_name == 'postgresql':
+        return postgresql.insert
+    if dialect_name == 'sqlite':
+        return sqlite.insert
+    raise NotImplementedError(
+        f'insert_on_conflict_nothing: unsupported dialect {dialect_name!r}; only postgresql and sqlite are supported'
+    )
+
+
+# PG caps statements at 65,535 binds; SQLite < 3.32 (May 2020) caps at 999.
+_PG_MAX_BIND_PARAMS = 65_000
+_SQLITE_MAX_BIND_PARAMS = 900
+
+
+def sql_param_batch(dialect_name: str, cols_per_row: int = 1) -> int:
+    cols_per_row = max(1, cols_per_row)
+    if dialect_name == 'postgresql':
+        budget = _PG_MAX_BIND_PARAMS
+    elif dialect_name == 'sqlite':
+        budget = _SQLITE_MAX_BIND_PARAMS
+    else:
+        raise NotImplementedError(
+            f'sql_param_batch: unsupported dialect {dialect_name!r}; only postgresql and sqlite are supported'
+        )
+    return max(1, budget // cols_per_row)
+
+
+async def insert_on_conflict_nothing(
+    db: AsyncSession,
+    target,  # mapped ORM class or sa.Table
+    values: dict,
+    index_elements: list[str],
+):
+    """Single-row INSERT ... ON CONFLICT (index_elements) DO NOTHING on
+    postgresql or sqlite. Caller is responsible for committing."""
+    insert = _insert_for_dialect(db.get_bind().dialect.name)
+    await db.execute(
+        insert(target).values(**values).on_conflict_do_nothing(index_elements=index_elements)
+    )
+
+
+async def insert_all_on_conflict_nothing(
+    db: AsyncSession,
+    target,  # mapped ORM class or sa.Table
+    values_list: list[dict],
+    index_elements: list[str],
+):
+    """Bulk INSERT ... ON CONFLICT (index_elements) DO NOTHING on postgresql
+    or sqlite. Caller is responsible for committing."""
+    if not values_list:
+        return
+    dialect_name = db.get_bind().dialect.name
+    insert = _insert_for_dialect(dialect_name)
+    # Bind-count budget uses the widest dict. Callers must still pass rows
+    # with matching keys - SA won't infer a uniform column set otherwise.
+    batch_size = sql_param_batch(dialect_name, cols_per_row=max(len(v) for v in values_list))
+    for start in range(0, len(values_list), batch_size):
+        batch = values_list[start:start + batch_size]
+        await db.execute(
+            insert(target).values(batch).on_conflict_do_nothing(index_elements=index_elements)
+        )
