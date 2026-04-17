@@ -26,9 +26,7 @@ depends_on: Union[str, Sequence[str], None] = None
 # across pages (large PG deployments OOM'd on yield_per in prior migrations).
 CHAT_PAGE_SIZE = 1000
 
-# Per-statement bind-parameter budget per dialect. PG allows 65,535;
-# SQLite < 3.32 (May 2020) caps at 999. Mirrors
-# open_webui.internal.db._PG_MAX_BIND_PARAMS / _SQLITE_MAX_BIND_PARAMS.
+# Mirrors open_webui.internal.db budgets - keep in sync.
 _PG_MAX_BIND_PARAMS = 65_000
 _SQLITE_MAX_BIND_PARAMS = 900
 
@@ -160,10 +158,8 @@ def upgrade() -> None:
             if not isinstance(meta, dict):
                 continue
 
-            # Shared-chat snapshots have user_id = 'shared-{orig_chat_id}' and
-            # historically carried meta['tags'] as a byproduct of the JSON
-            # blob copy. Don't promote those into real chat_tag / tag rows
-            # under the synthetic user_id; just strip the key for consistency.
+            # Shared snapshots (user_id='shared-...') historically leaked tags
+            # via the meta blob; don't promote them to real associations.
             is_shared_snapshot = isinstance(chat_row.user_id, str) and chat_row.user_id.startswith('shared-')
 
             raw_tag_names = meta.get('tags')
@@ -198,12 +194,8 @@ def upgrade() -> None:
             )
 
         if display_name_by_tag_key:
-            # Row-value IN works on PG and SQLite >= 3.15. Chunked per dialect
-            # to respect bind-param ceilings. The per-page reset of
-            # display_name_by_tag_key is safe because the existing-tag filter
-            # below skips (tag_id, user_id) pairs that already have a row,
-            # so a different display name seen on a later page can't clobber
-            # the first-seen name.
+            # Per-page reset is safe: the existing-tag filter below never
+            # overwrites a pre-existing (tag_id, user_id) row.
             tag_keys = list(display_name_by_tag_key.keys())
             existing_tag_keys: set[tuple[str, str]] = set()
             # tuple_(id, user_id) = 2 binds per row.
@@ -343,9 +335,7 @@ def downgrade() -> None:
                     existing_meta = json.loads(existing_meta)
                 except (TypeError, ValueError):
                     existing_meta = {}
-            # Downgrade is lossy for originally-non-dict meta (replaced with {}).
-            # Upgrade already skipped such chats, so this only affects rows
-            # mutated post-upgrade.
+            # Lossy for originally-non-dict meta; upgrade skipped those rows.
             if not isinstance(existing_meta, dict):
                 existing_meta = {}
             # Skip chats that had no tags pre-upgrade and still have none:

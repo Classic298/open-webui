@@ -293,9 +293,7 @@ def _insert_for_dialect(dialect_name: str):
     )
 
 
-# Per-statement bind-parameter budget. Postgres allows 65,535; SQLite < 3.32
-# (May 2020) caps at 999. Callers pass their row width to get a safe row
-# batch size. For single-column IN predicates, pass cols_per_row=1.
+# PG caps statements at 65,535 binds; SQLite < 3.32 (May 2020) caps at 999.
 _PG_MAX_BIND_PARAMS = 65_000
 _SQLITE_MAX_BIND_PARAMS = 900
 

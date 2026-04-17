@@ -440,8 +440,7 @@ class ChatTable:
                 await Tags.ensure_tags_exist(
                     list(display_name_by_tag_id.values()), user_id, db=db, commit=False
                 )
-                # Flush so the tag rows hit the DB before chat_tag's composite
-                # FK is checked on the chat_tag flush at commit-time.
+                # Flush so tag rows land before chat_tag's composite FK check.
                 await db.flush()
             if new_chat_tag_rows:
                 db.add_all(new_chat_tag_rows)
@@ -746,10 +745,8 @@ class ChatTable:
             return None
 
     async def delete_shared_chat_by_chat_id(self, chat_id: str, db: Optional[AsyncSession] = None) -> bool:
-        # ChatMessage / ChatTag deleted explicitly - see delete_chat_by_id
-        # NOTE re: SQLite PRAGMA foreign_keys. The ChatTag delete is
-        # defensive: shared snapshots shouldn't have chat_tag rows, but
-        # clean up if any leaked in.
+        # See delete_chat_by_id NOTE (SQLite PRAGMA). ChatTag delete is
+        # defensive - shared snapshots shouldn't have chat_tag rows.
         try:
             async with get_async_db_context(db) as db:
                 result = await db.execute(select(Chat.id).filter_by(user_id=f'shared-{chat_id}'))
