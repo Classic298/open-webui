@@ -395,7 +395,7 @@ class ChatTable:
     ) -> list[ChatModel]:
         async with get_async_db_context(db) as db:
             chats: list[Chat] = []
-            new_chat_tag_rows: list[ChatTag] = []
+            new_chat_tag_rows: list[dict] = []
             # First display name per normalized tag_id wins - avoids
             # composite-PK duplicates inside ensure_tags_exist.
             display_name_by_tag_id: dict[str, str] = {}
@@ -428,7 +428,7 @@ class ChatTable:
                     seen_tag_ids_in_chat.add(tag_id)
                     display_name_by_tag_id.setdefault(tag_id, raw_tag_name)
                     new_chat_tag_rows.append(
-                        ChatTag(chat_id=chat_row.id, tag_id=tag_id, user_id=user_id)
+                        {'chat_id': chat_row.id, 'tag_id': tag_id, 'user_id': user_id}
                     )
 
             # One commit covers chats + tag rows + chat_tag rows. Flush the
@@ -443,7 +443,15 @@ class ChatTable:
                 # Flush so tag rows land before chat_tag's composite FK check.
                 await db.flush()
             if new_chat_tag_rows:
-                db.add_all(new_chat_tag_rows)
+                # ON CONFLICT DO NOTHING matches the other write paths; the
+                # per-chat seen set already dedupes within a single import,
+                # but this stays consistent and idempotent.
+                await insert_all_on_conflict_nothing(
+                    db,
+                    ChatTag,
+                    new_chat_tag_rows,
+                    index_elements=['chat_id', 'tag_id', 'user_id'],
+                )
             await db.commit()
 
             try:
@@ -752,8 +760,9 @@ class ChatTable:
             return None
 
     async def delete_shared_chat_by_chat_id(self, chat_id: str, db: Optional[AsyncSession] = None) -> bool:
-        # See delete_chat_by_id NOTE (SQLite PRAGMA). ChatTag delete is
-        # defensive - shared snapshots shouldn't have chat_tag rows.
+        # Explicit deletes for ChatMessage / ChatTag in case SQLite's FK
+        # cascade is disabled (PRAGMA foreign_keys). Shared snapshots aren't
+        # expected to carry chat_tag rows; this cleans up any that leaked.
         try:
             async with get_async_db_context(db) as db:
                 result = await db.execute(select(Chat.id).filter_by(user_id=f'shared-{chat_id}'))
@@ -1578,14 +1587,18 @@ class ChatTable:
             # Counts across archived + non-archived: scoping to non-archived
             # would combine with the chat_tag FK CASCADE to destroy archived
             # chats' associations the next time any chat drops the tag.
-            reference_count_query = (
-                select(ChatTag.tag_id, func.count())
-                .where(ChatTag.user_id == user_id, ChatTag.tag_id.in_(tag_ids))
-                .group_by(ChatTag.tag_id)
-            )
-            reference_count_by_tag_id = {
-                row[0]: row[1] for row in (await db.execute(reference_count_query)).all()
-            }
+            # Chunk the IN for consistency with other IN predicates in this PR.
+            reference_count_by_tag_id: dict[str, int] = {}
+            batch_size = sql_param_batch(db.get_bind().dialect.name, cols_per_row=1)
+            for start in range(0, len(tag_ids), batch_size):
+                batch = tag_ids[start:start + batch_size]
+                reference_count_query = (
+                    select(ChatTag.tag_id, func.count())
+                    .where(ChatTag.user_id == user_id, ChatTag.tag_id.in_(batch))
+                    .group_by(ChatTag.tag_id)
+                )
+                for tag_id, count in (await db.execute(reference_count_query)).all():
+                    reference_count_by_tag_id[tag_id] = count
             orphan_tag_ids = [
                 tag_id
                 for tag_id in tag_ids

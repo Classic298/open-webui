@@ -337,7 +337,8 @@ async def insert_all_on_conflict_nothing(
         return
     dialect_name = db.get_bind().dialect.name
     insert = _insert_for_dialect(dialect_name)
-    # Max width across all dicts, so a heterogeneous batch can't overshoot.
+    # Bind-count budget uses the widest dict. Callers must still pass rows
+    # with matching keys - SA won't infer a uniform column set otherwise.
     batch_size = sql_param_batch(dialect_name, cols_per_row=max(len(v) for v in values_list))
     for start in range(0, len(values_list), batch_size):
         batch = values_list[start:start + batch_size]
