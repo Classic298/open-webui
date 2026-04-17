@@ -280,3 +280,24 @@ async def get_async_db_context(db: Optional[AsyncSession] = None):
     else:
         async with get_async_db() as session:
             yield session
+
+
+async def insert_ignore_conflict(
+    db: AsyncSession, model, values: dict, conflict_cols: list[str]
+):
+    """Execute INSERT ... ON CONFLICT (conflict_cols) DO NOTHING against *model*.
+
+    Dialect-specific because SQLAlchemy's core Insert doesn't expose ON CONFLICT
+    portably; we support postgresql and sqlite.
+    """
+    from sqlalchemy.dialects import postgresql, sqlite
+
+    bind = await db.connection()
+    dialect = bind.dialect.name
+    if dialect == 'postgresql':
+        stmt = postgresql.insert(model).values(**values)
+    elif dialect == 'sqlite':
+        stmt = sqlite.insert(model).values(**values)
+    else:
+        raise NotImplementedError(f'insert_ignore_conflict: unsupported dialect {dialect!r}')
+    await db.execute(stmt.on_conflict_do_nothing(index_elements=conflict_cols))

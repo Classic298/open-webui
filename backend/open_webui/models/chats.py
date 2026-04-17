@@ -5,11 +5,10 @@ import uuid
 from typing import Optional
 
 from sqlalchemy import select, delete, update, func, or_, and_, text
-from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import exists
 from sqlalchemy.sql.expression import bindparam
-from open_webui.internal.db import Base, JSONField, get_async_db_context
+from open_webui.internal.db import Base, JSONField, get_async_db_context, insert_ignore_conflict
 from open_webui.models.tags import TagModel, Tag, Tags, normalize_tag_id
 from open_webui.models.folders import Folders
 from open_webui.models.chat_messages import ChatMessage, ChatMessages
@@ -522,7 +521,6 @@ class ChatTable:
                 )
 
             await db.commit()
-            await db.refresh(chat)
 
             removed_tag_ids = previous_tag_ids - set(new_tag_ids)
             if removed_tag_ids:
@@ -1271,16 +1269,12 @@ class ChatTable:
 
             # 'tag:none' = no associations; 'tag:X tag:Y' = has both.
             if 'none' in tag_ids:
-                chat_has_any_tag = select(ChatTag.chat_id).where(
-                    ChatTag.chat_id == Chat.id,
-                    ChatTag.user_id == user_id,
-                )
+                chat_has_any_tag = select(ChatTag.chat_id).where(ChatTag.chat_id == Chat.id)
                 stmt = stmt.filter(~exists(chat_has_any_tag))
             else:
                 for required_tag_id in tag_ids:
                     chat_has_this_tag = select(ChatTag.chat_id).where(
                         ChatTag.chat_id == Chat.id,
-                        ChatTag.user_id == user_id,
                         ChatTag.tag_id == required_tag_id,
                     )
                     stmt = stmt.filter(exists(chat_has_this_tag))
@@ -1390,11 +1384,7 @@ class ChatTable:
             chat_list_query = (
                 select(Chat.id, Chat.title, Chat.updated_at, Chat.created_at, Chat.last_read_at)
                 .join(ChatTag, ChatTag.chat_id == Chat.id)
-                .where(
-                    Chat.user_id == user_id,
-                    ChatTag.user_id == user_id,
-                    ChatTag.tag_id == tag_id,
-                )
+                .where(Chat.user_id == user_id, ChatTag.tag_id == tag_id)
                 .order_by(Chat.updated_at.desc(), Chat.id)
             )
 
@@ -1430,23 +1420,14 @@ class ChatTable:
                 await Tags.ensure_tags_exist([tag_name], user_id, db=db, commit=False)
 
                 # ON CONFLICT DO NOTHING avoids a TOCTOU race on concurrent adds.
-                bind = await db.connection()
-                dialect = bind.dialect.name
-                values = {'chat_id': id, 'tag_id': tag_id, 'user_id': user_id}
-                if dialect == 'postgresql':
-                    insert_chat_tag = postgresql.insert(ChatTag).values(**values)
-                elif dialect == 'sqlite':
-                    insert_chat_tag = sqlite.insert(ChatTag).values(**values)
-                else:
-                    raise NotImplementedError(f'unsupported dialect: {dialect}')
-                await db.execute(
-                    insert_chat_tag.on_conflict_do_nothing(
-                        index_elements=['chat_id', 'tag_id', 'user_id']
-                    )
+                await insert_ignore_conflict(
+                    db,
+                    ChatTag,
+                    {'chat_id': id, 'tag_id': tag_id, 'user_id': user_id},
+                    conflict_cols=['chat_id', 'tag_id', 'user_id'],
                 )
 
                 await db.commit()
-                await db.refresh(chat)
                 return ChatModel.model_validate(chat)
         except Exception:
             return None
@@ -1461,7 +1442,6 @@ class ChatTable:
                 .join(ChatTag, ChatTag.chat_id == Chat.id)
                 .where(
                     Chat.user_id == user_id,
-                    ChatTag.user_id == user_id,
                     ChatTag.tag_id == tag_id,
                     Chat.archived.is_(False),
                 )
@@ -1488,7 +1468,6 @@ class ChatTable:
                 select(ChatTag.tag_id, func.count(Chat.id))
                 .join(Chat, Chat.id == ChatTag.chat_id)
                 .where(
-                    ChatTag.user_id == user_id,
                     Chat.user_id == user_id,
                     Chat.archived.is_(False),
                     ChatTag.tag_id.in_(tag_ids),
@@ -1514,6 +1493,8 @@ class ChatTable:
             log.info(f"Count of chats for folder '{folder_id}': {count}")
             return count
 
+    # Callers that care about cleaning up now-unreferenced tag rows invoke
+    # delete_orphan_tags_for_user themselves (e.g. the DELETE /tags/all route).
     async def delete_tag_by_id_and_user_id_and_tag_name(
         self, id: str, user_id: str, tag_name: str, db: Optional[AsyncSession] = None
     ) -> bool:

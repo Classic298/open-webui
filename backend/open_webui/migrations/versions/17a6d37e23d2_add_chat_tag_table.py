@@ -26,8 +26,10 @@ depends_on: Union[str, Sequence[str], None] = None
 # across pages (large PG deployments OOM'd on yield_per in prior migrations).
 CHAT_PAGE_SIZE = 1000
 
-# Keeps bulk INSERTs under Postgres' 65,535 bind-parameter limit even when
-# a page has many tags per chat.
+# Per-INSERT row cap. Postgres limits a statement to 65,535 bind parameters,
+# and a chat page with many tags per chat can push the flattened payload past
+# it. 5000 rows stays comfortably under the ceiling at our widest table
+# (tag has 4 cols = 20,000 binds).
 INSERT_BATCH_ROWS = 5000
 
 LOG_EVERY_CHATS = 50_000
@@ -37,8 +39,8 @@ def _normalize_tag_id(raw: str) -> str:
     return raw.replace(' ', '_').lower()
 
 
-def _chunked(seq: Sequence, size: int) -> Iterable[list]:
-    it = iter(seq)
+def _chunked(source: Iterable, size: int) -> Iterable[list]:
+    it = iter(source)
     while True:
         batch = list(islice(it, size))
         if not batch:
@@ -83,8 +85,6 @@ def upgrade() -> None:
             ondelete='CASCADE',
         ),
     )
-    # chat_id-only lookups are covered by the PK's leading column.
-    op.create_index('chat_tag_user_tag_idx', 'chat_tag', ['user_id', 'tag_id'])
 
     conn = op.get_bind()
 
@@ -199,6 +199,27 @@ def upgrade() -> None:
         f'{chat_tag_rows_inserted} associations inserted, {tag_rows_inserted} tags inserted'
     )
 
+    # chat_id-only lookups are covered by the PK's leading column.
+    op.create_index('chat_tag_user_tag_idx', 'chat_tag', ['user_id', 'tag_id'])
+
+    # Strip meta['tags'] now that chat_tag is the source of truth - otherwise
+    # ChatModel responses would leak the stale JSON tag list. Downgrade
+    # rebuilds meta['tags'] from chat_tag.
+    dialect = conn.dialect.name
+    if dialect == 'postgresql':
+        conn.execute(sa.text(
+            "UPDATE chat SET meta = meta - 'tags' WHERE meta ? 'tags'"
+        ))
+    elif dialect == 'sqlite':
+        conn.execute(sa.text(
+            "UPDATE chat SET meta = json_remove(meta, '$.tags') "
+            "WHERE json_extract(meta, '$.tags') IS NOT NULL"
+        ))
+    else:
+        raise NotImplementedError(
+            f'chat_tag migration: unsupported dialect {dialect!r}'
+        )
+
 
 def downgrade() -> None:
     # Post-upgrade the app stops writing meta['tags'], so we must reserialize
@@ -214,46 +235,43 @@ def downgrade() -> None:
         'chat_tag',
         sa.column('chat_id', sa.String()),
         sa.column('tag_id', sa.String()),
-        sa.column('user_id', sa.String()),
     )
 
     last_chat_id: Union[str, None] = None
     chats_rewritten = 0
+    bulk_update = (
+        sa.update(chat)
+        .where(chat.c.id == sa.bindparam('target_chat_id'))
+        .values(meta=sa.bindparam('new_meta'))
+    )
 
+    # Paginate by chat.id so a single heavily-tagged chat can never span
+    # page boundaries (avoids the "truncated tag list" edge case).
     while True:
-        tag_ids_by_chat_query = (
-            sa.select(chat_tag.c.chat_id, chat_tag.c.tag_id)
-            .order_by(chat_tag.c.chat_id)
-        )
+        chat_page_query = sa.select(chat.c.id, chat.c.meta).order_by(chat.c.id)
         if last_chat_id is not None:
-            tag_ids_by_chat_query = tag_ids_by_chat_query.where(chat_tag.c.chat_id > last_chat_id)
-        tag_ids_by_chat_query = tag_ids_by_chat_query.limit(CHAT_PAGE_SIZE * 50)
-        rows = conn.execute(tag_ids_by_chat_query).fetchall()
-        if not rows:
+            chat_page_query = chat_page_query.where(chat.c.id > last_chat_id)
+        chat_page_query = chat_page_query.limit(CHAT_PAGE_SIZE)
+
+        page_rows = conn.execute(chat_page_query).fetchall()
+        if not page_rows:
             break
 
-        tag_ids_by_chat_id: dict[str, list[str]] = {}
-        for row in rows:
-            tag_ids_by_chat_id.setdefault(row.chat_id, []).append(row.tag_id)
+        chat_ids_in_page = [row.id for row in page_rows]
+        existing_meta_by_chat_id = {row.id: row.meta for row in page_rows}
 
-        # The last chat_id in the batch may have been truncated mid-way
-        # through its tags, so defer it to the next iteration.
-        chat_ids_in_order = list(tag_ids_by_chat_id.keys())
-        if len(chat_ids_in_order) > 1:
-            complete_chat_ids = chat_ids_in_order[:-1]
-            next_cursor = complete_chat_ids[-1]
-        else:
-            complete_chat_ids = chat_ids_in_order
-            next_cursor = chat_ids_in_order[-1]
+        tag_rows = conn.execute(
+            sa.select(chat_tag.c.chat_id, chat_tag.c.tag_id).where(
+                chat_tag.c.chat_id.in_(chat_ids_in_page)
+            )
+        ).fetchall()
+        tag_ids_by_chat_id: dict[str, list[str]] = {cid: [] for cid in chat_ids_in_page}
+        for tag_row in tag_rows:
+            tag_ids_by_chat_id[tag_row.chat_id].append(tag_row.tag_id)
 
-        for chat_id in complete_chat_ids:
-            tag_ids = tag_ids_by_chat_id[chat_id]
-            existing_meta_row = conn.execute(
-                sa.select(chat.c.meta).where(chat.c.id == chat_id)
-            ).first()
-            if existing_meta_row is None:
-                continue
-            existing_meta = existing_meta_row.meta
+        update_params = []
+        for chat_id in chat_ids_in_page:
+            existing_meta = existing_meta_by_chat_id.get(chat_id)
             if isinstance(existing_meta, str):
                 try:
                     existing_meta = json.loads(existing_meta)
@@ -261,13 +279,14 @@ def downgrade() -> None:
                     existing_meta = {}
             if not isinstance(existing_meta, dict):
                 existing_meta = {}
-            merged_meta = {**existing_meta, 'tags': tag_ids}
-            conn.execute(
-                sa.update(chat).where(chat.c.id == chat_id).values(meta=merged_meta)
-            )
-            chats_rewritten += 1
+            merged_meta = {**existing_meta, 'tags': tag_ids_by_chat_id[chat_id]}
+            update_params.append({'target_chat_id': chat_id, 'new_meta': merged_meta})
 
-        last_chat_id = next_cursor
+        if update_params:
+            conn.execute(bulk_update, update_params)
+            chats_rewritten += len(update_params)
+
+        last_chat_id = chat_ids_in_page[-1]
 
     log.info(f'chat_tag downgrade: serialized tags back into meta for {chats_rewritten} chats')
 
