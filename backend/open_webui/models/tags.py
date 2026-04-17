@@ -122,20 +122,38 @@ class TagTable:
             log.error(f'delete_tags_by_ids: {e}')
             return False
 
-    async def ensure_tags_exist(self, names: list[str], user_id: str, db: Optional[AsyncSession] = None) -> None:
-        """Create tag rows for any *names* that don't already exist for *user_id*."""
+    async def ensure_tags_exist(
+        self,
+        names: list[str],
+        user_id: str,
+        db: Optional[AsyncSession] = None,
+        commit: bool = True,
+    ) -> None:
+        """Create tag rows for any *names* that don't already exist for *user_id*.
+
+        Pass ``commit=False`` when the caller owns a larger transaction that
+        must remain atomic (e.g. a dual-write that also touches chat_tag);
+        the caller is then responsible for committing the session.
+        """
         if not names:
             return
         ids = [n.replace(' ', '_').lower() for n in names]
         async with get_async_db_context(db) as db:
             result = await db.execute(select(Tag.id).filter(Tag.id.in_(ids), Tag.user_id == user_id))
             existing = {row[0] for row in result.all()}
-            new_tags = [
-                Tag(id=tag_id, name=name, user_id=user_id) for tag_id, name in zip(ids, names) if tag_id not in existing
-            ]
+            # Dedupe on normalized id so callers passing ['My Tag', 'my tag']
+            # don't stage two Tag rows with the same composite PK.
+            seen: set = set()
+            new_tags = []
+            for tag_id, name in zip(ids, names):
+                if tag_id in existing or tag_id in seen:
+                    continue
+                seen.add(tag_id)
+                new_tags.append(Tag(id=tag_id, name=name, user_id=user_id))
             if new_tags:
                 db.add_all(new_tags)
-                await db.commit()
+                if commit:
+                    await db.commit()
 
 
 Tags = TagTable()

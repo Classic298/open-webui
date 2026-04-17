@@ -8,7 +8,8 @@ Create Date: 2026-04-17 00:00:00.000000
 
 import json
 import logging
-from typing import Sequence, Union
+from itertools import islice
+from typing import Iterable, Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
@@ -21,55 +22,55 @@ down_revision: Union[str, None] = 'e1f2a3b4c5d6'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-# Keyset chunk size. Each chunk is fully materialized with .fetchall() and the
-# associated INSERTs run as bulk dialect-specific upserts, so no server-side
-# cursor stays open across chunks. Earlier migrations that used yield_per
-# streaming held a single cursor for the full run, which caused OOM /
-# connection resets on large PostgreSQL deployments.
-#
-# 1000 is a balance between round-trip overhead (too small) and per-chunk
-# memory plus Postgres' ~32k bind-parameter limit on bulk INSERT (too large);
-# at 3 columns per row that caps us well below the limit and keeps working
-# memory bounded.
-#
-# Note for very large (>10M chat rows) deployments: this migration runs
-# inside Alembic's default transaction, so the WAL write grows with row
-# count. Run during a maintenance window, or split DDL from backfill by
-# disabling transactional_ddl on this revision.
-CHUNK_SIZE = 1000
-LOG_EVERY = 50_000
+# Keyset page size for the chat scan. Each page is fully drained with
+# .fetchall() so no server-side cursor stays open across pages; earlier
+# migrations that used yield_per held one cursor for the full run and
+# OOM'd large PG deployments.
+CHAT_PAGE_SIZE = 1000
+
+# Hard cap on rows per bulk INSERT, so a page with many tags per chat can't
+# push past Postgres' 65,535 bind-parameter ceiling. chat_tag has 3 cols, tag
+# has 4; 5000 rows = 20,000 binds, well under the ceiling.
+INSERT_BATCH_ROWS = 5000
+
+LOG_EVERY_CHATS = 50_000
 
 
 def _normalize_tag_id(raw: str) -> str:
     return raw.replace(' ', '_').lower()
 
 
-def _bulk_insert_ignore(conn, table, rows, conflict_cols):
-    """Dialect-aware bulk INSERT that skips duplicate key conflicts.
+def _chunked(seq: Sequence, size: int) -> Iterable[list]:
+    it = iter(seq)
+    while True:
+        batch = list(islice(it, size))
+        if not batch:
+            return
+        yield batch
 
-    Postgres: INSERT ... ON CONFLICT (...) DO NOTHING.
-    SQLite:   INSERT OR IGNORE.
-    Other dialects are not supported - open-webui officially targets PG and
-    SQLite only, and a savepoint fallback here would silently swallow real
-    data-integrity errors alongside the intended duplicate-key skip.
+
+def _bulk_insert_skip_conflicts(conn, table, rows, conflict_cols):
+    """Bulk INSERT that skips duplicate-key conflicts. PG and SQLite only.
+
+    Both dialects scope the skip to the given conflict columns, so a real
+    integrity error on an unrelated constraint still surfaces.
     """
     if not rows:
         return
     dialect = conn.dialect.name
-    if dialect == 'postgresql':
-        stmt = postgresql.insert(table).values(rows).on_conflict_do_nothing(index_elements=conflict_cols)
+    for batch in _chunked(rows, INSERT_BATCH_ROWS):
+        if dialect == 'postgresql':
+            stmt = postgresql.insert(table).values(batch).on_conflict_do_nothing(index_elements=conflict_cols)
+        elif dialect == 'sqlite':
+            stmt = sqlite.insert(table).values(batch).on_conflict_do_nothing(index_elements=conflict_cols)
+        else:
+            raise NotImplementedError(
+                f'chat_tag backfill: unsupported dialect {dialect!r}; only postgresql and sqlite are supported'
+            )
         conn.execute(stmt)
-    elif dialect == 'sqlite':
-        stmt = sqlite.insert(table).values(rows).prefix_with('OR IGNORE')
-        conn.execute(stmt)
-    else:
-        raise NotImplementedError(
-            f'chat_tag backfill: unsupported dialect {dialect!r}; only postgresql and sqlite are supported'
-        )
 
 
 def upgrade() -> None:
-    # Step 1: Create chat_tag table
     op.create_table(
         'chat_tag',
         sa.Column('chat_id', sa.String(), nullable=False),
@@ -92,7 +93,6 @@ def upgrade() -> None:
     op.create_index('chat_tag_user_tag_idx', 'chat_tag', ['user_id', 'tag_id'])
     op.create_index('chat_tag_chat_idx', 'chat_tag', ['chat_id'])
 
-    # Step 2: Backfill from chat.meta['tags']
     conn = op.get_bind()
 
     chat = sa.table(
@@ -115,34 +115,31 @@ def upgrade() -> None:
         sa.column('user_id', sa.String()),
     )
 
-    last_id: Union[str, None] = None
-    processed = 0
-    assoc_queued = 0
-    tags_queued = 0
-    next_log_at = LOG_EVERY
+    last_chat_id: Union[str, None] = None
+    chats_processed = 0
+    chat_tag_rows_queued = 0
+    tag_rows_queued = 0
+    next_log_threshold = LOG_EVERY_CHATS
 
     while True:
-        stmt = sa.select(chat.c.id, chat.c.user_id, chat.c.meta).order_by(chat.c.id)
-        if last_id is not None:
-            stmt = stmt.where(chat.c.id > last_id)
-        stmt = stmt.limit(CHUNK_SIZE)
+        page_stmt = sa.select(chat.c.id, chat.c.user_id, chat.c.meta).order_by(chat.c.id)
+        if last_chat_id is not None:
+            page_stmt = page_stmt.where(chat.c.id > last_chat_id)
+        page_stmt = page_stmt.limit(CHAT_PAGE_SIZE)
 
-        # fetchall() fully materializes and releases the cursor immediately -
-        # see note at top of file on why this matters for large PG deployments.
-        rows = conn.execute(stmt).fetchall()
-        if not rows:
+        chat_rows = conn.execute(page_stmt).fetchall()
+        if not chat_rows:
             break
 
-        # First raw display name seen per (tag_id, user_id) "wins" and becomes
-        # the name on any newly-created tag row. Chunks iterate rows in
-        # chat.id order, so the winner is deterministic but otherwise
-        # arbitrary if the same tag exists under multiple casings across
-        # different chats. Pre-existing tag rows are never overwritten.
-        tag_display: dict[tuple[str, str], str] = {}
-        assoc_rows: list[dict] = []
+        # First raw display name seen per (tag_id, user_id) wins the name on
+        # any newly-created tag row. Deterministic per run (iteration is in
+        # chat.id order) but arbitrary across runs if the same tag appears
+        # under multiple casings. Pre-existing tag rows are never overwritten.
+        display_name_by_tag_key: dict[tuple[str, str], str] = {}
+        chat_tag_payload: list[dict] = []
 
-        for row in rows:
-            meta = row.meta
+        for chat_row in chat_rows:
+            meta = chat_row.meta
             if isinstance(meta, str):
                 try:
                     meta = json.loads(meta)
@@ -151,93 +148,80 @@ def upgrade() -> None:
             if not isinstance(meta, dict):
                 continue
 
-            tag_names = meta.get('tags')
-            if not isinstance(tag_names, list) or not tag_names:
+            raw_tag_names = meta.get('tags')
+            if not isinstance(raw_tag_names, list) or not raw_tag_names:
                 continue
 
-            seen_in_chat: set = set()
-            for raw_tag_name in tag_names:
+            seen_tag_ids_in_chat: set[str] = set()
+            for raw_tag_name in raw_tag_names:
                 if not isinstance(raw_tag_name, str):
                     continue
                 tag_id = _normalize_tag_id(raw_tag_name)
-                if not tag_id or tag_id in seen_in_chat:
+                if not tag_id or tag_id in seen_tag_ids_in_chat:
                     continue
-                seen_in_chat.add(tag_id)
+                seen_tag_ids_in_chat.add(tag_id)
 
-                tag_display.setdefault((tag_id, row.user_id), raw_tag_name)
-                assoc_rows.append(
-                    {'chat_id': row.id, 'tag_id': tag_id, 'user_id': row.user_id}
+                display_name_by_tag_key.setdefault((tag_id, chat_row.user_id), raw_tag_name)
+                chat_tag_payload.append(
+                    {'chat_id': chat_row.id, 'tag_id': tag_id, 'user_id': chat_row.user_id}
                 )
 
-        # Bulk-create missing tag rows for this chunk with proper display names.
-        if tag_display:
-            keys = list(tag_display.keys())
-            # One SELECT to find which (tag_id, user_id) pairs already exist.
-            existing: set = set()
-            # Parameterize via a VALUES / OR filter. Use a simple in-memory filter
-            # on the smaller side: we have <= CHUNK_SIZE tag keys. Split by
-            # user_id to keep predicates simple.
-            by_user: dict = {}
-            for tid, uid in keys:
-                by_user.setdefault(uid, set()).add(tid)
-            for uid, tids in by_user.items():
-                res = conn.execute(
-                    sa.select(tag.c.id, tag.c.user_id).where(
-                        tag.c.user_id == uid,
-                        tag.c.id.in_(tids),
-                    )
-                ).fetchall()
-                for r in res:
-                    existing.add((r.id, r.user_id))
+        if display_name_by_tag_key:
+            # One tuple-IN query covers every (tag_id, user_id) in the page,
+            # regardless of how many distinct users it spans. Both PG and
+            # SQLite >= 3.15 support row-value IN.
+            tag_keys = list(display_name_by_tag_key.keys())
+            existing_tag_keys: set[tuple[str, str]] = set()
+            existing_stmt = sa.select(tag.c.id, tag.c.user_id).where(
+                sa.tuple_(tag.c.id, tag.c.user_id).in_(tag_keys)
+            )
+            for existing_row in conn.execute(existing_stmt).fetchall():
+                existing_tag_keys.add((existing_row.id, existing_row.user_id))
 
             new_tag_rows = [
-                {
-                    'id': tid,
-                    'name': raw_name,
-                    'user_id': uid,
-                    'meta': None,
-                }
-                for (tid, uid), raw_name in tag_display.items()
-                if (tid, uid) not in existing
+                {'id': tid, 'name': raw_name, 'user_id': uid, 'meta': None}
+                for (tid, uid), raw_name in display_name_by_tag_key.items()
+                if (tid, uid) not in existing_tag_keys
             ]
             if new_tag_rows:
-                _bulk_insert_ignore(conn, tag, new_tag_rows, conflict_cols=['id', 'user_id'])
-                tags_queued += len(new_tag_rows)
+                _bulk_insert_skip_conflicts(conn, tag, new_tag_rows, conflict_cols=['id', 'user_id'])
+                tag_rows_queued += len(new_tag_rows)
 
-        # Bulk-insert chat_tag associations. Dedupe payload list first; duplicate
-        # PK collisions (e.g. re-run after partial failure) are swallowed by the
-        # dialect's conflict clause.
-        if assoc_rows:
-            unique_assocs = list(
-                {(r['chat_id'], r['tag_id'], r['user_id']): r for r in assoc_rows}.values()
+        if chat_tag_payload:
+            deduped_chat_tag_rows = list(
+                {
+                    (r['chat_id'], r['tag_id'], r['user_id']): r
+                    for r in chat_tag_payload
+                }.values()
             )
-            _bulk_insert_ignore(
-                conn, chat_tag, unique_assocs, conflict_cols=['chat_id', 'tag_id', 'user_id']
+            _bulk_insert_skip_conflicts(
+                conn, chat_tag, deduped_chat_tag_rows,
+                conflict_cols=['chat_id', 'tag_id', 'user_id'],
             )
-            assoc_queued += len(unique_assocs)
+            chat_tag_rows_queued += len(deduped_chat_tag_rows)
 
-        last_id = rows[-1].id
-        processed += len(rows)
+        last_chat_id = chat_rows[-1].id
+        chats_processed += len(chat_rows)
 
-        if processed >= next_log_at:
+        if chats_processed >= next_log_threshold:
             log.info(
-                f'chat_tag backfill progress: {processed} chats processed, '
-                f'{assoc_queued} associations queued, {tags_queued} tags queued, '
-                f'last_id={last_id}'
+                f'chat_tag backfill progress: {chats_processed} chats processed, '
+                f'{chat_tag_rows_queued} associations queued, '
+                f'{tag_rows_queued} tags queued, last_chat_id={last_chat_id}'
             )
-            next_log_at += LOG_EVERY
+            next_log_threshold += LOG_EVERY_CHATS
 
     log.info(
-        f'chat_tag backfill complete: {processed} chats processed, '
-        f'{assoc_queued} associations queued, {tags_queued} tags queued'
+        f'chat_tag backfill complete: {chats_processed} chats processed, '
+        f'{chat_tag_rows_queued} associations queued, {tag_rows_queued} tags queued'
     )
 
 
 def downgrade() -> None:
-    # NOTE: downgrade is only data-safe while chat.meta['tags'] is still being
-    # dual-written by the model layer. If a future migration drops the meta
-    # writes, update this downgrade to serialize chat_tag rows back into
-    # chat.meta['tags'] before dropping the table.
+    # TODO(chat-tag-meta-dropped): this downgrade relies on chat.meta['tags']
+    # still being dual-written. When a future migration drops those writes,
+    # this function must serialize chat_tag rows back into meta before the
+    # drop - or refuse to run.
     op.drop_index('chat_tag_chat_idx', table_name='chat_tag')
     op.drop_index('chat_tag_user_tag_idx', table_name='chat_tag')
     op.drop_table('chat_tag')
