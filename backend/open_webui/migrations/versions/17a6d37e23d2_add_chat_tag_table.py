@@ -308,20 +308,26 @@ def downgrade() -> None:
 
         # ORDER BY tag.name gives deterministic meta['tags'] ordering across
         # downgrade runs (row order from chat_tag is otherwise undefined).
-        tag_rows = conn.execute(
-            sa.select(chat_tag.c.chat_id, tag.c.name)
-            .select_from(
-                chat_tag.join(
-                    tag,
-                    sa.and_(
-                        chat_tag.c.tag_id == tag.c.id,
-                        chat_tag.c.user_id == tag.c.user_id,
-                    ),
-                )
+        # IN chunked so CHAT_PAGE_SIZE > SQLite's 900-bind cap can't blow up.
+        tag_rows: list = []
+        chat_id_batch_size = _row_batch_size(dialect, cols_per_row=1)
+        for id_batch in _chunked(chat_ids_in_page, chat_id_batch_size):
+            tag_rows.extend(
+                conn.execute(
+                    sa.select(chat_tag.c.chat_id, tag.c.name)
+                    .select_from(
+                        chat_tag.join(
+                            tag,
+                            sa.and_(
+                                chat_tag.c.tag_id == tag.c.id,
+                                chat_tag.c.user_id == tag.c.user_id,
+                            ),
+                        )
+                    )
+                    .where(chat_tag.c.chat_id.in_(id_batch))
+                    .order_by(chat_tag.c.chat_id, tag.c.name)
+                ).fetchall()
             )
-            .where(chat_tag.c.chat_id.in_(chat_ids_in_page))
-            .order_by(chat_tag.c.chat_id, tag.c.name)
-        ).fetchall()
         tag_names_by_chat_id: dict[str, list[str]] = {cid: [] for cid in chat_ids_in_page}
         for tag_row in tag_rows:
             tag_names_by_chat_id[tag_row.chat_id].append(tag_row.name)

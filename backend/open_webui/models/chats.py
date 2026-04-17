@@ -575,7 +575,12 @@ class ChatTable:
             await db.commit()
 
             if to_remove:
-                await self.delete_orphan_tags_for_user(list(to_remove), user.id, db=db)
+                # Best-effort - runs after commit, so a failure here would
+                # only leave orphan tag rows (cosmetic), not corrupt state.
+                try:
+                    await self.delete_orphan_tags_for_user(list(to_remove), user.id, db=db)
+                except Exception:
+                    log.exception('orphan tag cleanup failed for chat=%s', id)
 
             return ChatModel.model_validate(chat)
 
@@ -722,6 +727,8 @@ class ChatTable:
     async def update_shared_chat_by_chat_id(
         self, chat_id: str, db: Optional[AsyncSession] = None
     ) -> Optional[ChatModel]:
+        # meta is still copied but no longer contains tags - see
+        # insert_shared_chat_by_chat_id for why tags don't propagate.
         try:
             async with get_async_db_context(db) as db:
                 chat = await db.get(Chat, chat_id)

@@ -300,7 +300,14 @@ _SQLITE_MAX_BIND_PARAMS = 900
 
 def sql_param_batch(dialect_name: str, cols_per_row: int = 1) -> int:
     cols_per_row = max(1, cols_per_row)
-    budget = _SQLITE_MAX_BIND_PARAMS if dialect_name == 'sqlite' else _PG_MAX_BIND_PARAMS
+    if dialect_name == 'postgresql':
+        budget = _PG_MAX_BIND_PARAMS
+    elif dialect_name == 'sqlite':
+        budget = _SQLITE_MAX_BIND_PARAMS
+    else:
+        raise NotImplementedError(
+            f'sql_param_batch: unsupported dialect {dialect_name!r}; only postgresql and sqlite are supported'
+        )
     return max(1, budget // cols_per_row)
 
 
@@ -330,7 +337,8 @@ async def insert_all_on_conflict_nothing(
         return
     dialect_name = db.get_bind().dialect.name
     insert = _insert_for_dialect(dialect_name)
-    batch_size = sql_param_batch(dialect_name, cols_per_row=len(values_list[0]))
+    # Max width across all dicts, so a heterogeneous batch can't overshoot.
+    batch_size = sql_param_batch(dialect_name, cols_per_row=max(len(v) for v in values_list))
     for start in range(0, len(values_list), batch_size):
         batch = values_list[start:start + batch_size]
         await db.execute(
