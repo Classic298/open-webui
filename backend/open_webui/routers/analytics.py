@@ -5,13 +5,15 @@ import logging
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
+from collections import Counter
+
 from open_webui.models.chat_messages import ChatMessages, ChatMessageModel
 from open_webui.models.chats import Chats, ChatTag
 from open_webui.models.groups import Groups
 from open_webui.models.users import Users
 from open_webui.models.feedbacks import Feedbacks
 from open_webui.utils.auth import get_admin_user
-from open_webui.internal.db import get_async_session
+from open_webui.internal.db import get_async_session, SQL_PARAM_BATCH
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -429,14 +431,18 @@ async def get_model_overview(
             )
             current += timedelta(days=1)
 
-    tag_count_query = (
-        select(ChatTag.tag_id, func.count())
-        .where(ChatTag.chat_id.in_(chat_ids))
-        .group_by(ChatTag.tag_id)
-        .order_by(func.count().desc())
-        .limit(10)
-    )
-    tag_count_rows = (await db.execute(tag_count_query)).all() if chat_ids else []
-    tags = [TagEntry(tag=row[0], count=row[1]) for row in tag_count_rows]
+    # Chunk the IN clause so wide date ranges can't push it past PG's
+    # 65,535 bind-param ceiling, then aggregate in Python.
+    tag_counts: Counter[str] = Counter()
+    for start in range(0, len(chat_ids), SQL_PARAM_BATCH):
+        batch = chat_ids[start:start + SQL_PARAM_BATCH]
+        rows = (await db.execute(
+            select(ChatTag.tag_id, func.count())
+            .where(ChatTag.chat_id.in_(batch))
+            .group_by(ChatTag.tag_id)
+        )).all()
+        for tag_id, count in rows:
+            tag_counts[tag_id] += count
+    tags = [TagEntry(tag=t, count=c) for t, c in tag_counts.most_common(10)]
 
     return ModelOverviewResponse(history=history, tags=tags)

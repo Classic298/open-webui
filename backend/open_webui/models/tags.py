@@ -19,6 +19,12 @@ log = logging.getLogger(__name__)
 # To name a thing is to claim it. The creator has
 # already named everything stored in this table.
 ####################
+# Reserved tag_id used as a sentinel by the tag:none search filter
+# ("chat has no tags"). Writers must reject it so it can never become a
+# real association.
+RESERVED_TAG_ID_NONE = 'none'
+
+
 def normalize_tag_id(raw: str) -> str:
     """Canonical tag_id form. This is the PK for tag and chat_tag, so every
     call site that derives an id from a user-supplied name must use this."""
@@ -138,6 +144,8 @@ class TagTable:
         must remain atomic (e.g. a dual-write that also touches chat_tag);
         the caller is then responsible for committing the session.
         """
+        if not commit and db is None:
+            raise ValueError('ensure_tags_exist(commit=False) requires an explicit db session')
         if not names:
             return
         # Dedupe on normalized id, first display name wins. ON CONFLICT DO

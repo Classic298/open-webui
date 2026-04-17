@@ -151,10 +151,16 @@ def upgrade() -> None:
             if not isinstance(meta, dict):
                 continue
 
+            # Shared-chat snapshots have user_id = 'shared-{orig_chat_id}' and
+            # historically carried meta['tags'] as a byproduct of the JSON
+            # blob copy. Don't promote those into real chat_tag / tag rows
+            # under the synthetic user_id; just strip the key for consistency.
+            is_shared_snapshot = isinstance(chat_row.user_id, str) and chat_row.user_id.startswith('shared-')
+
             raw_tag_names = meta.get('tags')
-            if not isinstance(raw_tag_names, list) or not raw_tag_names:
-                # Still strip the 'tags' key if present but empty/malformed,
-                # so meta is consistently tag-free post-upgrade.
+            if is_shared_snapshot or not isinstance(raw_tag_names, list) or not raw_tag_names:
+                # Still strip the 'tags' key if present, so meta is
+                # consistently tag-free post-upgrade.
                 if 'tags' in meta:
                     stripped_meta = {k: v for k, v in meta.items() if k != 'tags'}
                     meta_strip_payload.append(
@@ -235,6 +241,8 @@ def upgrade() -> None:
         f'{meta_rows_stripped} meta rows stripped'
     )
 
+    # Index built after backfill so bulk inserts don't pay index-maintenance
+    # cost per row.
     op.create_index('chat_tag_user_tag_idx', 'chat_tag', ['user_id', 'tag_id'])
 
 
@@ -321,6 +329,9 @@ def downgrade() -> None:
                     existing_meta = json.loads(existing_meta)
                 except (TypeError, ValueError):
                     existing_meta = {}
+            # Downgrade is lossy for originally-non-dict meta (replaced with {}).
+            # Upgrade already skipped such chats, so this only affects rows
+            # mutated post-upgrade.
             if not isinstance(existing_meta, dict):
                 existing_meta = {}
             # Skip chats that had no tags pre-upgrade and still have none:

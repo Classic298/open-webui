@@ -9,14 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import exists
 from sqlalchemy.sql.expression import bindparam
 from open_webui.internal.db import (
-    _INSERT_BATCH_ROWS,
+    SQL_PARAM_BATCH,
     Base,
     JSONField,
     get_async_db_context,
     insert_all_on_conflict_nothing,
     insert_on_conflict_nothing,
 )
-from open_webui.models.tags import TagModel, Tag, Tags, normalize_tag_id
+from open_webui.models.tags import TagModel, Tag, Tags, normalize_tag_id, RESERVED_TAG_ID_NONE
 from open_webui.models.folders import Folders
 from open_webui.models.chat_messages import ChatMessage, ChatMessages
 from open_webui.models.automations import AutomationRun
@@ -423,7 +423,7 @@ class ChatTable:
                     # 'none' is the sentinel used by the search "tag:none"
                     # filter to mean "no tags" - skip it so it never becomes
                     # a real association.
-                    if not tag_id or tag_id == 'none' or tag_id in seen_tag_ids_in_chat:
+                    if not tag_id or tag_id == RESERVED_TAG_ID_NONE or tag_id in seen_tag_ids_in_chat:
                         continue
                     seen_tag_ids_in_chat.add(tag_id)
                     display_name_by_tag_id.setdefault(tag_id, raw_tag_name)
@@ -525,7 +525,7 @@ class ChatTable:
                 if not isinstance(raw_tag_name, str):
                     continue
                 tag_id = normalize_tag_id(raw_tag_name)
-                if not tag_id or tag_id == 'none':
+                if not tag_id or tag_id == RESERVED_TAG_ID_NONE:
                     continue
                 display_name_by_tag_id.setdefault(tag_id, raw_tag_name)
             new_tag_ids = list(display_name_by_tag_id.keys())
@@ -1325,7 +1325,7 @@ class ChatTable:
 
             # 'tag:none' = no associations; 'tag:X tag:Y' = has both.
             # ChatTag.user_id filter is defense-in-depth + index alignment.
-            if 'none' in tag_ids:
+            if RESERVED_TAG_ID_NONE in tag_ids:
                 any_tag_subquery = select(ChatTag.chat_id).where(
                     ChatTag.chat_id == Chat.id,
                     ChatTag.user_id == user_id,
@@ -1437,8 +1437,8 @@ class ChatTable:
         # Chunk the IN predicate so a very large caller list can't push it
         # past the Postgres 65,535 bind-param ceiling.
         async with get_async_db_context(db) as db:
-            for start in range(0, len(chat_ids), _INSERT_BATCH_ROWS):
-                batch_ids = chat_ids[start:start + _INSERT_BATCH_ROWS]
+            for start in range(0, len(chat_ids), SQL_PARAM_BATCH):
+                batch_ids = chat_ids[start:start + SQL_PARAM_BATCH]
                 rows = await db.execute(
                     select(ChatTag.chat_id, ChatTag.tag_id).where(
                         ChatTag.chat_id.in_(batch_ids),
@@ -1500,7 +1500,7 @@ class ChatTable:
     ) -> Optional[ChatModel]:
         tag_id = normalize_tag_id(tag_name)
         # 'none' is the search sentinel; '' would bind a garbage association.
-        if not tag_id or tag_id == 'none':
+        if not tag_id or tag_id == RESERVED_TAG_ID_NONE:
             return None
         try:
             async with get_async_db_context(db) as db:

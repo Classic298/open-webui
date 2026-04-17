@@ -24,7 +24,7 @@ from open_webui.models.chats import (
     ChatHistoryStats,
     MessageStats,
 )
-from open_webui.models.tags import TagModel, Tags, normalize_tag_id
+from open_webui.models.tags import TagModel, Tags, normalize_tag_id, RESERVED_TAG_ID_NONE
 from open_webui.models.folders import Folders
 from open_webui.internal.db import get_async_session
 
@@ -1342,7 +1342,7 @@ async def add_tag_by_id_and_tag_name(
 ):
     chat = await Chats.get_chat_by_id_and_user_id(id, user.id, db=db)
     if chat:
-        if normalize_tag_id(form_data.name) == 'none':
+        if normalize_tag_id(form_data.name) == RESERVED_TAG_ID_NONE:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=ERROR_MESSAGES.DEFAULT("Tag name cannot be 'None'"),
