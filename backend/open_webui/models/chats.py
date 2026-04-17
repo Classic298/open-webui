@@ -430,8 +430,11 @@ class ChatTable:
                         ChatTag(chat_id=chat_row.id, tag_id=tag_id, user_id=user_id)
                     )
 
-            # One commit covers chats + tag rows + chat_tag rows.
+            # One commit covers chats + tag rows + chat_tag rows. Flush the
+            # chat rows before raw tag/chat_tag inserts so the FKs resolve
+            # without depending on implicit autoflush ordering.
             db.add_all(chats)
+            await db.flush()
             if display_name_by_tag_id:
                 await Tags.ensure_tags_exist(
                     list(display_name_by_tag_id.values()), user_id, db=db, commit=False
@@ -728,6 +731,8 @@ class ChatTable:
             return None
 
     async def delete_shared_chat_by_chat_id(self, chat_id: str, db: Optional[AsyncSession] = None) -> bool:
+        # ChatMessage / ChatTag deleted explicitly - see delete_chat_by_id
+        # NOTE re: SQLite PRAGMA foreign_keys.
         try:
             async with get_async_db_context(db) as db:
                 result = await db.execute(select(Chat.id).filter_by(user_id=f'shared-{chat_id}'))
@@ -1534,18 +1539,12 @@ class ChatTable:
         if not tag_ids:
             return
         async with get_async_db_context(db) as db:
-            # Tag is orphan only if NO chat (archived or not) references it.
-            # Scoping this to non-archived would combine with the chat_tag FK
-            # CASCADE to destroy archived chats' associations the next time
-            # a non-archived chat drops the tag.
+            # Counts across archived + non-archived: scoping to non-archived
+            # would combine with the chat_tag FK CASCADE to destroy archived
+            # chats' associations the next time any chat drops the tag.
             reference_count_query = (
-                select(ChatTag.tag_id, func.count(Chat.id))
-                .join(Chat, Chat.id == ChatTag.chat_id)
-                .where(
-                    ChatTag.user_id == user_id,
-                    Chat.user_id == user_id,
-                    ChatTag.tag_id.in_(tag_ids),
-                )
+                select(ChatTag.tag_id, func.count())
+                .where(ChatTag.user_id == user_id, ChatTag.tag_id.in_(tag_ids))
                 .group_by(ChatTag.tag_id)
             )
             reference_count_by_tag_id = {

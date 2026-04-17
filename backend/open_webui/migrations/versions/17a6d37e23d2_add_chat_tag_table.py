@@ -237,8 +237,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # Reserialize chat_tag into meta['tags'] before the drop (post-upgrade
-    # writes only hit chat_tag). Lossy: rebuilt from tag_id (not tag.name)
-    # and in DB row order, not the original user-meaningful order.
+    # writes only hit chat_tag). Joins tag to recover tag.name so a
+    # round-trip upgrade -> downgrade preserves user-visible casing.
+    # Still lossy on row order (no user-meaningful order survives chat_tag).
     conn = op.get_bind()
     dialect = conn.dialect.name
     if dialect not in ('postgresql', 'sqlite'):
@@ -249,12 +250,20 @@ def downgrade() -> None:
     chat = sa.table(
         'chat',
         sa.column('id', sa.String()),
+        sa.column('user_id', sa.String()),
         sa.column('meta', sa.JSON()),
+    )
+    tag = sa.table(
+        'tag',
+        sa.column('id', sa.String()),
+        sa.column('name', sa.String()),
+        sa.column('user_id', sa.String()),
     )
     chat_tag = sa.table(
         'chat_tag',
         sa.column('chat_id', sa.String()),
         sa.column('tag_id', sa.String()),
+        sa.column('user_id', sa.String()),
     )
 
     last_chat_id: Union[str, None] = None
@@ -281,17 +290,25 @@ def downgrade() -> None:
         existing_meta_by_chat_id = {row.id: row.meta for row in page_rows}
 
         tag_rows = conn.execute(
-            sa.select(chat_tag.c.chat_id, chat_tag.c.tag_id).where(
-                chat_tag.c.chat_id.in_(chat_ids_in_page)
+            sa.select(chat_tag.c.chat_id, tag.c.name)
+            .select_from(
+                chat_tag.join(
+                    tag,
+                    sa.and_(
+                        chat_tag.c.tag_id == tag.c.id,
+                        chat_tag.c.user_id == tag.c.user_id,
+                    ),
+                )
             )
+            .where(chat_tag.c.chat_id.in_(chat_ids_in_page))
         ).fetchall()
-        tag_ids_by_chat_id: dict[str, list[str]] = {cid: [] for cid in chat_ids_in_page}
+        tag_names_by_chat_id: dict[str, list[str]] = {cid: [] for cid in chat_ids_in_page}
         for tag_row in tag_rows:
-            tag_ids_by_chat_id[tag_row.chat_id].append(tag_row.tag_id)
+            tag_names_by_chat_id[tag_row.chat_id].append(tag_row.name)
 
         update_params = []
         for chat_id in chat_ids_in_page:
-            tag_ids = tag_ids_by_chat_id[chat_id]
+            tag_names = tag_names_by_chat_id[chat_id]
             existing_meta = existing_meta_by_chat_id.get(chat_id)
             if isinstance(existing_meta, str):
                 try:
@@ -302,9 +319,9 @@ def downgrade() -> None:
                 existing_meta = {}
             # Skip chats that had no tags pre-upgrade and still have none:
             # don't grow their meta with an empty 'tags' key.
-            if not tag_ids and 'tags' not in existing_meta:
+            if not tag_names and 'tags' not in existing_meta:
                 continue
-            merged_meta = {**existing_meta, 'tags': tag_ids}
+            merged_meta = {**existing_meta, 'tags': tag_names}
             update_params.append({'target_chat_id': chat_id, 'new_meta': merged_meta})
 
         if update_params:
