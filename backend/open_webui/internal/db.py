@@ -293,12 +293,17 @@ def _insert_for_dialect(dialect_name: str):
     )
 
 
-# Per-statement row cap, sized to stay under each dialect's bind-parameter
-# ceiling. Postgres allows 65,535; SQLite < 3.32 (May 2020) caps at 999.
-# Used by bulk INSERTs and IN-predicate chunking alike.
-def sql_param_batch(dialect_name: str) -> int:
-    # 200 rows x 4 cols = 800 binds, under SQLite's 999 floor.
-    return 200 if dialect_name == 'sqlite' else 5000
+# Per-statement bind-parameter budget. Postgres allows 65,535; SQLite < 3.32
+# (May 2020) caps at 999. Callers pass their row width to get a safe row
+# batch size. For single-column IN predicates, pass cols_per_row=1.
+_PG_MAX_BIND_PARAMS = 65_000
+_SQLITE_MAX_BIND_PARAMS = 900
+
+
+def sql_param_batch(dialect_name: str, cols_per_row: int = 1) -> int:
+    cols_per_row = max(1, cols_per_row)
+    budget = _SQLITE_MAX_BIND_PARAMS if dialect_name == 'sqlite' else _PG_MAX_BIND_PARAMS
+    return max(1, budget // cols_per_row)
 
 
 async def insert_on_conflict_nothing(
@@ -327,7 +332,7 @@ async def insert_all_on_conflict_nothing(
         return
     dialect_name = db.get_bind().dialect.name
     insert = _insert_for_dialect(dialect_name)
-    batch_size = sql_param_batch(dialect_name)
+    batch_size = sql_param_batch(dialect_name, cols_per_row=len(values_list[0]))
     for start in range(0, len(values_list), batch_size):
         batch = values_list[start:start + batch_size]
         await db.execute(

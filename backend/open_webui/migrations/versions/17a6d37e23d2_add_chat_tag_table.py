@@ -26,11 +26,16 @@ depends_on: Union[str, Sequence[str], None] = None
 # across pages (large PG deployments OOM'd on yield_per in prior migrations).
 CHAT_PAGE_SIZE = 1000
 
-# Ceiling guard against each dialect's bind-parameter limit. PG allows
-# 65,535; SQLite < 3.32 (May 2020) caps at 999. Mirrors
-# open_webui.internal.db.sql_param_batch - keep in sync.
-SQL_PARAM_BATCH_PG = 5000
-SQL_PARAM_BATCH_SQLITE = 200
+# Per-statement bind-parameter budget per dialect. PG allows 65,535;
+# SQLite < 3.32 (May 2020) caps at 999. Mirrors
+# open_webui.internal.db._PG_MAX_BIND_PARAMS / _SQLITE_MAX_BIND_PARAMS.
+_PG_MAX_BIND_PARAMS = 65_000
+_SQLITE_MAX_BIND_PARAMS = 900
+
+
+def _row_batch_size(dialect: str, cols_per_row: int) -> int:
+    budget = _SQLITE_MAX_BIND_PARAMS if dialect == 'sqlite' else _PG_MAX_BIND_PARAMS
+    return max(1, budget // max(1, cols_per_row))
 
 LOG_EVERY_CHATS = 50_000
 
@@ -54,7 +59,7 @@ def _bulk_insert_on_conflict_nothing(conn, table, rows, index_elements):
     if not rows:
         return
     dialect = conn.dialect.name
-    batch_size = SQL_PARAM_BATCH_SQLITE if dialect == 'sqlite' else SQL_PARAM_BATCH_PG
+    batch_size = _row_batch_size(dialect, cols_per_row=len(rows[0]))
     for batch in _chunked(rows, batch_size):
         if dialect == 'postgresql':
             stmt = postgresql.insert(table).values(batch).on_conflict_do_nothing(index_elements=index_elements)
@@ -201,7 +206,8 @@ def upgrade() -> None:
             # the first-seen name.
             tag_keys = list(display_name_by_tag_key.keys())
             existing_tag_keys: set[tuple[str, str]] = set()
-            key_batch_size = SQL_PARAM_BATCH_SQLITE if dialect == 'sqlite' else SQL_PARAM_BATCH_PG
+            # tuple_(id, user_id) = 2 binds per row.
+            key_batch_size = _row_batch_size(dialect, cols_per_row=2)
             for key_batch in _chunked(tag_keys, key_batch_size):
                 existing_tag_query = sa.select(tag.c.id, tag.c.user_id).where(
                     sa.tuple_(tag.c.id, tag.c.user_id).in_(key_batch)
