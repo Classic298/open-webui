@@ -1041,8 +1041,9 @@ async def delete_chat_by_id(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=ERROR_MESSAGES.NOT_FOUND,
             )
-        tag_ids = await Chats.get_chat_tag_ids_by_id_and_user_id(id, user.id, db=db)
-        await Chats.delete_orphan_tags_for_user(tag_ids, user.id, threshold=1, db=db)
+        # Orphan cleanup is scoped to the chat's owner, not the admin.
+        tag_ids = await Chats.get_chat_tag_ids_by_id_and_user_id(id, chat.user_id, db=db)
+        await Chats.delete_orphan_tags_for_user(tag_ids, chat.user_id, threshold=1, db=db)
 
         result = await Chats.delete_chat_by_id(id, db=db)
 

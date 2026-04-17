@@ -530,9 +530,15 @@ class ChatTable:
                     db=db,
                     commit=False,
                 )
-                db.add_all(
-                    [ChatTag(chat_id=id, tag_id=tag_id, user_id=user.id) for tag_id in to_add]
-                )
+                # ON CONFLICT DO NOTHING per row so concurrent adds of the
+                # same (chat, tag, user) don't raise IntegrityError.
+                for tag_id in to_add:
+                    await insert_on_conflict_nothing(
+                        db,
+                        ChatTag,
+                        {'chat_id': id, 'tag_id': tag_id, 'user_id': user.id},
+                        index_elements=['chat_id', 'tag_id', 'user_id'],
+                    )
             if to_remove:
                 await db.execute(
                     delete(ChatTag).where(
@@ -1469,6 +1475,12 @@ class ChatTable:
                 if chat is None or chat.user_id != user_id:
                     return None
 
+                # Read the existing set before writing so we can build the
+                # response tag list in memory (avoids a post-commit round-trip).
+                existing_tag_ids = await self.get_chat_tag_ids_by_id_and_user_id(
+                    id, user_id, db=db
+                )
+
                 await Tags.ensure_tags_exist([tag_name], user_id, db=db, commit=False)
 
                 # ON CONFLICT DO NOTHING avoids a TOCTOU race on concurrent adds.
@@ -1482,10 +1494,8 @@ class ChatTable:
                 await db.commit()
 
                 response = ChatModel.model_validate(chat)
-                response.meta = {
-                    **(response.meta or {}),
-                    'tags': await self.get_chat_tag_ids_by_id_and_user_id(id, user_id, db=db),
-                }
+                merged_tag_ids = list(dict.fromkeys([*existing_tag_ids, tag_id]))
+                response.meta = {**(response.meta or {}), 'tags': merged_tag_ids}
                 return response
         except Exception as e:
             log.exception(f'add_chat_tag failed for chat={id} tag={tag_name}: {e}')
@@ -1515,8 +1525,9 @@ class ChatTable:
         threshold: int = 0,
         db: Optional[AsyncSession] = None,
     ) -> None:
-        """Delete tag rows from *tag_ids* whose non-archived chat reference
-        count for *user_id* is at most *threshold*.
+        """Delete tag rows from *tag_ids* whose chat reference count for
+        *user_id* is at most *threshold*. Counts across archived and
+        non-archived chats; see the in-body comment for why.
 
         threshold=0: call after a tag has already been removed from a chat.
         threshold=1: call before the referencing chat is deleted.
