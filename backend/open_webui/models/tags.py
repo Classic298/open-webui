@@ -5,7 +5,7 @@ from typing import Optional
 
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from open_webui.internal.db import Base, JSONField, get_async_db_context
+from open_webui.internal.db import Base, JSONField, get_async_db_context, insert_all_on_conflict_nothing
 
 
 from pydantic import BaseModel, ConfigDict
@@ -140,23 +140,21 @@ class TagTable:
         """
         if not names:
             return
-        ids = [normalize_tag_id(n) for n in names]
+        # Dedupe on normalized id, first display name wins. ON CONFLICT DO
+        # NOTHING handles the concurrent-insert race so we don't need the
+        # old SELECT-then-add check.
+        values_by_tag_id: dict[str, dict] = {}
+        for name in names:
+            tag_id = normalize_tag_id(name)
+            values_by_tag_id.setdefault(
+                tag_id, {'id': tag_id, 'name': name, 'user_id': user_id}
+            )
         async with get_async_db_context(db) as db:
-            result = await db.execute(select(Tag.id).filter(Tag.id.in_(ids), Tag.user_id == user_id))
-            existing = {row[0] for row in result.all()}
-            # Dedupe on normalized id - ['My Tag', 'my tag'] would otherwise
-            # stage two Tag rows with the same composite PK.
-            seen_tag_ids: set[str] = set()
-            new_tags: list[Tag] = []
-            for tag_id, name in zip(ids, names):
-                if tag_id in existing or tag_id in seen_tag_ids:
-                    continue
-                seen_tag_ids.add(tag_id)
-                new_tags.append(Tag(id=tag_id, name=name, user_id=user_id))
-            if new_tags:
-                db.add_all(new_tags)
-                if commit:
-                    await db.commit()
+            await insert_all_on_conflict_nothing(
+                db, Tag, list(values_by_tag_id.values()), index_elements=['id', 'user_id']
+            )
+            if commit:
+                await db.commit()
 
 
 Tags = TagTable()

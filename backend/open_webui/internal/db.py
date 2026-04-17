@@ -283,6 +283,16 @@ async def get_async_db_context(db: Optional[AsyncSession] = None):
             yield session
 
 
+def _insert_factory_for_dialect(dialect_name: str):
+    if dialect_name == 'postgresql':
+        return postgresql.insert
+    if dialect_name == 'sqlite':
+        return sqlite.insert
+    raise NotImplementedError(
+        f'insert_on_conflict_nothing: unsupported dialect {dialect_name!r}; only postgresql and sqlite are supported'
+    )
+
+
 async def insert_on_conflict_nothing(
     db: AsyncSession, target, values: dict, index_elements: list[str]
 ):
@@ -290,13 +300,21 @@ async def insert_on_conflict_nothing(
     *target* (mapped ORM class or sa.Table) on postgresql or sqlite. Caller
     is responsible for committing."""
     bind = await db.connection()
-    dialect = bind.dialect.name
-    if dialect == 'postgresql':
-        stmt = postgresql.insert(target).values(**values)
-    elif dialect == 'sqlite':
-        stmt = sqlite.insert(target).values(**values)
-    else:
-        raise NotImplementedError(
-            f'insert_on_conflict_nothing: unsupported dialect {dialect!r}; only postgresql and sqlite are supported'
-        )
-    await db.execute(stmt.on_conflict_do_nothing(index_elements=index_elements))
+    insert = _insert_factory_for_dialect(bind.dialect.name)
+    await db.execute(
+        insert(target).values(**values).on_conflict_do_nothing(index_elements=index_elements)
+    )
+
+
+async def insert_all_on_conflict_nothing(
+    db: AsyncSession, target, values_list: list[dict], index_elements: list[str]
+):
+    """Bulk INSERT ... ON CONFLICT (index_elements) DO NOTHING on postgresql or
+    sqlite. Caller is responsible for committing."""
+    if not values_list:
+        return
+    bind = await db.connection()
+    insert = _insert_factory_for_dialect(bind.dialect.name)
+    await db.execute(
+        insert(target).values(values_list).on_conflict_do_nothing(index_elements=index_elements)
+    )

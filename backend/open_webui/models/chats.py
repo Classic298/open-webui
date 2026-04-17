@@ -8,7 +8,13 @@ from sqlalchemy import select, delete, update, func, or_, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import exists
 from sqlalchemy.sql.expression import bindparam
-from open_webui.internal.db import Base, JSONField, get_async_db_context, insert_on_conflict_nothing
+from open_webui.internal.db import (
+    Base,
+    JSONField,
+    get_async_db_context,
+    insert_all_on_conflict_nothing,
+    insert_on_conflict_nothing,
+)
 from open_webui.models.tags import TagModel, Tag, Tags, normalize_tag_id
 from open_webui.models.folders import Folders
 from open_webui.models.chat_messages import ChatMessage, ChatMessages
@@ -413,7 +419,10 @@ class ChatTable:
                     if not isinstance(raw_tag_name, str):
                         continue
                     tag_id = normalize_tag_id(raw_tag_name)
-                    if not tag_id or tag_id in seen_tag_ids_in_chat:
+                    # 'none' is the sentinel used by the search "tag:none"
+                    # filter to mean "no tags" - skip it so it never becomes
+                    # a real association.
+                    if not tag_id or tag_id == 'none' or tag_id in seen_tag_ids_in_chat:
                         continue
                     seen_tag_ids_in_chat.add(tag_id)
                     display_name_by_tag_id.setdefault(tag_id, raw_tag_name)
@@ -530,15 +539,17 @@ class ChatTable:
                     db=db,
                     commit=False,
                 )
-                # ON CONFLICT DO NOTHING per row so concurrent adds of the
-                # same (chat, tag, user) don't raise IntegrityError.
-                for tag_id in to_add:
-                    await insert_on_conflict_nothing(
-                        db,
-                        ChatTag,
-                        {'chat_id': id, 'tag_id': tag_id, 'user_id': user.id},
-                        index_elements=['chat_id', 'tag_id', 'user_id'],
-                    )
+                # Bulk ON CONFLICT DO NOTHING so concurrent adds of the same
+                # (chat, tag, user) don't raise IntegrityError.
+                await insert_all_on_conflict_nothing(
+                    db,
+                    ChatTag,
+                    [
+                        {'chat_id': id, 'tag_id': tag_id, 'user_id': user.id}
+                        for tag_id in to_add
+                    ],
+                    index_elements=['chat_id', 'tag_id', 'user_id'],
+                )
             if to_remove:
                 await db.execute(
                     delete(ChatTag).where(
@@ -553,10 +564,7 @@ class ChatTable:
             if to_remove:
                 await self.delete_orphan_tags_for_user(list(to_remove), user.id, db=db)
 
-            # Response-only meta overlay for back-compat with ChatModel.meta.tags readers.
-            response = ChatModel.model_validate(chat)
-            response.meta = {**(response.meta or {}), 'tags': new_tag_ids}
-            return response
+            return ChatModel.model_validate(chat)
 
     async def get_chat_title_by_id(self, id: str) -> Optional[str]:
         async with get_async_db_context() as db:
@@ -1392,7 +1400,8 @@ class ChatTable:
         except Exception:
             return None
 
-    # Returns [] for a missing/foreign chat.
+    # Returns the tag_ids associated with (id, user_id) in chat_tag. Empty
+    # list if the chat doesn't exist OR the user has no chat_tag rows for it.
     async def get_chat_tag_ids_by_id_and_user_id(
         self, id: str, user_id: str, db: Optional[AsyncSession] = None
     ) -> list[str]:
@@ -1475,12 +1484,6 @@ class ChatTable:
                 if chat is None or chat.user_id != user_id:
                     return None
 
-                # Read the existing set before writing so we can build the
-                # response tag list in memory (avoids a post-commit round-trip).
-                existing_tag_ids = await self.get_chat_tag_ids_by_id_and_user_id(
-                    id, user_id, db=db
-                )
-
                 await Tags.ensure_tags_exist([tag_name], user_id, db=db, commit=False)
 
                 # ON CONFLICT DO NOTHING avoids a TOCTOU race on concurrent adds.
@@ -1492,13 +1495,9 @@ class ChatTable:
                 )
 
                 await db.commit()
-
-                response = ChatModel.model_validate(chat)
-                merged_tag_ids = list(dict.fromkeys([*existing_tag_ids, tag_id]))
-                response.meta = {**(response.meta or {}), 'tags': merged_tag_ids}
-                return response
-        except Exception as e:
-            log.exception(f'add_chat_tag failed for chat={id} tag={tag_name}: {e}')
+                return ChatModel.model_validate(chat)
+        except Exception:
+            log.exception('add_chat_tag failed for chat=%s tag=%s', id, tag_name)
             return None
 
     async def count_chats_by_tag_name_and_user_id(
@@ -1582,8 +1581,8 @@ class ChatTable:
                 )
                 await db.commit()
                 return True
-        except Exception as e:
-            log.exception(f'delete_tag failed for chat={id} tag={tag_name}: {e}')
+        except Exception:
+            log.exception('delete_tag failed for chat=%s tag=%s', id, tag_name)
             return False
 
     async def delete_all_tags_by_id_and_user_id(self, id: str, user_id: str, db: Optional[AsyncSession] = None) -> bool:
@@ -1592,8 +1591,8 @@ class ChatTable:
                 await db.execute(delete(ChatTag).filter_by(chat_id=id, user_id=user_id))
                 await db.commit()
                 return True
-        except Exception as e:
-            log.exception(f'delete_all_tags failed for chat={id}: {e}')
+        except Exception:
+            log.exception('delete_all_tags failed for chat=%s', id)
             return False
 
     # NOTE: ChatMessage / ChatTag are deleted explicitly - SQLite only

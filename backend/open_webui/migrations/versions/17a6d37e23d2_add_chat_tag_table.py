@@ -64,6 +64,12 @@ def _bulk_insert_on_conflict_nothing(conn, table, rows, index_elements):
 
 
 def upgrade() -> None:
+    dialect = op.get_bind().dialect.name
+    if dialect not in ('postgresql', 'sqlite'):
+        raise NotImplementedError(
+            f'chat_tag migration: unsupported dialect {dialect!r}; only postgresql and sqlite are supported'
+        )
+
     op.create_table(
         'chat_tag',
         sa.Column('chat_id', sa.String(), nullable=False),
@@ -161,7 +167,8 @@ def upgrade() -> None:
                 if not isinstance(raw_tag_name, str):
                     continue
                 tag_id = _normalize_tag_id(raw_tag_name)
-                if not tag_id or tag_id in seen_tag_ids_in_chat:
+                # 'none' is the search sentinel; don't promote it to a real association.
+                if not tag_id or tag_id == 'none' or tag_id in seen_tag_ids_in_chat:
                     continue
                 seen_tag_ids_in_chat.add(tag_id)
 
@@ -233,6 +240,11 @@ def downgrade() -> None:
     # writes only hit chat_tag). Lossy: rebuilt from tag_id (not tag.name)
     # and in DB row order, not the original user-meaningful order.
     conn = op.get_bind()
+    dialect = conn.dialect.name
+    if dialect not in ('postgresql', 'sqlite'):
+        raise NotImplementedError(
+            f'chat_tag migration: unsupported dialect {dialect!r}; only postgresql and sqlite are supported'
+        )
 
     chat = sa.table(
         'chat',
