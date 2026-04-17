@@ -26,18 +26,14 @@ depends_on: Union[str, Sequence[str], None] = None
 # across pages (large PG deployments OOM'd on yield_per in prior migrations).
 CHAT_PAGE_SIZE = 1000
 
-# Per-INSERT row cap (ceiling guard). Postgres limits a statement to 65,535
-# bind parameters; a page with many tags per chat could in theory push past
-# that. Realistic workloads stay far below 5000 rows per page, so this is
-# defensive - chunked execution only kicks in on degenerate inputs.
+# Ceiling guard against Postgres' 65,535 bind-param statement limit.
 INSERT_BATCH_ROWS = 5000
 
 LOG_EVERY_CHATS = 50_000
 
 
 def _normalize_tag_id(raw: str) -> str:
-    # Duplicated from open_webui.models.tags.normalize_tag_id; migrations must
-    # be self-contained (models evolve independently). Keep in sync.
+    # Must stay in sync with open_webui.models.tags.normalize_tag_id.
     return raw.replace(' ', '_').lower()
 
 
@@ -206,10 +202,8 @@ def upgrade() -> None:
             chat_tag_rows_inserted += len(chat_tag_payload)
 
         if meta_strip_payload:
-            # Paginated executemany avoids a single full-table UPDATE that
-            # would hold write locks and bloat WAL on large deployments.
-            # (Also: meta is sa.JSON, so the PG json - 'tags' operator
-            # isn't available without a jsonb cast.)
+            # Paginated; a single full-table UPDATE holds write locks too long.
+            # (Also: meta is sa.JSON, so PG's json - 'tags' needs a jsonb cast.)
             conn.execute(strip_meta_update, meta_strip_payload)
             meta_rows_stripped += len(meta_strip_payload)
 
@@ -236,12 +230,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Post-upgrade the app stops writing meta['tags'], so we must reserialize
-    # chat_tag back into meta before the drop or lose every post-upgrade tag.
-    # Lossy for display casing: the reserialized tag list uses the normalized
-    # tag_id, not the original tag.name. Round-tripping upgrade -> downgrade
-    # on already-normalized data is a no-op; original user casings only
-    # survive re-running upgrade (which reads from tag.name).
+    # Reserialize chat_tag into meta['tags'] before the drop (post-upgrade
+    # writes only hit chat_tag). Lossy: rebuilt from tag_id, not tag.name.
     conn = op.get_bind()
 
     chat = sa.table(

@@ -72,10 +72,8 @@ class Chat(Base):
     )
 
 
-# Invariant (enforced by writers, not by the schema): chat_tag.user_id equals
-# chat(chat_id).user_id. user_id is kept in the PK so the composite FK to
-# tag(id, user_id) is declarable - SQL can't reference just part of a
-# composite PK on the parent side.
+# Writer-enforced invariant: chat_tag.user_id == chat(chat_id).user_id.
+# user_id is in the PK so the composite FK to tag(id, user_id) is declarable.
 class ChatTag(Base):
     __tablename__ = 'chat_tag'
 
@@ -529,9 +527,7 @@ class ChatTable:
             if removed_tag_ids:
                 await self.delete_orphan_tags_for_user(list(removed_tag_ids), user.id, db=db)
 
-            # Overlay the new tag ids on the response only - chat.meta is
-            # no longer the source of truth, but existing clients may still
-            # read ChatModel.meta['tags'].
+            # Response-only meta overlay for back-compat with ChatModel.meta.tags readers.
             response = ChatModel.model_validate(chat)
             response.meta = {**(response.meta or {}), 'tags': new_tag_ids}
             return response
@@ -1276,9 +1272,7 @@ class ChatTable:
                 raise NotImplementedError(f'Unsupported dialect: {dialect_name}')
 
             # 'tag:none' = no associations; 'tag:X tag:Y' = has both.
-            # The ChatTag.user_id predicate is redundant with the writer-enforced
-            # invariant, but keeping it defends against any future drift and
-            # drives the chat_tag_user_tag_idx lookup.
+            # ChatTag.user_id filter is defense-in-depth + index alignment.
             if 'none' in tag_ids:
                 chat_has_any_tag = select(ChatTag.chat_id).where(
                     ChatTag.chat_id == Chat.id,
@@ -1383,11 +1377,7 @@ class ChatTable:
     async def get_chat_tag_ids_by_chat_ids_and_user_id(
         self, chat_ids: list[str], user_id: str, db: Optional[AsyncSession] = None
     ) -> dict[str, list[str]]:
-        """Batch equivalent of get_chat_tag_ids_by_id_and_user_id.
-
-        Every chat_id from *chat_ids* is present in the result (empty list if
-        no tags), so callers can look up without a .get() default.
-        """
+        # Every chat_id is present in the result; callers can look up without .get().
         tag_ids_by_chat_id: dict[str, list[str]] = {chat_id: [] for chat_id in chat_ids}
         if not chat_ids:
             return tag_ids_by_chat_id
