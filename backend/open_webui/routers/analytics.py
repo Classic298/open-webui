@@ -13,7 +13,7 @@ from open_webui.models.groups import Groups
 from open_webui.models.users import Users
 from open_webui.models.feedbacks import Feedbacks
 from open_webui.utils.auth import get_admin_user
-from open_webui.internal.db import get_async_session, SQL_PARAM_BATCH
+from open_webui.internal.db import get_async_session, sql_param_batch
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -431,11 +431,12 @@ async def get_model_overview(
             )
             current += timedelta(days=1)
 
-    # Chunk the IN clause so wide date ranges can't push it past PG's
-    # 65,535 bind-param ceiling, then aggregate in Python.
+    # Chunk the IN clause to respect each dialect's bind-param ceiling,
+    # then aggregate in Python.
     tag_counts: Counter[str] = Counter()
-    for start in range(0, len(chat_ids), SQL_PARAM_BATCH):
-        batch = chat_ids[start:start + SQL_PARAM_BATCH]
+    batch_size = sql_param_batch(db.get_bind().dialect.name)
+    for start in range(0, len(chat_ids), batch_size):
+        batch = chat_ids[start:start + batch_size]
         rows = (await db.execute(
             select(ChatTag.tag_id, func.count())
             .where(ChatTag.chat_id.in_(batch))

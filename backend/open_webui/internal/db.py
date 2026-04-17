@@ -283,7 +283,7 @@ async def get_async_db_context(db: Optional[AsyncSession] = None):
             yield session
 
 
-def _insert_factory_for_dialect(dialect_name: str):
+def _insert_for_dialect(dialect_name: str):
     if dialect_name == 'postgresql':
         return postgresql.insert
     if dialect_name == 'sqlite':
@@ -293,8 +293,14 @@ def _insert_factory_for_dialect(dialect_name: str):
     )
 
 
-# db.bind is the engine; read the dialect off it directly so we don't have
-# to check out a connection for every insert helper call.
+# Per-statement row cap, sized to stay under each dialect's bind-parameter
+# ceiling. Postgres allows 65,535; SQLite < 3.32 (May 2020) caps at 999.
+# Used by bulk INSERTs and IN-predicate chunking alike.
+def sql_param_batch(dialect_name: str) -> int:
+    # 200 rows x 4 cols = 800 binds, under SQLite's 999 floor.
+    return 200 if dialect_name == 'sqlite' else 5000
+
+
 async def insert_on_conflict_nothing(
     db: AsyncSession,
     target,  # mapped ORM class or sa.Table
@@ -303,16 +309,10 @@ async def insert_on_conflict_nothing(
 ):
     """Single-row INSERT ... ON CONFLICT (index_elements) DO NOTHING on
     postgresql or sqlite. Caller is responsible for committing."""
-    insert = _insert_factory_for_dialect(db.bind.dialect.name)
+    insert = _insert_for_dialect(db.get_bind().dialect.name)
     await db.execute(
         insert(target).values(**values).on_conflict_do_nothing(index_elements=index_elements)
     )
-
-
-# Conservative ceiling under Postgres' 65,535 bind-param per-statement limit.
-# Safe for both bulk INSERT (5000 rows x ~4 cols = 20k binds) and IN-predicate
-# chunking (1 bind per value, huge margin).
-SQL_PARAM_BATCH = 5000
 
 
 async def insert_all_on_conflict_nothing(
@@ -325,9 +325,11 @@ async def insert_all_on_conflict_nothing(
     or sqlite. Caller is responsible for committing."""
     if not values_list:
         return
-    insert = _insert_factory_for_dialect(db.bind.dialect.name)
-    for start in range(0, len(values_list), SQL_PARAM_BATCH):
-        batch = values_list[start:start + SQL_PARAM_BATCH]
+    dialect_name = db.get_bind().dialect.name
+    insert = _insert_for_dialect(dialect_name)
+    batch_size = sql_param_batch(dialect_name)
+    for start in range(0, len(values_list), batch_size):
+        batch = values_list[start:start + batch_size]
         await db.execute(
             insert(target).values(batch).on_conflict_do_nothing(index_elements=index_elements)
         )

@@ -1370,8 +1370,11 @@ async def delete_tag_by_id_and_tag_name(
     if chat:
         await Chats.delete_tag_by_id_and_user_id_and_tag_name(id, user.id, form_data.name, db=db)
 
-        if await Chats.count_chats_by_tag_name_and_user_id(form_data.name, user.id, db=db) == 0:
-            await Tags.delete_tag_by_name_and_user_id(form_data.name, user.id, db=db)
+        # Orphan cleanup counts archived chats too (see delete_orphan_tags_for_user),
+        # so a tag referenced only by archived chats is preserved for unarchive.
+        await Chats.delete_orphan_tags_for_user(
+            [normalize_tag_id(form_data.name)], user.id, db=db
+        )
 
         return await Chats.get_chat_tags_by_id_and_user_id(id, user.id, db=db)
     else:

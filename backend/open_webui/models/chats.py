@@ -9,12 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import exists
 from sqlalchemy.sql.expression import bindparam
 from open_webui.internal.db import (
-    SQL_PARAM_BATCH,
     Base,
     JSONField,
     get_async_db_context,
     insert_all_on_conflict_nothing,
     insert_on_conflict_nothing,
+    sql_param_batch,
 )
 from open_webui.models.tags import TagModel, Tag, Tags, normalize_tag_id, RESERVED_TAG_ID_NONE
 from open_webui.models.folders import Folders
@@ -1434,11 +1434,11 @@ class ChatTable:
             return {}
         # Every chat_id is present in the result; callers can look up without .get().
         tag_ids_by_chat_id: dict[str, list[str]] = {chat_id: [] for chat_id in chat_ids}
-        # Chunk the IN predicate so a very large caller list can't push it
-        # past the Postgres 65,535 bind-param ceiling.
+        # Chunk the IN predicate to respect each dialect's bind-param ceiling.
         async with get_async_db_context(db) as db:
-            for start in range(0, len(chat_ids), SQL_PARAM_BATCH):
-                batch_ids = chat_ids[start:start + SQL_PARAM_BATCH]
+            batch_size = sql_param_batch(db.get_bind().dialect.name)
+            for start in range(0, len(chat_ids), batch_size):
+                batch_ids = chat_ids[start:start + batch_size]
                 rows = await db.execute(
                     select(ChatTag.chat_id, ChatTag.tag_id).where(
                         ChatTag.chat_id.in_(batch_ids),
@@ -1504,7 +1504,12 @@ class ChatTable:
             return None
         try:
             async with get_async_db_context(db) as db:
-                chat = await db.get(Chat, id)
+                # FOR UPDATE on the chat row to match update_chat_tags_by_id's
+                # lock, so a concurrent "set tags" + "add tag" pair on the same
+                # chat serializes rather than racing.
+                chat = await db.scalar(
+                    select(Chat).where(Chat.id == id).with_for_update()
+                )
                 # Ownership check enforces the chat_tag invariant.
                 if chat is None or chat.user_id != user_id:
                     return None

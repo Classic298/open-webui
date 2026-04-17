@@ -26,8 +26,11 @@ depends_on: Union[str, Sequence[str], None] = None
 # across pages (large PG deployments OOM'd on yield_per in prior migrations).
 CHAT_PAGE_SIZE = 1000
 
-# Ceiling guard against Postgres' 65,535 bind-param statement limit.
-INSERT_BATCH_ROWS = 5000
+# Ceiling guard against each dialect's bind-parameter limit. PG allows
+# 65,535; SQLite < 3.32 (May 2020) caps at 999. Mirrors
+# open_webui.internal.db.sql_param_batch - keep in sync.
+SQL_PARAM_BATCH_PG = 5000
+SQL_PARAM_BATCH_SQLITE = 200
 
 LOG_EVERY_CHATS = 50_000
 
@@ -51,7 +54,8 @@ def _bulk_insert_on_conflict_nothing(conn, table, rows, index_elements):
     if not rows:
         return
     dialect = conn.dialect.name
-    for batch in _chunked(rows, INSERT_BATCH_ROWS):
+    batch_size = SQL_PARAM_BATCH_SQLITE if dialect == 'sqlite' else SQL_PARAM_BATCH_PG
+    for batch in _chunked(rows, batch_size):
         if dialect == 'postgresql':
             stmt = postgresql.insert(table).values(batch).on_conflict_do_nothing(index_elements=index_elements)
         elif dialect == 'sqlite':
@@ -189,12 +193,16 @@ def upgrade() -> None:
             )
 
         if display_name_by_tag_key:
-            # Row-value IN works on PG and SQLite >= 3.15. Chunked so a
-            # tenant-heavy page can't push this predicate past the PG bind
-            # param ceiling.
+            # Row-value IN works on PG and SQLite >= 3.15. Chunked per dialect
+            # to respect bind-param ceilings. The per-page reset of
+            # display_name_by_tag_key is safe because the existing-tag filter
+            # below skips (tag_id, user_id) pairs that already have a row,
+            # so a different display name seen on a later page can't clobber
+            # the first-seen name.
             tag_keys = list(display_name_by_tag_key.keys())
             existing_tag_keys: set[tuple[str, str]] = set()
-            for key_batch in _chunked(tag_keys, INSERT_BATCH_ROWS):
+            key_batch_size = SQL_PARAM_BATCH_SQLITE if dialect == 'sqlite' else SQL_PARAM_BATCH_PG
+            for key_batch in _chunked(tag_keys, key_batch_size):
                 existing_tag_query = sa.select(tag.c.id, tag.c.user_id).where(
                     sa.tuple_(tag.c.id, tag.c.user_id).in_(key_batch)
                 )
