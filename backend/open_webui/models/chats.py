@@ -493,9 +493,12 @@ class ChatTable:
             return None
 
     async def update_chat_tags_by_id(self, id: str, tags: list[str], user) -> Optional[ChatModel]:
+        # Ownership check enforces the chat_tag.user_id == chat.user_id invariant.
+        # Concurrent calls on the same chat race on the previous_tag_ids read;
+        # last-writer-wins within a single call, set-union across races.
         async with get_async_db_context() as db:
             chat = await db.get(Chat, id)
-            if chat is None:
+            if chat is None or chat.user_id != user.id:
                 return None
 
             # First display name per normalized id wins; ['My Tag', 'my tag']
@@ -1462,7 +1465,8 @@ class ChatTable:
         try:
             async with get_async_db_context(db) as db:
                 chat = await db.get(Chat, id)
-                if chat is None:
+                # Ownership check enforces the chat_tag invariant.
+                if chat is None or chat.user_id != user_id:
                     return None
 
                 await Tags.ensure_tags_exist([tag_name], user_id, db=db, commit=False)
@@ -1520,13 +1524,16 @@ class ChatTable:
         if not tag_ids:
             return
         async with get_async_db_context(db) as db:
+            # Tag is orphan only if NO chat (archived or not) references it.
+            # Scoping this to non-archived would combine with the chat_tag FK
+            # CASCADE to destroy archived chats' associations the next time
+            # a non-archived chat drops the tag.
             reference_count_query = (
                 select(ChatTag.tag_id, func.count(Chat.id))
                 .join(Chat, Chat.id == ChatTag.chat_id)
                 .where(
                     ChatTag.user_id == user_id,
                     Chat.user_id == user_id,
-                    Chat.archived.is_(False),
                     ChatTag.tag_id.in_(tag_ids),
                 )
                 .group_by(ChatTag.tag_id)
@@ -1564,7 +1571,8 @@ class ChatTable:
                 )
                 await db.commit()
                 return True
-        except Exception:
+        except Exception as e:
+            log.exception(f'delete_tag failed for chat={id} tag={tag_name}: {e}')
             return False
 
     async def delete_all_tags_by_id_and_user_id(self, id: str, user_id: str, db: Optional[AsyncSession] = None) -> bool:
@@ -1573,7 +1581,8 @@ class ChatTable:
                 await db.execute(delete(ChatTag).filter_by(chat_id=id, user_id=user_id))
                 await db.commit()
                 return True
-        except Exception:
+        except Exception as e:
+            log.exception(f'delete_all_tags failed for chat={id}: {e}')
             return False
 
     # NOTE: ChatMessage / ChatTag are deleted explicitly - SQLite only
@@ -1619,6 +1628,7 @@ class ChatTable:
                 await db.execute(
                     delete(ChatMessage).filter(ChatMessage.chat_id.in_(select(Chat.id).filter_by(user_id=user_id)))
                 )
+                # Relies on chat_tag.user_id == chat.user_id invariant.
                 await db.execute(delete(ChatTag).filter_by(user_id=user_id))
                 await db.execute(delete(Chat).filter_by(user_id=user_id))
                 await db.commit()

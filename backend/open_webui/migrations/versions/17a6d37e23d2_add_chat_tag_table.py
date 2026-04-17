@@ -116,7 +116,7 @@ def upgrade() -> None:
     strip_meta_update = (
         sa.update(chat)
         .where(chat.c.id == sa.bindparam('target_chat_id'))
-        .values(meta=sa.bindparam('new_meta'))
+        .values(meta=sa.bindparam('new_meta', type_=sa.JSON()))
     )
 
     while True:
@@ -230,7 +230,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # Reserialize chat_tag into meta['tags'] before the drop (post-upgrade
-    # writes only hit chat_tag). Lossy: rebuilt from tag_id, not tag.name.
+    # writes only hit chat_tag). Lossy: rebuilt from tag_id (not tag.name)
+    # and in DB row order, not the original user-meaningful order.
     conn = op.get_bind()
 
     chat = sa.table(
@@ -249,7 +250,7 @@ def downgrade() -> None:
     bulk_update = (
         sa.update(chat)
         .where(chat.c.id == sa.bindparam('target_chat_id'))
-        .values(meta=sa.bindparam('new_meta'))
+        .values(meta=sa.bindparam('new_meta', type_=sa.JSON()))
     )
 
     # Paginate by chat.id so a single heavily-tagged chat can never span
