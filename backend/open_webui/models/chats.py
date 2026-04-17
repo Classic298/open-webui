@@ -8,7 +8,7 @@ from sqlalchemy import select, delete, update, func, or_, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import exists
 from sqlalchemy.sql.expression import bindparam
-from open_webui.internal.db import Base, JSONField, get_async_db_context, insert_ignore_conflict
+from open_webui.internal.db import Base, JSONField, get_async_db_context, insert_on_conflict_nothing
 from open_webui.models.tags import TagModel, Tag, Tags, normalize_tag_id
 from open_webui.models.folders import Folders
 from open_webui.models.chat_messages import ChatMessage, ChatMessages
@@ -529,7 +529,12 @@ class ChatTable:
             if removed_tag_ids:
                 await self.delete_orphan_tags_for_user(list(removed_tag_ids), user.id, db=db)
 
-            return ChatModel.model_validate(chat)
+            # Overlay the new tag ids on the response only - chat.meta is
+            # no longer the source of truth, but existing clients may still
+            # read ChatModel.meta['tags'].
+            response = ChatModel.model_validate(chat)
+            response.meta = {**(response.meta or {}), 'tags': new_tag_ids}
+            return response
 
     async def get_chat_title_by_id(self, id: str) -> Optional[str]:
         async with get_async_db_context() as db:
@@ -1271,13 +1276,20 @@ class ChatTable:
                 raise NotImplementedError(f'Unsupported dialect: {dialect_name}')
 
             # 'tag:none' = no associations; 'tag:X tag:Y' = has both.
+            # The ChatTag.user_id predicate is redundant with the writer-enforced
+            # invariant, but keeping it defends against any future drift and
+            # drives the chat_tag_user_tag_idx lookup.
             if 'none' in tag_ids:
-                chat_has_any_tag = select(ChatTag.chat_id).where(ChatTag.chat_id == Chat.id)
+                chat_has_any_tag = select(ChatTag.chat_id).where(
+                    ChatTag.chat_id == Chat.id,
+                    ChatTag.user_id == user_id,
+                )
                 stmt = stmt.filter(~exists(chat_has_any_tag))
             elif tag_ids:
                 for required_tag_id in tag_ids:
                     chat_has_this_tag = select(ChatTag.chat_id).where(
                         ChatTag.chat_id == Chat.id,
+                        ChatTag.user_id == user_id,
                         ChatTag.tag_id == required_tag_id,
                     )
                     stmt = stmt.filter(exists(chat_has_this_tag))
@@ -1360,12 +1372,35 @@ class ChatTable:
         except Exception:
             return None
 
+    # Returns [] for a missing/foreign chat.
     async def get_chat_tag_ids_by_id_and_user_id(
         self, id: str, user_id: str, db: Optional[AsyncSession] = None
     ) -> list[str]:
         async with get_async_db_context(db) as db:
             rows = await db.execute(select(ChatTag.tag_id).filter_by(chat_id=id, user_id=user_id))
             return [row[0] for row in rows.all()]
+
+    async def get_chat_tag_ids_by_chat_ids_and_user_id(
+        self, chat_ids: list[str], user_id: str, db: Optional[AsyncSession] = None
+    ) -> dict[str, list[str]]:
+        """Batch equivalent of get_chat_tag_ids_by_id_and_user_id.
+
+        Every chat_id from *chat_ids* is present in the result (empty list if
+        no tags), so callers can look up without a .get() default.
+        """
+        tag_ids_by_chat_id: dict[str, list[str]] = {chat_id: [] for chat_id in chat_ids}
+        if not chat_ids:
+            return tag_ids_by_chat_id
+        async with get_async_db_context(db) as db:
+            rows = await db.execute(
+                select(ChatTag.chat_id, ChatTag.tag_id).where(
+                    ChatTag.chat_id.in_(chat_ids),
+                    ChatTag.user_id == user_id,
+                )
+            )
+            for chat_id, tag_id in rows.all():
+                tag_ids_by_chat_id[chat_id].append(tag_id)
+        return tag_ids_by_chat_id
 
     async def get_chat_tags_by_id_and_user_id(
         self, id: str, user_id: str, db: Optional[AsyncSession] = None
@@ -1423,15 +1458,21 @@ class ChatTable:
                 await Tags.ensure_tags_exist([tag_name], user_id, db=db, commit=False)
 
                 # ON CONFLICT DO NOTHING avoids a TOCTOU race on concurrent adds.
-                await insert_ignore_conflict(
+                await insert_on_conflict_nothing(
                     db,
                     ChatTag,
                     {'chat_id': id, 'tag_id': tag_id, 'user_id': user_id},
-                    conflict_cols=['chat_id', 'tag_id', 'user_id'],
+                    index_elements=['chat_id', 'tag_id', 'user_id'],
                 )
 
                 await db.commit()
-                return ChatModel.model_validate(chat)
+
+                response = ChatModel.model_validate(chat)
+                response.meta = {
+                    **(response.meta or {}),
+                    'tags': await self.get_chat_tag_ids_by_id_and_user_id(id, user_id, db=db),
+                }
+                return response
         except Exception:
             return None
 

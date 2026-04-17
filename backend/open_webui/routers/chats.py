@@ -104,6 +104,10 @@ async def get_session_user_chat_usage_stats(
         chats = result.items
         total = result.total
 
+        tag_ids_by_chat_id = await Chats.get_chat_tag_ids_by_chat_ids_and_user_id(
+            [chat.id for chat in chats], user.id, db=db
+        )
+
         chat_stats = []
         for chat in chats:
             messages_map = chat.chat.get('history', {}).get('messages', {})
@@ -177,7 +181,7 @@ async def get_session_user_chat_usage_stats(
                             'average_response_time': average_response_time,
                             'average_user_message_content_length': average_user_message_content_length,
                             'average_assistant_message_content_length': average_assistant_message_content_length,
-                            'tags': await Chats.get_chat_tag_ids_by_id_and_user_id(chat.id, user.id, db=db),
+                            'tags': tag_ids_by_chat_id[chat.id],
                             'last_message_at': message_list[-1].get('timestamp', None),
                             'updated_at': chat.updated_at,
                             'created_at': chat.created_at,

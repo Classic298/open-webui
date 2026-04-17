@@ -36,6 +36,8 @@ LOG_EVERY_CHATS = 50_000
 
 
 def _normalize_tag_id(raw: str) -> str:
+    # Duplicated from open_webui.models.tags.normalize_tag_id; migrations must
+    # be self-contained (models evolve independently). Keep in sync.
     return raw.replace(' ', '_').lower()
 
 
@@ -48,19 +50,19 @@ def _chunked(source: Iterable, size: int) -> Iterable[list]:
         yield batch
 
 
-def _bulk_insert_skip_conflicts(conn, table, rows, conflict_cols):
-    """Bulk INSERT that skips duplicate-key conflicts. PG and SQLite only."""
+def _bulk_insert_on_conflict_nothing(conn, table, rows, index_elements):
+    """Bulk INSERT ... ON CONFLICT DO NOTHING. PG and SQLite only."""
     if not rows:
         return
     dialect = conn.dialect.name
     for batch in _chunked(rows, INSERT_BATCH_ROWS):
         if dialect == 'postgresql':
-            stmt = postgresql.insert(table).values(batch).on_conflict_do_nothing(index_elements=conflict_cols)
+            stmt = postgresql.insert(table).values(batch).on_conflict_do_nothing(index_elements=index_elements)
         elif dialect == 'sqlite':
-            stmt = sqlite.insert(table).values(batch).on_conflict_do_nothing(index_elements=conflict_cols)
+            stmt = sqlite.insert(table).values(batch).on_conflict_do_nothing(index_elements=index_elements)
         else:
             raise NotImplementedError(
-                f'_bulk_insert_skip_conflicts: unsupported dialect {dialect!r}; only postgresql and sqlite are supported'
+                f'_bulk_insert_on_conflict_nothing: unsupported dialect {dialect!r}; only postgresql and sqlite are supported'
             )
         conn.execute(stmt)
 
@@ -188,18 +190,18 @@ def upgrade() -> None:
                 existing_tag_keys.add((existing_row.id, existing_row.user_id))
 
             new_tag_rows = [
-                {'id': tid, 'name': raw_name, 'user_id': uid, 'meta': None}
+                {'id': tid, 'name': raw_name, 'user_id': uid}
                 for (tid, uid), raw_name in display_name_by_tag_key.items()
                 if (tid, uid) not in existing_tag_keys
             ]
             if new_tag_rows:
-                _bulk_insert_skip_conflicts(conn, tag, new_tag_rows, conflict_cols=['id', 'user_id'])
+                _bulk_insert_on_conflict_nothing(conn, tag, new_tag_rows, index_elements=['id', 'user_id'])
                 tag_rows_inserted += len(new_tag_rows)
 
         if chat_tag_payload:
-            _bulk_insert_skip_conflicts(
+            _bulk_insert_on_conflict_nothing(
                 conn, chat_tag, chat_tag_payload,
-                conflict_cols=['chat_id', 'tag_id', 'user_id'],
+                index_elements=['chat_id', 'tag_id', 'user_id'],
             )
             chat_tag_rows_inserted += len(chat_tag_payload)
 
@@ -236,6 +238,10 @@ def upgrade() -> None:
 def downgrade() -> None:
     # Post-upgrade the app stops writing meta['tags'], so we must reserialize
     # chat_tag back into meta before the drop or lose every post-upgrade tag.
+    # Lossy for display casing: the reserialized tag list uses the normalized
+    # tag_id, not the original tag.name. Round-tripping upgrade -> downgrade
+    # on already-normalized data is a no-op; original user casings only
+    # survive re-running upgrade (which reads from tag.name).
     conn = op.get_bind()
 
     chat = sa.table(

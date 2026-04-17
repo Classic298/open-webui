@@ -283,11 +283,11 @@ async def get_async_db_context(db: Optional[AsyncSession] = None):
             yield session
 
 
-async def insert_ignore_conflict(
-    db: AsyncSession, model, values: dict, conflict_cols: list[str]
+async def insert_on_conflict_nothing(
+    db: AsyncSession, model, values: dict, index_elements: list[str]
 ):
-    """INSERT ... ON CONFLICT (conflict_cols) DO NOTHING against *model* on
-    postgresql or sqlite."""
+    """Single-row INSERT ... ON CONFLICT (index_elements) DO NOTHING against
+    *model* on postgresql or sqlite. Caller is responsible for committing."""
     bind = await db.connection()
     dialect = bind.dialect.name
     if dialect == 'postgresql':
@@ -296,6 +296,6 @@ async def insert_ignore_conflict(
         stmt = sqlite.insert(model).values(**values)
     else:
         raise NotImplementedError(
-            f'insert_ignore_conflict: unsupported dialect {dialect!r}; only postgresql and sqlite are supported'
+            f'insert_on_conflict_nothing: unsupported dialect {dialect!r}; only postgresql and sqlite are supported'
         )
-    await db.execute(stmt.on_conflict_do_nothing(index_elements=conflict_cols))
+    await db.execute(stmt.on_conflict_do_nothing(index_elements=index_elements))
