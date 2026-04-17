@@ -22,13 +22,12 @@ down_revision: Union[str, None] = 'e1f2a3b4c5d6'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-# Keyset page size for the chat scan. Each page is drained with .fetchall()
-# so no server-side cursor stays open across pages.
+# Pages are drained with .fetchall() so no server-side cursor stays open
+# across pages (large PG deployments OOM'd on yield_per in prior migrations).
 CHAT_PAGE_SIZE = 1000
 
-# Cap rows per bulk INSERT so a page with many tags per chat can't push past
-# Postgres' 65,535 bind-parameter limit. chat_tag has 3 cols, tag has 4;
-# 5000 rows = 20,000 binds, well under the ceiling.
+# Keeps bulk INSERTs under Postgres' 65,535 bind-parameter limit even when
+# a page has many tags per chat.
 INSERT_BATCH_ROWS = 5000
 
 LOG_EVERY_CHATS = 50_000
@@ -84,8 +83,7 @@ def upgrade() -> None:
             ondelete='CASCADE',
         ),
     )
-    # Single secondary index covers the "list chats for this tag" path.
-    # A chat_id-only index would be redundant with the PK's leading column.
+    # chat_id-only lookups are covered by the PK's leading column.
     op.create_index('chat_tag_user_tag_idx', 'chat_tag', ['user_id', 'tag_id'])
 
     conn = op.get_bind()
@@ -126,8 +124,8 @@ def upgrade() -> None:
         if not chat_rows:
             break
 
-        # First raw display name seen per (tag_id, user_id) wins the name on
-        # any newly-created tag row. Pre-existing tag rows are never overwritten.
+        # First raw display name seen per (tag_id, user_id) wins for new rows;
+        # pre-existing tag rows are never overwritten.
         display_name_by_tag_key: dict[tuple[str, str], str] = {}
         chat_tag_payload: list[dict] = []
 
@@ -160,9 +158,7 @@ def upgrade() -> None:
                 )
 
         if display_name_by_tag_key:
-            # One tuple-IN query covers every (tag_id, user_id) in the page,
-            # regardless of how many distinct users it spans. PG and SQLite
-            # 3.15+ both support row-value IN.
+            # Row-value IN works on PG and SQLite >= 3.15.
             tag_keys = list(display_name_by_tag_key.keys())
             existing_tag_keys: set[tuple[str, str]] = set()
             existing_tag_query = sa.select(tag.c.id, tag.c.user_id).where(
@@ -205,9 +201,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Serialize chat_tag rows back into chat.meta['tags'] before dropping the
-    # table. Post-upgrade the app stops writing meta['tags'], so skipping this
-    # step would silently discard every tag associated after the upgrade ran.
+    # Post-upgrade the app stops writing meta['tags'], so we must reserialize
+    # chat_tag back into meta before the drop or lose every post-upgrade tag.
     conn = op.get_bind()
 
     chat = sa.table(
@@ -232,8 +227,6 @@ def downgrade() -> None:
         )
         if last_chat_id is not None:
             tag_ids_by_chat_query = tag_ids_by_chat_query.where(chat_tag.c.chat_id > last_chat_id)
-        # Pull tags for up to CHAT_PAGE_SIZE chats per iteration. Rows come
-        # grouped by chat_id because of the ORDER BY.
         tag_ids_by_chat_query = tag_ids_by_chat_query.limit(CHAT_PAGE_SIZE * 50)
         rows = conn.execute(tag_ids_by_chat_query).fetchall()
         if not rows:
@@ -243,11 +236,8 @@ def downgrade() -> None:
         for row in rows:
             tag_ids_by_chat_id.setdefault(row.chat_id, []).append(row.tag_id)
 
-        # Only the first CHAT_PAGE_SIZE chat_ids in the batch are guaranteed
-        # to have their complete tag list - the last chat_id in `rows` may
-        # have been truncated mid-way. Write the completed ones, keep the
-        # last chat_id's tags for the next iteration by excluding it here
-        # and using `> chat_id` as the next cursor.
+        # The last chat_id in the batch may have been truncated mid-way
+        # through its tags, so defer it to the next iteration.
         chat_ids_in_order = list(tag_ids_by_chat_id.keys())
         if len(chat_ids_in_order) > 1:
             complete_chat_ids = chat_ids_in_order[:-1]

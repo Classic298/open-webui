@@ -1204,9 +1204,7 @@ async def clone_shared_chat_by_id(
 async def archive_chat_by_id(id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
     chat = await Chats.get_chat_by_id_and_user_id(id, user.id, db=db)
     if chat:
-        # chat_tag rows persist across archive toggles; counts and list
-        # queries already filter archived=False so archived chats are
-        # excluded from the tag UI without touching the association table.
+        # chat_tag rows persist; list/count queries already filter archived=False.
         chat = await Chats.toggle_chat_archive_by_id(id, db=db)
         return ChatResponse(**chat.model_dump())
     else:
@@ -1338,7 +1336,6 @@ async def add_tag_by_id_and_tag_name(
                 detail=ERROR_MESSAGES.DEFAULT("Tag name cannot be 'None'"),
             )
 
-        # add_chat_tag uses ON CONFLICT DO NOTHING, so no pre-check needed.
         await Chats.add_chat_tag_by_id_and_user_id_and_tag_name(id, user.id, form_data.name, db=db)
         return await Chats.get_chat_tags_by_id_and_user_id(id, user.id, db=db)
     else:
@@ -1380,8 +1377,7 @@ async def delete_all_tags_by_id(
 ):
     chat = await Chats.get_chat_by_id_and_user_id(id, user.id, db=db)
     if chat:
-        # Snapshot current tag_ids before clearing so orphan cleanup knows
-        # which tags to re-count.
+        # Snapshot before clearing so orphan cleanup knows which tags to re-count.
         old_tag_ids = await Chats.get_chat_tag_ids_by_id_and_user_id(id, user.id, db=db)
         await Chats.delete_all_tags_by_id_and_user_id(id, user.id, db=db)
         await Chats.delete_orphan_tags_for_user(old_tag_ids, user.id, db=db)

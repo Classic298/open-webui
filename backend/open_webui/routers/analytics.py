@@ -429,7 +429,6 @@ async def get_model_overview(
             )
             current += timedelta(days=1)
 
-    # One aggregate query replaces the former per-chat_id N+1 meta scan.
     tag_count_query = (
         select(ChatTag.tag_id, func.count())
         .where(ChatTag.chat_id.in_(chat_ids))

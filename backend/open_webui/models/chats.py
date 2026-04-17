@@ -73,11 +73,8 @@ class Chat(Base):
     )
 
 
-# Source of truth for chat <-> tag associations as of revision 17a6d37e23d2.
-# Legacy chat.meta['tags'] data is preserved by that migration for rollback
-# serialization but is no longer read or written by the application.
-# user_id in the PK is redundant with chat_id (a chat has one owner) but
-# enables the composite FK to tag(id, user_id) and user-scoped queries.
+# user_id in the PK is redundant with chat_id but enables the composite FK
+# to tag(id, user_id) and user-scoped queries without joining chat.
 class ChatTag(Base):
     __tablename__ = 'chat_tag'
 
@@ -392,15 +389,14 @@ class ChatTable:
         async with get_async_db_context(db) as db:
             chats: list[Chat] = []
             new_chat_tag_rows: list[ChatTag] = []
-            # First display name per normalized tag_id wins; avoids
+            # First display name per normalized tag_id wins - avoids
             # composite-PK duplicates inside ensure_tags_exist.
             display_name_by_tag_id: dict[str, str] = {}
 
             for form_data in chat_import_forms:
                 chat_model = self._chat_import_form_to_chat_model(user_id, form_data)
 
-                # Pull tags out of the incoming meta and strip the key - tags
-                # now live in chat_tag, not in chat.meta.
+                # Tags now live in chat_tag, not meta.
                 raw_tag_names: list = []
                 if isinstance(chat_model.meta, dict) and 'tags' in chat_model.meta:
                     candidate = chat_model.meta.get('tags')
@@ -424,9 +420,7 @@ class ChatTable:
                         ChatTag(chat_id=chat_row.id, tag_id=tag_id, user_id=user_id)
                     )
 
-            # Stage chats + tag rows + chat_tag rows, then commit once. A
-            # failure here rolls everything back so an imported chat never
-            # lands without its associations.
+            # One commit covers chats + tag rows + chat_tag rows.
             db.add_all(chats)
             if display_name_by_tag_id:
                 await Tags.ensure_tags_exist(
@@ -436,7 +430,6 @@ class ChatTable:
                 db.add_all(new_chat_tag_rows)
             await db.commit()
 
-            # Best-effort message dual-write (unchanged).
             try:
                 for form_data, chat_obj in zip(chat_import_forms, chats):
                     history = form_data.chat.get('history', {})
@@ -504,9 +497,8 @@ class ChatTable:
             if chat is None:
                 return None
 
-            # Dedupe on normalized tag_id, first display name wins. Without
-            # this, ['My Tag', 'my tag'] hits a composite-PK IntegrityError
-            # in ensure_tags_exist - both entries normalize to the same id.
+            # First display name per normalized id wins; ['My Tag', 'my tag']
+            # would otherwise hit a composite-PK error in ensure_tags_exist.
             display_name_by_tag_id: dict[str, str] = {}
             for raw_tag_name in tags:
                 tag_id = normalize_tag_id(raw_tag_name)
@@ -521,8 +513,7 @@ class ChatTable:
             )
             previous_tag_ids = {row[0] for row in previous_tag_id_rows.all()}
 
-            # Tag rows + chat_tag rewrite commit together; commit=False keeps
-            # ensure_tags_exist from committing mid-batch.
+            # commit=False keeps the tag ensure + chat_tag rewrite atomic.
             await Tags.ensure_tags_exist(new_tag_display_names, user.id, db=db, commit=False)
             await db.execute(delete(ChatTag).filter_by(chat_id=id, user_id=user.id))
             if new_tag_ids:
@@ -1278,8 +1269,7 @@ class ChatTable:
             else:
                 raise NotImplementedError(f'Unsupported dialect: {dialect_name}')
 
-            # Tag filter is dialect-agnostic now - chat_tag is a relational
-            # table. 'tag:none' = no associations; 'tag:X tag:Y' = has both.
+            # 'tag:none' = no associations; 'tag:X tag:Y' = has both.
             if 'none' in tag_ids:
                 chat_has_any_tag = select(ChatTag.chat_id).where(
                     ChatTag.chat_id == Chat.id,
@@ -1373,7 +1363,6 @@ class ChatTable:
         except Exception:
             return None
 
-    # Returns [] for a missing/foreign chat - pre-PR code raised AttributeError.
     async def get_chat_tag_ids_by_id_and_user_id(
         self, id: str, user_id: str, db: Optional[AsyncSession] = None
     ) -> list[str]:
@@ -1438,11 +1427,9 @@ class ChatTable:
                 if chat is None:
                     return None
 
-                # commit=False - single commit below covers tag + chat_tag.
                 await Tags.ensure_tags_exist([tag_name], user_id, db=db, commit=False)
 
-                # ON CONFLICT DO NOTHING avoids a TOCTOU race between a
-                # check-first and the insert under concurrent adds.
+                # ON CONFLICT DO NOTHING avoids a TOCTOU race on concurrent adds.
                 bind = await db.connection()
                 dialect = bind.dialect.name
                 values = {'chat_id': id, 'tag_id': tag_id, 'user_id': user_id}
@@ -1497,7 +1484,6 @@ class ChatTable:
         if not tag_ids:
             return
         async with get_async_db_context(db) as db:
-            # One aggregate query replaces the former per-tag-id COUNT loop.
             reference_count_query = (
                 select(ChatTag.tag_id, func.count(Chat.id))
                 .join(Chat, Chat.id == ChatTag.chat_id)

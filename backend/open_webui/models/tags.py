@@ -147,8 +147,8 @@ class TagTable:
         async with get_async_db_context(db) as db:
             result = await db.execute(select(Tag.id).filter(Tag.id.in_(ids), Tag.user_id == user_id))
             existing = {row[0] for row in result.all()}
-            # Dedupe on normalized id so callers passing ['My Tag', 'my tag']
-            # don't stage two Tag rows with the same composite PK.
+            # Dedupe on normalized id - ['My Tag', 'my tag'] would otherwise
+            # stage two Tag rows with the same composite PK.
             seen_tag_ids: set[str] = set()
             new_tags: list[Tag] = []
             for tag_id, name in zip(ids, names):
