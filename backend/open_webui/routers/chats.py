@@ -212,7 +212,7 @@ class ChatStatsExportList(BaseModel):
     page: int
 
 
-def _process_chat_for_export(chat) -> Optional[ChatStatsExport]:
+def _process_chat_for_export(chat, tag_ids: list[str]) -> Optional[ChatStatsExport]:
     try:
 
         def get_message_content_length(message):
@@ -328,7 +328,7 @@ def _process_chat_for_export(chat) -> Optional[ChatStatsExport]:
             user_id=chat.user_id,
             created_at=chat.created_at,
             updated_at=chat.updated_at,
-            tags=await Chats.get_chat_tag_ids_by_id_and_user_id(chat.id, chat.user_id, db=db),
+            tags=tag_ids,
             stats=stats,
             chat=chat_body,
         )
@@ -348,9 +348,12 @@ async def calculate_chat_stats(user_id, skip=0, limit=10, filter=None):
         filter=filter,
     )
 
+    tag_ids_by_chat_id = await Chats.get_chat_tag_ids_by_chat_ids_and_user_id(
+        [c.id for c in result.items], user_id
+    )
     chat_stats_export_list = []
     for chat in result.items:
-        chat_stat = _process_chat_for_export(chat)
+        chat_stat = _process_chat_for_export(chat, tag_ids_by_chat_id.get(chat.id, []))
         if chat_stat:
             chat_stats_export_list.append(chat_stat)
 
@@ -383,9 +386,12 @@ async def generate_chat_stats_jsonl_generator(user_id, filter):
         if not result.items:
             break
 
+        tag_ids_by_chat_id = await Chats.get_chat_tag_ids_by_chat_ids_and_user_id(
+            [c.id for c in result.items], user_id
+        )
         for chat in result.items:
             try:
-                chat_stat = _process_chat_for_export(chat)
+                chat_stat = _process_chat_for_export(chat, tag_ids_by_chat_id.get(chat.id, []))
                 if chat_stat:
                     yield chat_stat.model_dump_json() + '\n'
             except Exception as e:
@@ -474,8 +480,9 @@ async def export_single_chat_stats(
                 detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
             )
 
+        tag_ids = await Chats.get_chat_tag_ids_by_id_and_user_id(chat.id, chat.user_id, db=db)
         # Process the chat for export (pure computation, no DB)
-        chat_stats = _process_chat_for_export(chat)
+        chat_stats = _process_chat_for_export(chat, tag_ids)
 
         if not chat_stats:
             raise HTTPException(

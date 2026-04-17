@@ -505,11 +505,15 @@ class ChatTable:
             return None
 
     async def update_chat_tags_by_id(self, id: str, tags: list[str], user) -> Optional[ChatModel]:
-        # Ownership check enforces the chat_tag.user_id == chat.user_id invariant.
-        # Concurrent calls on the same chat race on the previous_tag_ids read;
-        # last-writer-wins within a single call, set-union across races.
+        # Lock the chat row so concurrent callers see each other's chat_tag
+        # writes and the method has true replace semantics (instead of the
+        # set-union behavior a plain read + diff would produce under races).
+        # PG honors FOR UPDATE; SQLite is single-writer so the modifier is a
+        # no-op there.
         async with get_async_db_context() as db:
-            chat = await db.get(Chat, id)
+            chat = await db.scalar(
+                select(Chat).where(Chat.id == id).with_for_update()
+            )
             if chat is None or chat.user_id != user.id:
                 return None
 

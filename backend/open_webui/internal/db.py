@@ -297,13 +297,12 @@ def _insert_factory_for_dialect(dialect_name: str):
 # to check out a connection for every insert helper call.
 async def insert_on_conflict_nothing(
     db: AsyncSession,
-    target: 'type[Base] | types.TableClause',
+    target,  # mapped ORM class or sa.Table
     values: dict,
     index_elements: list[str],
 ):
-    """Single-row INSERT ... ON CONFLICT (index_elements) DO NOTHING against
-    *target* (mapped ORM class or sa.Table) on postgresql or sqlite. Caller
-    is responsible for committing."""
+    """Single-row INSERT ... ON CONFLICT (index_elements) DO NOTHING on
+    postgresql or sqlite. Caller is responsible for committing."""
     insert = _insert_factory_for_dialect(db.bind.dialect.name)
     await db.execute(
         insert(target).values(**values).on_conflict_do_nothing(index_elements=index_elements)
@@ -312,12 +311,12 @@ async def insert_on_conflict_nothing(
 
 async def insert_all_on_conflict_nothing(
     db: AsyncSession,
-    target: 'type[Base] | types.TableClause',
+    target,  # mapped ORM class or sa.Table
     values_list: list[dict],
     index_elements: list[str],
 ):
-    """Bulk INSERT ... ON CONFLICT (index_elements) DO NOTHING on postgresql or
-    sqlite. Caller is responsible for committing."""
+    """Bulk INSERT ... ON CONFLICT (index_elements) DO NOTHING on postgresql
+    or sqlite. Caller is responsible for committing."""
     if not values_list:
         return
     insert = _insert_factory_for_dialect(db.bind.dialect.name)
