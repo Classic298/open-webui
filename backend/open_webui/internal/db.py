@@ -309,6 +309,11 @@ async def insert_on_conflict_nothing(
     )
 
 
+# Postgres caps a statement at 65,535 bind params; 5000 rows x ~4 cols stays
+# well under even for the widest tables.
+_INSERT_BATCH_ROWS = 5000
+
+
 async def insert_all_on_conflict_nothing(
     db: AsyncSession,
     target,  # mapped ORM class or sa.Table
@@ -320,6 +325,8 @@ async def insert_all_on_conflict_nothing(
     if not values_list:
         return
     insert = _insert_factory_for_dialect(db.bind.dialect.name)
-    await db.execute(
-        insert(target).values(values_list).on_conflict_do_nothing(index_elements=index_elements)
-    )
+    for start in range(0, len(values_list), _INSERT_BATCH_ROWS):
+        batch = values_list[start:start + _INSERT_BATCH_ROWS]
+        await db.execute(
+            insert(target).values(batch).on_conflict_do_nothing(index_elements=index_elements)
+        )

@@ -538,6 +538,11 @@ class ChatTable:
             to_add = new_tag_ids_set - previous_tag_ids
             to_remove = previous_tag_ids - new_tag_ids_set
 
+            # Nothing changed - release the FOR UPDATE lock without committing
+            # mid-batch work that doesn't exist.
+            if not to_add and not to_remove:
+                return ChatModel.model_validate(chat)
+
             # commit=False keeps the tag ensure + chat_tag diff atomic.
             if to_add:
                 await Tags.ensure_tags_exist(
@@ -1486,6 +1491,9 @@ class ChatTable:
         self, id: str, user_id: str, tag_name: str, db: Optional[AsyncSession] = None
     ) -> Optional[ChatModel]:
         tag_id = normalize_tag_id(tag_name)
+        # 'none' is the search sentinel; '' would bind a garbage association.
+        if not tag_id or tag_id == 'none':
+            return None
         try:
             async with get_async_db_context(db) as db:
                 chat = await db.get(Chat, id)
@@ -1509,6 +1517,9 @@ class ChatTable:
             log.exception('add_chat_tag failed for chat=%s tag=%s', id, tag_name)
             return None
 
+    # UI-facing count: excludes archived chats, so a tag with only archived
+    # references shows count=0 but isn't treated as orphan by
+    # delete_orphan_tags_for_user (which intentionally counts archived too).
     async def count_chats_by_tag_name_and_user_id(
         self, tag_name: str, user_id: str, db: Optional[AsyncSession] = None
     ) -> int:

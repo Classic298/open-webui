@@ -183,14 +183,17 @@ def upgrade() -> None:
             )
 
         if display_name_by_tag_key:
-            # Row-value IN works on PG and SQLite >= 3.15.
+            # Row-value IN works on PG and SQLite >= 3.15. Chunked so a
+            # tenant-heavy page can't push this predicate past the PG bind
+            # param ceiling.
             tag_keys = list(display_name_by_tag_key.keys())
             existing_tag_keys: set[tuple[str, str]] = set()
-            existing_tag_query = sa.select(tag.c.id, tag.c.user_id).where(
-                sa.tuple_(tag.c.id, tag.c.user_id).in_(tag_keys)
-            )
-            for existing_row in conn.execute(existing_tag_query).fetchall():
-                existing_tag_keys.add((existing_row.id, existing_row.user_id))
+            for key_batch in _chunked(tag_keys, INSERT_BATCH_ROWS):
+                existing_tag_query = sa.select(tag.c.id, tag.c.user_id).where(
+                    sa.tuple_(tag.c.id, tag.c.user_id).in_(key_batch)
+                )
+                for existing_row in conn.execute(existing_tag_query).fetchall():
+                    existing_tag_keys.add((existing_row.id, existing_row.user_id))
 
             new_tag_rows = [
                 {'id': tid, 'name': raw_name, 'user_id': uid}
