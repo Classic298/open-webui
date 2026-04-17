@@ -19,6 +19,12 @@ log = logging.getLogger(__name__)
 # To name a thing is to claim it. The creator has
 # already named everything stored in this table.
 ####################
+def normalize_tag_id(raw: str) -> str:
+    """Canonical tag_id form. This is the PK for tag and chat_tag, so every
+    call site that derives an id from a user-supplied name must use this."""
+    return raw.replace(' ', '_').lower()
+
+
 class Tag(Base):
     __tablename__ = 'tag'
     id = Column(String)
@@ -56,7 +62,7 @@ class TagChatIdForm(BaseModel):
 class TagTable:
     async def insert_new_tag(self, name: str, user_id: str, db: Optional[AsyncSession] = None) -> Optional[TagModel]:
         async with get_async_db_context(db) as db:
-            id = name.replace(' ', '_').lower()
+            id = normalize_tag_id(name)
             tag = TagModel(**{'id': id, 'user_id': user_id, 'name': name})
             try:
                 result = Tag(**tag.model_dump())
@@ -75,7 +81,7 @@ class TagTable:
         self, name: str, user_id: str, db: Optional[AsyncSession] = None
     ) -> Optional[TagModel]:
         try:
-            id = name.replace(' ', '_').lower()
+            id = normalize_tag_id(name)
             async with get_async_db_context(db) as db:
                 result = await db.execute(select(Tag).filter_by(id=id, user_id=user_id))
                 tag = result.scalars().first()
@@ -98,7 +104,7 @@ class TagTable:
     async def delete_tag_by_name_and_user_id(self, name: str, user_id: str, db: Optional[AsyncSession] = None) -> bool:
         try:
             async with get_async_db_context(db) as db:
-                id = name.replace(' ', '_').lower()
+                id = normalize_tag_id(name)
                 result = await db.execute(delete(Tag).filter_by(id=id, user_id=user_id))
                 log.debug(f'res: {result.rowcount}')
                 await db.commit()
@@ -137,18 +143,18 @@ class TagTable:
         """
         if not names:
             return
-        ids = [n.replace(' ', '_').lower() for n in names]
+        ids = [normalize_tag_id(n) for n in names]
         async with get_async_db_context(db) as db:
             result = await db.execute(select(Tag.id).filter(Tag.id.in_(ids), Tag.user_id == user_id))
             existing = {row[0] for row in result.all()}
             # Dedupe on normalized id so callers passing ['My Tag', 'my tag']
             # don't stage two Tag rows with the same composite PK.
-            seen: set = set()
-            new_tags = []
+            seen_tag_ids: set[str] = set()
+            new_tags: list[Tag] = []
             for tag_id, name in zip(ids, names):
-                if tag_id in existing or tag_id in seen:
+                if tag_id in existing or tag_id in seen_tag_ids:
                     continue
-                seen.add(tag_id)
+                seen_tag_ids.add(tag_id)
                 new_tags.append(Tag(id=tag_id, name=name, user_id=user_id))
             if new_tags:
                 db.add_all(new_tags)

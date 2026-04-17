@@ -24,7 +24,7 @@ from open_webui.models.chats import (
     ChatHistoryStats,
     MessageStats,
 )
-from open_webui.models.tags import TagModel, Tags
+from open_webui.models.tags import TagModel, Tags, normalize_tag_id
 from open_webui.models.folders import Folders
 from open_webui.internal.db import get_async_session
 
@@ -177,7 +177,7 @@ async def get_session_user_chat_usage_stats(
                             'average_response_time': average_response_time,
                             'average_user_message_content_length': average_user_message_content_length,
                             'average_assistant_message_content_length': average_assistant_message_content_length,
-                            'tags': chat.meta.get('tags', []),
+                            'tags': await Chats.get_chat_tag_ids_by_id_and_user_id(chat.id, user.id, db=db),
                             'last_message_at': message_list[-1].get('timestamp', None),
                             'updated_at': chat.updated_at,
                             'created_at': chat.created_at,
@@ -324,7 +324,7 @@ def _process_chat_for_export(chat) -> Optional[ChatStatsExport]:
             user_id=chat.user_id,
             created_at=chat.created_at,
             updated_at=chat.updated_at,
-            tags=chat.meta.get('tags', []),
+            tags=await Chats.get_chat_tag_ids_by_id_and_user_id(chat.id, chat.user_id, db=db),
             stats=stats,
             chat=chat_body,
         )
@@ -1037,7 +1037,8 @@ async def delete_chat_by_id(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=ERROR_MESSAGES.NOT_FOUND,
             )
-        await Chats.delete_orphan_tags_for_user(chat.meta.get('tags', []), user.id, threshold=1, db=db)
+        tag_ids = await Chats.get_chat_tag_ids_by_id_and_user_id(id, user.id, db=db)
+        await Chats.delete_orphan_tags_for_user(tag_ids, user.id, threshold=1, db=db)
 
         result = await Chats.delete_chat_by_id(id, db=db)
 
@@ -1055,7 +1056,8 @@ async def delete_chat_by_id(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=ERROR_MESSAGES.NOT_FOUND,
             )
-        await Chats.delete_orphan_tags_for_user(chat.meta.get('tags', []), user.id, threshold=1, db=db)
+        tag_ids = await Chats.get_chat_tag_ids_by_id_and_user_id(id, user.id, db=db)
+        await Chats.delete_orphan_tags_for_user(tag_ids, user.id, threshold=1, db=db)
 
         result = await Chats.delete_chat_by_id_and_user_id(id, user.id, db=db)
         return result
@@ -1202,16 +1204,10 @@ async def clone_shared_chat_by_id(
 async def archive_chat_by_id(id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
     chat = await Chats.get_chat_by_id_and_user_id(id, user.id, db=db)
     if chat:
+        # chat_tag rows persist across archive toggles; counts and list
+        # queries already filter archived=False so archived chats are
+        # excluded from the tag UI without touching the association table.
         chat = await Chats.toggle_chat_archive_by_id(id, db=db)
-
-        tag_ids = chat.meta.get('tags', [])
-        if chat.archived:
-            # Archived chats are excluded from count — clean up orphans
-            await Chats.delete_orphan_tags_for_user(tag_ids, user.id, db=db)
-        else:
-            # Unarchived — ensure tag rows exist
-            await Tags.ensure_tags_exist(tag_ids, user.id, db=db)
-
         return ChatResponse(**chat.model_dump())
     else:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.DEFAULT())
@@ -1317,8 +1313,7 @@ async def update_chat_folder_id_by_id(
 async def get_chat_tags_by_id(id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
     chat = await Chats.get_chat_by_id_and_user_id(id, user.id, db=db)
     if chat:
-        tags = chat.meta.get('tags', [])
-        return await Tags.get_tags_by_ids_and_user_id(tags, user.id, db=db)
+        return await Chats.get_chat_tags_by_id_and_user_id(id, user.id, db=db)
     else:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.NOT_FOUND)
 
@@ -1337,21 +1332,15 @@ async def add_tag_by_id_and_tag_name(
 ):
     chat = await Chats.get_chat_by_id_and_user_id(id, user.id, db=db)
     if chat:
-        tags = chat.meta.get('tags', [])
-        tag_id = form_data.name.replace(' ', '_').lower()
-
-        if tag_id == 'none':
+        if normalize_tag_id(form_data.name) == 'none':
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=ERROR_MESSAGES.DEFAULT("Tag name cannot be 'None'"),
             )
 
-        if tag_id not in tags:
-            await Chats.add_chat_tag_by_id_and_user_id_and_tag_name(id, user.id, form_data.name, db=db)
-
-        chat = await Chats.get_chat_by_id_and_user_id(id, user.id, db=db)
-        tags = chat.meta.get('tags', [])
-        return await Tags.get_tags_by_ids_and_user_id(tags, user.id, db=db)
+        # add_chat_tag uses ON CONFLICT DO NOTHING, so no pre-check needed.
+        await Chats.add_chat_tag_by_id_and_user_id_and_tag_name(id, user.id, form_data.name, db=db)
+        return await Chats.get_chat_tags_by_id_and_user_id(id, user.id, db=db)
     else:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.DEFAULT())
 
@@ -1375,9 +1364,7 @@ async def delete_tag_by_id_and_tag_name(
         if await Chats.count_chats_by_tag_name_and_user_id(form_data.name, user.id, db=db) == 0:
             await Tags.delete_tag_by_name_and_user_id(form_data.name, user.id, db=db)
 
-        chat = await Chats.get_chat_by_id_and_user_id(id, user.id, db=db)
-        tags = chat.meta.get('tags', [])
-        return await Tags.get_tags_by_ids_and_user_id(tags, user.id, db=db)
+        return await Chats.get_chat_tags_by_id_and_user_id(id, user.id, db=db)
     else:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.NOT_FOUND)
 
@@ -1393,9 +1380,11 @@ async def delete_all_tags_by_id(
 ):
     chat = await Chats.get_chat_by_id_and_user_id(id, user.id, db=db)
     if chat:
-        old_tags = chat.meta.get('tags', [])
+        # Snapshot current tag_ids before clearing so orphan cleanup knows
+        # which tags to re-count.
+        old_tag_ids = await Chats.get_chat_tag_ids_by_id_and_user_id(id, user.id, db=db)
         await Chats.delete_all_tags_by_id_and_user_id(id, user.id, db=db)
-        await Chats.delete_orphan_tags_for_user(old_tags, user.id, db=db)
+        await Chats.delete_orphan_tags_for_user(old_tag_ids, user.id, db=db)
 
         return True
     else:

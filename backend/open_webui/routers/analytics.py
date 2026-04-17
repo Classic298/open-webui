@@ -6,12 +6,13 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from open_webui.models.chat_messages import ChatMessages, ChatMessageModel
-from open_webui.models.chats import Chats
+from open_webui.models.chats import Chats, ChatTag
 from open_webui.models.groups import Groups
 from open_webui.models.users import Users
 from open_webui.models.feedbacks import Feedbacks
 from open_webui.utils.auth import get_admin_user
 from open_webui.internal.db import get_async_session
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
@@ -428,15 +429,15 @@ async def get_model_overview(
             )
             current += timedelta(days=1)
 
-    # Get chat tags
-    tag_counts: dict[str, int] = defaultdict(int)
-    for chat_id in chat_ids:
-        chat = await Chats.get_chat_by_id(chat_id, db=db)
-        if chat and chat.meta:
-            for tag in chat.meta.get('tags', []):
-                tag_counts[tag] += 1
-
-    # Sort by count and take top 10
-    tags = [TagEntry(tag=tag, count=count) for tag, count in sorted(tag_counts.items(), key=lambda x: -x[1])[:10]]
+    # One aggregate query replaces the former per-chat_id N+1 meta scan.
+    tag_count_query = (
+        select(ChatTag.tag_id, func.count())
+        .where(ChatTag.chat_id.in_(chat_ids))
+        .group_by(ChatTag.tag_id)
+        .order_by(func.count().desc())
+        .limit(10)
+    )
+    tag_count_rows = (await db.execute(tag_count_query)).all() if chat_ids else []
+    tags = [TagEntry(tag=row[0], count=row[1]) for row in tag_count_rows]
 
     return ModelOverviewResponse(history=history, tags=tags)
