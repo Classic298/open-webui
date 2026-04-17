@@ -72,8 +72,10 @@ class Chat(Base):
     )
 
 
-# user_id in the PK is redundant with chat_id but enables the composite FK
-# to tag(id, user_id) and user-scoped queries without joining chat.
+# Invariant (enforced by writers, not by the schema): chat_tag.user_id equals
+# chat(chat_id).user_id. user_id is kept in the PK so the composite FK to
+# tag(id, user_id) is declarable - SQL can't reference just part of a
+# composite PK on the parent side.
 class ChatTag(Base):
     __tablename__ = 'chat_tag'
 
@@ -395,7 +397,8 @@ class ChatTable:
             for form_data in chat_import_forms:
                 chat_model = self._chat_import_form_to_chat_model(user_id, form_data)
 
-                # Tags now live in chat_tag, not meta.
+                # Tags now live in chat_tag, not meta. Entries are validated
+                # per-item below; the list may contain non-strings from legacy data.
                 raw_tag_names: list = []
                 if isinstance(chat_model.meta, dict) and 'tags' in chat_model.meta:
                     candidate = chat_model.meta.get('tags')
@@ -1271,7 +1274,7 @@ class ChatTable:
             if 'none' in tag_ids:
                 chat_has_any_tag = select(ChatTag.chat_id).where(ChatTag.chat_id == Chat.id)
                 stmt = stmt.filter(~exists(chat_has_any_tag))
-            else:
+            elif tag_ids:
                 for required_tag_id in tag_ids:
                     chat_has_this_tag = select(ChatTag.chat_id).where(
                         ChatTag.chat_id == Chat.id,

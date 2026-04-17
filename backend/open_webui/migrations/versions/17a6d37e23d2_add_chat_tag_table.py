@@ -26,10 +26,10 @@ depends_on: Union[str, Sequence[str], None] = None
 # across pages (large PG deployments OOM'd on yield_per in prior migrations).
 CHAT_PAGE_SIZE = 1000
 
-# Per-INSERT row cap. Postgres limits a statement to 65,535 bind parameters,
-# and a chat page with many tags per chat can push the flattened payload past
-# it. 5000 rows stays comfortably under the ceiling at our widest table
-# (tag has 4 cols = 20,000 binds).
+# Per-INSERT row cap (ceiling guard). Postgres limits a statement to 65,535
+# bind parameters; a page with many tags per chat could in theory push past
+# that. Realistic workloads stay far below 5000 rows per page, so this is
+# defensive - chunked execution only kicks in on degenerate inputs.
 INSERT_BATCH_ROWS = 5000
 
 LOG_EVERY_CHATS = 50_000
@@ -60,7 +60,7 @@ def _bulk_insert_skip_conflicts(conn, table, rows, conflict_cols):
             stmt = sqlite.insert(table).values(batch).on_conflict_do_nothing(index_elements=conflict_cols)
         else:
             raise NotImplementedError(
-                f'chat_tag backfill: unsupported dialect {dialect!r}; only postgresql and sqlite are supported'
+                f'_bulk_insert_skip_conflicts: unsupported dialect {dialect!r}; only postgresql and sqlite are supported'
             )
         conn.execute(stmt)
 
@@ -112,7 +112,14 @@ def upgrade() -> None:
     chats_processed = 0
     chat_tag_rows_inserted = 0
     tag_rows_inserted = 0
-    next_log_threshold = LOG_EVERY_CHATS
+    meta_rows_stripped = 0
+    next_log_threshold = 0  # log the first page unconditionally
+
+    strip_meta_update = (
+        sa.update(chat)
+        .where(chat.c.id == sa.bindparam('target_chat_id'))
+        .values(meta=sa.bindparam('new_meta'))
+    )
 
     while True:
         chat_page_query = sa.select(chat.c.id, chat.c.user_id, chat.c.meta).order_by(chat.c.id)
@@ -128,6 +135,7 @@ def upgrade() -> None:
         # pre-existing tag rows are never overwritten.
         display_name_by_tag_key: dict[tuple[str, str], str] = {}
         chat_tag_payload: list[dict] = []
+        meta_strip_payload: list[dict] = []
 
         for chat_row in chat_rows:
             meta = chat_row.meta
@@ -141,6 +149,13 @@ def upgrade() -> None:
 
             raw_tag_names = meta.get('tags')
             if not isinstance(raw_tag_names, list) or not raw_tag_names:
+                # Still strip the 'tags' key if present but empty/malformed,
+                # so meta is consistently tag-free post-upgrade.
+                if 'tags' in meta:
+                    stripped_meta = {k: v for k, v in meta.items() if k != 'tags'}
+                    meta_strip_payload.append(
+                        {'target_chat_id': chat_row.id, 'new_meta': stripped_meta}
+                    )
                 continue
 
             seen_tag_ids_in_chat: set[str] = set()
@@ -156,6 +171,11 @@ def upgrade() -> None:
                 chat_tag_payload.append(
                     {'chat_id': chat_row.id, 'tag_id': tag_id, 'user_id': chat_row.user_id}
                 )
+
+            stripped_meta = {k: v for k, v in meta.items() if k != 'tags'}
+            meta_strip_payload.append(
+                {'target_chat_id': chat_row.id, 'new_meta': stripped_meta}
+            )
 
         if display_name_by_tag_key:
             # Row-value IN works on PG and SQLite >= 3.15.
@@ -183,6 +203,14 @@ def upgrade() -> None:
             )
             chat_tag_rows_inserted += len(chat_tag_payload)
 
+        if meta_strip_payload:
+            # Paginated executemany avoids a single full-table UPDATE that
+            # would hold write locks and bloat WAL on large deployments.
+            # (Also: meta is sa.JSON, so the PG json - 'tags' operator
+            # isn't available without a jsonb cast.)
+            conn.execute(strip_meta_update, meta_strip_payload)
+            meta_rows_stripped += len(meta_strip_payload)
+
         last_chat_id = chat_rows[-1].id
         chats_processed += len(chat_rows)
 
@@ -190,35 +218,19 @@ def upgrade() -> None:
             log.info(
                 f'chat_tag backfill progress: {chats_processed} chats processed, '
                 f'{chat_tag_rows_inserted} associations inserted, '
-                f'{tag_rows_inserted} tags inserted, last_chat_id={last_chat_id}'
+                f'{tag_rows_inserted} tags inserted, '
+                f'{meta_rows_stripped} meta rows stripped, last_chat_id={last_chat_id}'
             )
-            next_log_threshold += LOG_EVERY_CHATS
+            next_log_threshold = chats_processed + LOG_EVERY_CHATS
 
     log.info(
         f'chat_tag backfill complete: {chats_processed} chats processed, '
-        f'{chat_tag_rows_inserted} associations inserted, {tag_rows_inserted} tags inserted'
+        f'{chat_tag_rows_inserted} associations inserted, {tag_rows_inserted} tags inserted, '
+        f'{meta_rows_stripped} meta rows stripped'
     )
 
     # chat_id-only lookups are covered by the PK's leading column.
     op.create_index('chat_tag_user_tag_idx', 'chat_tag', ['user_id', 'tag_id'])
-
-    # Strip meta['tags'] now that chat_tag is the source of truth - otherwise
-    # ChatModel responses would leak the stale JSON tag list. Downgrade
-    # rebuilds meta['tags'] from chat_tag.
-    dialect = conn.dialect.name
-    if dialect == 'postgresql':
-        conn.execute(sa.text(
-            "UPDATE chat SET meta = meta - 'tags' WHERE meta ? 'tags'"
-        ))
-    elif dialect == 'sqlite':
-        conn.execute(sa.text(
-            "UPDATE chat SET meta = json_remove(meta, '$.tags') "
-            "WHERE json_extract(meta, '$.tags') IS NOT NULL"
-        ))
-    else:
-        raise NotImplementedError(
-            f'chat_tag migration: unsupported dialect {dialect!r}'
-        )
 
 
 def downgrade() -> None:
@@ -271,6 +283,7 @@ def downgrade() -> None:
 
         update_params = []
         for chat_id in chat_ids_in_page:
+            tag_ids = tag_ids_by_chat_id[chat_id]
             existing_meta = existing_meta_by_chat_id.get(chat_id)
             if isinstance(existing_meta, str):
                 try:
@@ -279,7 +292,11 @@ def downgrade() -> None:
                     existing_meta = {}
             if not isinstance(existing_meta, dict):
                 existing_meta = {}
-            merged_meta = {**existing_meta, 'tags': tag_ids_by_chat_id[chat_id]}
+            # Skip chats that had no tags pre-upgrade and still have none:
+            # don't grow their meta with an empty 'tags' key.
+            if not tag_ids and 'tags' not in existing_meta:
+                continue
+            merged_meta = {**existing_meta, 'tags': tag_ids}
             update_params.append({'target_chat_id': chat_id, 'new_meta': merged_meta})
 
         if update_params:
