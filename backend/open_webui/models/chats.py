@@ -21,6 +21,8 @@ from sqlalchemy import (
     Boolean,
     Column,
     ForeignKey,
+    ForeignKeyConstraint,
+    PrimaryKeyConstraint,
     String,
     Text,
     JSON,
@@ -67,6 +69,24 @@ class Chat(Base):
         Index('user_id_archived_idx', 'user_id', 'archived'),
         Index('updated_at_user_id_idx', 'updated_at', 'user_id'),
         Index('folder_id_user_id_idx', 'folder_id', 'user_id'),
+    )
+
+
+class ChatTag(Base):
+    __tablename__ = 'chat_tag'
+
+    chat_id = Column(String, nullable=False)
+    tag_id = Column(String, nullable=False)
+    user_id = Column(String, nullable=False)
+
+    __table_args__ = (
+        PrimaryKeyConstraint('chat_id', 'tag_id', 'user_id', name='pk_chat_tag'),
+        ForeignKeyConstraint(['chat_id'], ['chat.id'], name='fk_chat_tag_chat_id', ondelete='CASCADE'),
+        ForeignKeyConstraint(
+            ['tag_id', 'user_id'], ['tag.id', 'tag.user_id'], name='fk_chat_tag_tag', ondelete='CASCADE'
+        ),
+        Index('chat_tag_user_tag_idx', 'user_id', 'tag_id'),
+        Index('chat_tag_chat_idx', 'chat_id'),
     )
 
 
@@ -435,17 +455,22 @@ class ChatTable:
 
             old_tags = chat.meta.get('tags', [])
             new_tags = [t for t in tags if t.replace(' ', '_').lower() != 'none']
-            new_tag_ids = [t.replace(' ', '_').lower() for t in new_tags]
+            new_tag_ids = list(dict.fromkeys(t.replace(' ', '_').lower() for t in new_tags))
 
-            # Single meta update
             chat.meta = {**chat.meta, 'tags': new_tag_ids}
             await db.commit()
             await db.refresh(chat)
 
-            # Batch-create any missing tag rows
             await Tags.ensure_tags_exist(new_tags, user.id, db=db)
 
-            # Clean up orphaned old tags in one query
+            # Rewrite the normalized chat_tag association rows for this chat.
+            await db.execute(delete(ChatTag).filter_by(chat_id=id, user_id=user.id))
+            if new_tag_ids:
+                db.add_all(
+                    [ChatTag(chat_id=id, tag_id=tag_id, user_id=user.id) for tag_id in new_tag_ids]
+                )
+            await db.commit()
+
             removed = set(old_tags) - set(new_tag_ids)
             if removed:
                 await self.delete_orphan_tags_for_user(list(removed), user.id, db=db)
@@ -1323,8 +1348,15 @@ class ChatTable:
         self, id: str, user_id: str, db: Optional[AsyncSession] = None
     ) -> list[TagModel]:
         async with get_async_db_context(db) as db:
-            chat = await db.get(Chat, id)
-            tag_ids = chat.meta.get('tags', [])
+            result = await db.execute(select(ChatTag.tag_id).filter_by(chat_id=id, user_id=user_id))
+            tag_ids = [row[0] for row in result.all()]
+            if not tag_ids:
+                # Transitional fallback for chats whose normalized chat_tag rows
+                # haven't been populated yet (e.g. before the backfill migration
+                # ran for this chat's row, or data written by old code paths).
+                chat = await db.get(Chat, id)
+                if chat is not None:
+                    tag_ids = chat.meta.get('tags', []) or []
             return await Tags.get_tags_by_ids_and_user_id(tag_ids, user_id, db=db)
 
     async def get_chat_list_by_user_id_and_tag_name(
@@ -1336,26 +1368,14 @@ class ChatTable:
         db: Optional[AsyncSession] = None,
     ) -> list[ChatTitleIdResponse]:
         async with get_async_db_context(db) as db:
-            stmt = select(Chat.id, Chat.title, Chat.updated_at, Chat.created_at, Chat.last_read_at).filter_by(
-                user_id=user_id
-            )
             tag_id = tag_name.replace(' ', '_').lower()
 
-            bind = await db.connection()
-            dialect_name = bind.dialect.name
-            log.info(f'DB dialect name: {dialect_name}')
-            if dialect_name == 'sqlite':
-                stmt = stmt.filter(
-                    text(f"EXISTS (SELECT 1 FROM json_each(Chat.meta, '$.tags') WHERE json_each.value = :tag_id)")
-                ).params(tag_id=tag_id)
-            elif dialect_name == 'postgresql':
-                stmt = stmt.filter(
-                    text("EXISTS (SELECT 1 FROM json_array_elements_text(Chat.meta->'tags') elem WHERE elem = :tag_id)")
-                ).params(tag_id=tag_id)
-            else:
-                raise NotImplementedError(f'Unsupported dialect: {dialect_name}')
-
-            stmt = stmt.order_by(Chat.updated_at.desc(), Chat.id)
+            stmt = (
+                select(Chat.id, Chat.title, Chat.updated_at, Chat.created_at, Chat.last_read_at)
+                .join(ChatTag, and_(ChatTag.chat_id == Chat.id, ChatTag.user_id == Chat.user_id))
+                .where(Chat.user_id == user_id, ChatTag.tag_id == tag_id)
+                .order_by(Chat.updated_at.desc(), Chat.id)
+            )
 
             if skip:
                 stmt = stmt.offset(skip)
@@ -1390,6 +1410,13 @@ class ChatTable:
                         **chat.meta,
                         'tags': list(set(chat.meta.get('tags', []) + [tag_id])),
                     }
+
+                existing = await db.execute(
+                    select(ChatTag).filter_by(chat_id=id, tag_id=tag_id, user_id=user_id)
+                )
+                if existing.scalar_one_or_none() is None:
+                    db.add(ChatTag(chat_id=id, tag_id=tag_id, user_id=user_id))
+
                 await db.commit()
                 await db.refresh(chat)
                 return ChatModel.model_validate(chat)
@@ -1400,24 +1427,14 @@ class ChatTable:
         self, tag_name: str, user_id: str, db: Optional[AsyncSession] = None
     ) -> int:
         async with get_async_db_context(db) as db:
-            stmt = select(func.count(Chat.id)).filter_by(user_id=user_id, archived=False)
             tag_id = tag_name.replace(' ', '_').lower()
-
-            bind = await db.connection()
-            dialect_name = bind.dialect.name
-            if dialect_name == 'sqlite':
-                stmt = stmt.filter(
-                    text("EXISTS (SELECT 1 FROM json_each(Chat.meta, '$.tags') WHERE json_each.value = :tag_id)")
-                ).params(tag_id=tag_id)
-            elif dialect_name == 'postgresql':
-                stmt = stmt.filter(
-                    text("EXISTS (SELECT 1 FROM json_array_elements_text(Chat.meta->'tags') elem WHERE elem = :tag_id)")
-                ).params(tag_id=tag_id)
-            else:
-                raise NotImplementedError(f'Unsupported dialect: {dialect_name}')
-
+            stmt = (
+                select(func.count(Chat.id))
+                .join(ChatTag, and_(ChatTag.chat_id == Chat.id, ChatTag.user_id == Chat.user_id))
+                .where(Chat.user_id == user_id, Chat.archived == False, ChatTag.tag_id == tag_id)  # noqa: E712
+            )
             result = await db.execute(stmt)
-            return result.scalar()
+            return result.scalar() or 0
 
     async def delete_orphan_tags_for_user(
         self,
@@ -1468,6 +1485,9 @@ class ChatTable:
                     **chat.meta,
                     'tags': list(set(tags)),
                 }
+                await db.execute(
+                    delete(ChatTag).filter_by(chat_id=id, tag_id=tag_id, user_id=user_id)
+                )
                 await db.commit()
                 return True
         except Exception:
@@ -1481,6 +1501,7 @@ class ChatTable:
                     **chat.meta,
                     'tags': [],
                 }
+                await db.execute(delete(ChatTag).filter_by(chat_id=id, user_id=user_id))
                 await db.commit()
 
                 return True
@@ -1492,6 +1513,7 @@ class ChatTable:
             async with get_async_db_context(db) as db:
                 await db.execute(update(AutomationRun).filter_by(chat_id=id).values(chat_id=None))
                 await db.execute(delete(ChatMessage).filter_by(chat_id=id))
+                await db.execute(delete(ChatTag).filter_by(chat_id=id))
                 await db.execute(delete(Chat).filter_by(id=id))
                 await db.commit()
 
@@ -1504,6 +1526,7 @@ class ChatTable:
             async with get_async_db_context(db) as db:
                 await db.execute(update(AutomationRun).filter_by(chat_id=id).values(chat_id=None))
                 await db.execute(delete(ChatMessage).filter_by(chat_id=id))
+                await db.execute(delete(ChatTag).filter_by(chat_id=id, user_id=user_id))
                 await db.execute(delete(Chat).filter_by(id=id, user_id=user_id))
                 await db.commit()
 
@@ -1525,6 +1548,7 @@ class ChatTable:
                 await db.execute(
                     delete(ChatMessage).filter(ChatMessage.chat_id.in_(select(Chat.id).filter_by(user_id=user_id)))
                 )
+                await db.execute(delete(ChatTag).filter_by(user_id=user_id))
                 await db.execute(delete(Chat).filter_by(user_id=user_id))
                 await db.commit()
 
@@ -1542,6 +1566,7 @@ class ChatTable:
                     update(AutomationRun).filter(AutomationRun.chat_id.in_(chat_ids_stmt)).values(chat_id=None)
                 )
                 await db.execute(delete(ChatMessage).filter(ChatMessage.chat_id.in_(chat_ids_stmt)))
+                await db.execute(delete(ChatTag).filter(ChatTag.chat_id.in_(chat_ids_stmt)))
                 await db.execute(delete(Chat).filter_by(user_id=user_id, folder_id=folder_id))
                 await db.commit()
 
