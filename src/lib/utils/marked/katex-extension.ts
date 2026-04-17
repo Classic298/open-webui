@@ -101,9 +101,7 @@ export const tokenizeDisplayMath = (
 		() => !requireBlockBoundary || isBlockBoundary(src, afterClose)
 	];
 
-	return validators.every((v) => v())
-		? { type, raw, text, displayMode: true }
-		: undefined;
+	return validators.every((v) => v()) ? { type, raw, text, displayMode: true } : undefined;
 };
 
 export default function (options = {}) {

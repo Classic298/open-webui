@@ -13,19 +13,19 @@ _USER_PROFILE_IMAGE_RE = re.compile(r'^/api/v1/users/[^/?#]+/profile/image$')
 # regex across megabytes of data on every Pydantic instantiation for zero
 # security benefit (corrupt base64 simply renders a broken image, same as
 # a 404 URL).  SVG is intentionally excluded: it can carry embedded scripts.
-_SAFE_DATA_URI_RE = re.compile(
-    r'^data:image/(png|jpeg|gif|webp);base64,', re.IGNORECASE
-)
+_SAFE_DATA_URI_RE = re.compile(r'^data:image/(png|jpeg|gif|webp);base64,', re.IGNORECASE)
 
 # Exact relative paths accepted as profile images.  These are the only
 # static-asset paths OWUI itself assigns; no prefix/wildcard matching is
 # used so that arbitrary relative paths cannot trigger authenticated GETs
 # against internal endpoints when rendered as ``<img>`` sources.
-_SAFE_STATIC_PATHS = frozenset({
-    '/user.png',
-    '/favicon.png',
-    '/static/favicon.png',
-})
+_SAFE_STATIC_PATHS = frozenset(
+    {
+        '/user.png',
+        '/favicon.png',
+        '/static/favicon.png',
+    }
+)
 
 
 def validate_profile_image_url(url: str) -> str:
@@ -67,9 +67,7 @@ def validate_profile_image_url(url: str) -> str:
     # for a URL like http://:80/path with no actual host).
     if parsed.scheme in ('http', 'https'):
         if not parsed.hostname:
-            raise ValueError(
-                'Invalid profile image URL: HTTP(S) URLs must include a host.'
-            )
+            raise ValueError('Invalid profile image URL: HTTP(S) URLs must include a host.')
         return url
 
     # Base64-encoded raster images uploaded via the frontend.

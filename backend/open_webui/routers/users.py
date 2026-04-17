@@ -273,15 +273,11 @@ async def update_default_user_permissions(request: Request, form_data: UserPermi
 
 
 @router.get('/user/settings', response_model=Optional[UserSettings])
-async def get_user_settings_by_session_user(user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
-    user = await Users.get_user_by_id(user.id, db=db)
-    if user:
-        return user.settings
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.USER_NOT_FOUND,
-        )
+async def get_user_settings_by_session_user(
+    user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+):
+    # user already fetched by get_verified_user — no need to refetch
+    return user.settings
 
 
 ############################
@@ -337,14 +333,8 @@ async def get_user_status_by_session_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACTION_PROHIBITED,
         )
-    user = await Users.get_user_by_id(user.id, db=db)
-    if user:
-        return user
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.USER_NOT_FOUND,
-        )
+    # user already fetched by get_verified_user — no need to refetch
+    return user
 
 
 ############################
@@ -364,15 +354,14 @@ async def update_user_status_by_session_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACTION_PROHIBITED,
         )
-    user = await Users.get_user_by_id(user.id, db=db)
-    if user:
-        user = await Users.update_user_status_by_id(user.id, form_data, db=db)
-        return user
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.USER_NOT_FOUND,
-        )
+    # user already fetched by get_verified_user — no need to refetch
+    updated = await Users.update_user_status_by_id(user.id, form_data, db=db)
+    if updated:
+        return updated
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=ERROR_MESSAGES.USER_NOT_FOUND,
+    )
 
 
 ############################
@@ -382,14 +371,8 @@ async def update_user_status_by_session_user(
 
 @router.get('/user/info', response_model=Optional[dict])
 async def get_user_info_by_session_user(user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
-    user = await Users.get_user_by_id(user.id, db=db)
-    if user:
-        return user.info
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.USER_NOT_FOUND,
-        )
+    # user already fetched by get_verified_user — no need to refetch
+    return user.info
 
 
 ############################
@@ -401,19 +384,13 @@ async def get_user_info_by_session_user(user=Depends(get_verified_user), db: Asy
 async def update_user_info_by_session_user(
     form_data: dict, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
 ):
-    user = await Users.get_user_by_id(user.id, db=db)
-    if user:
-        if user.info is None:
-            user.info = {}
-
-        user = await Users.update_user_by_id(user.id, {'info': {**user.info, **form_data}}, db=db)
-        if user:
-            return user.info
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.USER_NOT_FOUND,
-            )
+    # Merges against the auth-time snapshot of user.info. The previous pre-merge
+    # refetch only narrowed (did not eliminate) the lost-update window on concurrent
+    # same-user writes; real safety needs row locking or a version column.
+    existing_info = user.info or {}
+    updated = await Users.update_user_by_id(user.id, {'info': {**existing_info, **form_data}}, db=db)
+    if updated:
+        return updated.info
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -468,7 +445,9 @@ async def get_user_by_id(user_id: str, user=Depends(get_admin_user), db: AsyncSe
 
 
 @router.get('/{user_id}/info', response_model=UserInfoResponse)
-async def get_user_info_by_id(user_id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
+async def get_user_info_by_id(
+    user_id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+):
     user = await Users.get_user_by_id(user_id, db=db)
     if user:
         groups = await Groups.get_groups_by_member_id(user_id, db=db)
@@ -487,7 +466,9 @@ async def get_user_info_by_id(user_id: str, user=Depends(get_verified_user), db:
 
 
 @router.get('/{user_id}/oauth/sessions')
-async def get_user_oauth_sessions_by_id(user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+async def get_user_oauth_sessions_by_id(
+    user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
+):
     sessions = await OAuthSessions.get_sessions_by_user_id(user_id, db=db)
     if sessions and len(sessions) > 0:
         return sessions
@@ -574,7 +555,7 @@ async def update_user_by_id(
                         detail=ERROR_MESSAGES.ACTION_PROHIBITED,
                     )
 
-                if form_data.role != 'admin':
+                if form_data.role is not None and form_data.role != 'admin':
                     # If the primary admin is trying to change their own role, prevent it
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
@@ -591,7 +572,7 @@ async def update_user_by_id(
     user = await Users.get_user_by_id(user_id, db=db)
 
     if user:
-        if form_data.email.lower() != user.email:
+        if form_data.email is not None and form_data.email.lower() != user.email:
             email_user = await Users.get_user_by_email(form_data.email.lower(), db=db)
             if email_user:
                 raise HTTPException(
@@ -608,17 +589,26 @@ async def update_user_by_id(
             hashed = get_password_hash(form_data.password)
             await Auths.update_user_password_by_id(user_id, hashed, db=db)
 
-        await Auths.update_email_by_id(user_id, form_data.email.lower(), db=db)
-        updated_user = await Users.update_user_by_id(
-            user_id,
-            {
-                'role': form_data.role,
-                'name': form_data.name,
-                'email': form_data.email.lower(),
-                'profile_image_url': form_data.profile_image_url,
-            },
-            db=db,
-        )
+        # Build update dict from only the provided fields
+        update_data = {}
+        if form_data.role is not None:
+            update_data['role'] = form_data.role
+        if form_data.name is not None:
+            update_data['name'] = form_data.name
+        if form_data.email is not None:
+            update_data['email'] = form_data.email.lower()
+            await Auths.update_email_by_id(user_id, form_data.email.lower(), db=db)
+        if form_data.profile_image_url is not None:
+            update_data['profile_image_url'] = form_data.profile_image_url
+
+        if update_data:
+            updated_user = await Users.update_user_by_id(
+                user_id,
+                update_data,
+                db=db,
+            )
+        else:
+            updated_user = user
 
         if updated_user:
             # If the role changed, disconnect all socket sessions so stale
@@ -685,5 +675,7 @@ async def delete_user_by_id(user_id: str, user=Depends(get_admin_user), db: Asyn
 
 
 @router.get('/{user_id}/groups')
-async def get_user_groups_by_id(user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+async def get_user_groups_by_id(
+    user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
+):
     return await Groups.get_groups_by_member_id(user_id, db=db)

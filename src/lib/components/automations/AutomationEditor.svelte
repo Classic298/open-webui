@@ -20,7 +20,6 @@
 		type AutomationRunModel
 	} from '$lib/apis/automations';
 
-
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -41,7 +40,6 @@
 	let prompt = '';
 	let model_id = '';
 	let is_active = true;
-
 
 	let loading = false;
 	let saving = false;
@@ -335,7 +333,6 @@
 							<span class="text-gray-600 dark:text-gray-400">{$i18n.t('Model')}</span>
 							<ModelDropdown bind:model_id side="bottom" align="end" onChange={markDirty} />
 						</div>
-
 					</div>
 				</div>
 
