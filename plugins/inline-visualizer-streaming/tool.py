@@ -828,115 +828,312 @@ STREAMING_OBSERVER_SCRIPT = """
     return;
   }
 
+  // ---------------------------------------------------------------------
+  // Monotonic claim index — guarantees older wrappers NEVER steal newer
+  // fences. Each wrapper registers on parent.window.__ivClaimNext__ at
+  // mount time and takes a strictly increasing index. It then claims the
+  // Nth `language-visualization` code block in DOM order, where N is its
+  // index. If the Nth block hasn't appeared yet, it waits.
+  // ---------------------------------------------------------------------
+  try {
+    if (typeof parent.window.__ivClaimNext__ !== 'number') {
+      parent.window.__ivClaimNext__ = 0;
+    }
+  } catch(e) {}
+  var MY_CLAIM_IDX;
+  try { MY_CLAIM_IDX = parent.window.__ivClaimNext__++; }
+  catch(e) { MY_CLAIM_IDX = 0; }
+
   var claimedBlock = null;
   var hiddenWrapper = null;
-  var lastText = '';
+  var lastRawText = '';
+  var lastSafeRendered = '';
   var stableTimer = null;
-  var executed = false;
+  var finalizeTimer = null;
+  var finalized = false;
 
+  // ---- Claim: take exactly the Nth block in DOM order -----------------
   function claim() {
     if (claimedBlock && parent.document.contains(claimedBlock)) return claimedBlock;
-    var pd = parent.document;
-    var iframe = window.frameElement;
-    var myMessage = iframe && iframe.closest ? iframe.closest('[id^="message-"]') : null;
-
-    // Prefer code blocks in messages at or after ours in DOM order.
-    var candidates;
-    if (myMessage) {
-      var messages = Array.from(pd.querySelectorAll('[id^="message-"]'));
-      var startIdx = messages.indexOf(myMessage);
-      if (startIdx < 0) startIdx = 0;
-      candidates = [];
-      for (var i = startIdx; i < messages.length; i++) {
-        var blocks = messages[i].querySelectorAll(
-          'code.language-' + SENTINEL + ':not([data-iv-claimed])'
-        );
-        for (var j = 0; j < blocks.length; j++) candidates.push(blocks[j]);
-      }
-    } else {
-      candidates = Array.from(pd.querySelectorAll(
-        'code.language-' + SENTINEL + ':not([data-iv-claimed])'
-      ));
-    }
-    if (candidates.length === 0) return null;
-    var c = candidates[0];
-    c.setAttribute('data-iv-claimed', 'true');
+    var all = parent.document.querySelectorAll('code.language-' + SENTINEL);
+    if (all.length <= MY_CLAIM_IDX) return null;
+    var c = all[MY_CLAIM_IDX];
+    // If already claimed by a different wrapper (shouldn't happen with a
+    // monotonic counter, but guard anyway), refuse.
+    var prev = c.getAttribute('data-iv-claim-idx');
+    if (prev !== null && prev !== String(MY_CLAIM_IDX)) return null;
+    c.setAttribute('data-iv-claim-idx', String(MY_CLAIM_IDX));
     claimedBlock = c;
     hideWrapperOf(c);
     return c;
   }
 
   function hideWrapperOf(code) {
-    // Walk up until we find the CodeBlock top-level wrapper (Open WebUI wraps
-    // code blocks in a div with rounded corners / my-* spacing). Fall back to
-    // the nearest <pre>.
     try {
       var el = code.parentElement;
-      var steps = 0;
-      while (el && steps < 8) {
+      for (var i = 0; i < 8 && el; i++) {
         var cls = el.className || '';
         if (typeof cls === 'string' && /(rounded-2xl|rounded-xl|my-2)/.test(cls)) {
-          hiddenWrapper = el;
-          el.style.display = 'none';
-          return;
+          hiddenWrapper = el; el.style.display = 'none'; return;
         }
         el = el.parentElement;
-        steps++;
       }
       var pre = code.closest('pre');
       if (pre) { hiddenWrapper = pre; pre.style.display = 'none'; }
     } catch(e) {}
   }
 
-  function stripScripts(html) {
-    html = html.replace(/<script[\\s\\S]*?<\\/script>/gi, '');
-    html = html.replace(/<script[\\s\\S]*$/i, '');
-    return html;
+  // ---------------------------------------------------------------------
+  // Safe-cut partial-HTML parser
+  //
+  // Returns the last index in `text` where markup is in a fully balanced
+  // state — no open tag, no unclosed attribute, no open script/style, no
+  // comment mid-delimiter, and nesting depth === 0. Rendering text up to
+  // this cut guarantees we never inject a half-written element like
+  // `<a href="` that would break the render area.
+  // ---------------------------------------------------------------------
+  var VOID_TAGS = {area:1,base:1,br:1,col:1,embed:1,hr:1,img:1,input:1,
+                   link:1,meta:1,param:1,source:1,track:1,wbr:1};
+  var RAW_TAGS = {script:1, style:1};
+
+  function findSafeCut(text) {
+    var i = 0, len = text.length;
+    var depth = 0;
+    var state = 'TEXT';
+    var quote = 0;
+    var safeCut = 0;
+    var tagNameBuf = '';
+    var tagNameEnd = false;
+    var inClosingTag = false;
+    var selfClosing = false;
+    var rawTag = '';  // active <script>/<style> close tag name
+
+    while (i < len) {
+      var ch = text.charCodeAt(i);
+
+      if (state === 'RAW') {
+        var marker = '</' + rawTag;
+        if (text.substr(i, marker.length).toLowerCase() === marker) {
+          var end = text.indexOf('>', i + marker.length);
+          if (end === -1) break;
+          if (depth > 0) depth--;
+          rawTag = '';
+          state = 'TEXT';
+          i = end + 1;
+          if (depth === 0) safeCut = i;
+          continue;
+        }
+        i++; continue;
+      }
+
+      if (state === 'TEXT') {
+        if (ch === 60 /* < */) {
+          if (text.substr(i, 4) === '<!--') {
+            var ce = text.indexOf('-->', i + 4);
+            if (ce === -1) break;
+            i = ce + 3;
+            if (depth === 0) safeCut = i;
+            continue;
+          }
+          if (text.substr(i, 9) === '<![CDATA[') {
+            var ke = text.indexOf(']]>', i + 9);
+            if (ke === -1) break;
+            i = ke + 3;
+            if (depth === 0) safeCut = i;
+            continue;
+          }
+          state = 'TAG';
+          tagNameBuf = ''; tagNameEnd = false;
+          inClosingTag = false; selfClosing = false;
+          i++; continue;
+        }
+        i++;
+        if (depth === 0) safeCut = i;
+        continue;
+      }
+
+      if (state === 'TAG') {
+        if (ch === 47 /* / */) {
+          if (tagNameBuf === '' && !tagNameEnd) { inClosingTag = true; i++; continue; }
+          selfClosing = true; i++; continue;
+        }
+        if (ch === 62 /* > */) {
+          var tn = tagNameBuf.toLowerCase();
+          if (inClosingTag) { if (depth > 0) depth--; }
+          else if (!selfClosing && !VOID_TAGS[tn]) {
+            depth++;
+            if (RAW_TAGS[tn]) { state = 'RAW'; rawTag = tn; i++; continue; }
+          }
+          state = 'TEXT'; i++;
+          if (depth === 0) safeCut = i;
+          continue;
+        }
+        if (ch === 32 || ch === 9 || ch === 10 || ch === 13) {
+          tagNameEnd = true; i++; state = 'ATTR_NAME'; continue;
+        }
+        if (!tagNameEnd) tagNameBuf += text.charAt(i);
+        i++; continue;
+      }
+
+      if (state === 'ATTR_NAME') {
+        if (ch === 62) {
+          var tn2 = tagNameBuf.toLowerCase();
+          if (inClosingTag) { if (depth > 0) depth--; }
+          else if (!selfClosing && !VOID_TAGS[tn2]) {
+            depth++;
+            if (RAW_TAGS[tn2]) { state = 'RAW'; rawTag = tn2; i++; continue; }
+          }
+          state = 'TEXT'; i++;
+          if (depth === 0) safeCut = i;
+          continue;
+        }
+        if (ch === 47) { selfClosing = true; i++; continue; }
+        if (ch === 61 /* = */) { state = 'ATTR_VAL_START'; i++; continue; }
+        i++; continue;
+      }
+
+      if (state === 'ATTR_VAL_START') {
+        if (ch === 32 || ch === 9 || ch === 10 || ch === 13) { i++; continue; }
+        if (ch === 34) { quote = 34; state = 'ATTR_VAL_Q'; i++; continue; }
+        if (ch === 39) { quote = 39; state = 'ATTR_VAL_Q'; i++; continue; }
+        if (ch === 62) { state = 'ATTR_NAME'; continue; }
+        state = 'ATTR_VAL_U'; i++; continue;
+      }
+
+      if (state === 'ATTR_VAL_Q') {
+        if (ch === quote) { state = 'ATTR_NAME'; i++; continue; }
+        i++; continue;
+      }
+
+      if (state === 'ATTR_VAL_U') {
+        if (ch === 32 || ch === 9 || ch === 10 || ch === 13) { state = 'ATTR_NAME'; i++; continue; }
+        if (ch === 62) { state = 'ATTR_NAME'; continue; }
+        i++; continue;
+      }
+    }
+    return safeCut;
   }
 
-  function finalRender(html) {
-    renderArea.innerHTML = html;
-    // Replace <script> nodes so the browser executes them.
-    var scripts = renderArea.querySelectorAll('script');
-    scripts.forEach(function(old) {
+  // ---- Fade-in animation for newly-complete elements ------------------
+  function markAndAnimate(root) {
+    var toAnimate = [];
+    function visit(node, top) {
+      if (!node || node.nodeType !== 1) return;
+      var isSvgChild = node.ownerSVGElement != null;
+      if ((top || isSvgChild || node.tagName === 'svg') && !node.hasAttribute('data-iv-faded')) {
+        node.setAttribute('data-iv-faded', '1');
+        toAnimate.push(node);
+      }
+      if (node.tagName === 'svg') {
+        for (var c = node.firstElementChild; c; c = c.nextElementSibling) visit(c, false);
+      }
+    }
+    for (var c = root.firstElementChild; c; c = c.nextElementSibling) visit(c, true);
+    if (toAnimate.length === 0) return;
+    requestAnimationFrame(function() {
+      toAnimate.forEach(function(el) { el.classList.add('iv-fade-in'); });
+    });
+  }
+
+  // ---- Height handling during streaming -------------------------------
+  var heightRaf = 0;
+  function scheduleHeight() {
+    cancelAnimationFrame(heightRaf);
+    heightRaf = requestAnimationFrame(function() {
+      try { if (typeof reportHeight === 'function') reportHeight(); } catch(e) {}
+    });
+  }
+
+  // ---- Finalize: run scripts, final height nudge ----------------------
+  function finalize(fullText) {
+    if (finalized) return;
+    finalized = true;
+    renderArea.innerHTML = fullText;
+    renderArea.querySelectorAll('script').forEach(function(old) {
       var s = document.createElement('script');
-      for (var i = 0; i < old.attributes.length; i++) {
-        s.setAttribute(old.attributes[i].name, old.attributes[i].value);
+      for (var a = 0; a < old.attributes.length; a++) {
+        s.setAttribute(old.attributes[a].name, old.attributes[a].value);
       }
       s.textContent = old.textContent;
       old.parentNode.replaceChild(s, old);
     });
+    // Animate everything in one final pass (skips nodes already marked).
+    markAndAnimate(renderArea);
+    // Kick the height reporter twice — once immediately, once after layout.
+    scheduleHeight();
+    setTimeout(scheduleHeight, 120);
+    setTimeout(scheduleHeight, 400);
   }
 
-  function render() {
+  // ---- Is the enclosing assistant message still streaming? -----------
+  // Open WebUI adds a .shimmer class to containers in "executing" state.
+  // When nothing with .shimmer remains near our code block, the fence
+  // has closed and we can safely finalize even if textContent is stable
+  // only briefly.
+  function isMessageDone(code) {
+    try {
+      var msg = code.closest('[id^="message-"]');
+      if (!msg) return false;
+      return !msg.querySelector('.shimmer');
+    } catch(e) { return false; }
+  }
+
+  function tick() {
+    if (finalized) return;
     var code = claim();
     if (!code) return;
-    var text = code.textContent || '';
-    if (text === lastText) return;
-    lastText = text;
-    executed = false;
-    // Live preview — strip scripts to avoid partial / repeat execution.
-    renderArea.innerHTML = stripScripts(text);
-    // Debounce: once the content stops changing, do the final render with scripts.
-    clearTimeout(stableTimer);
-    stableTimer = setTimeout(function() {
-      if (executed) return;
-      executed = true;
-      finalRender(text);
-    }, 600);
+    var raw = code.textContent || '';
+    if (raw === lastRawText) return;
+    lastRawText = raw;
+
+    var cut = findSafeCut(raw);
+    var safe = raw.substring(0, cut);
+
+    if (safe !== lastSafeRendered) {
+      lastSafeRendered = safe;
+      // Live partial render — no scripts yet (final pass re-injects them).
+      renderArea.innerHTML = safe.replace(/<script[\\s\\S]*?<\\/script>/gi, '')
+                                 .replace(/<script[\\s\\S]*$/i, '');
+      markAndAnimate(renderArea);
+      scheduleHeight();
+    }
+
+    // Finalize when either:
+    //   (a) the enclosing message is no longer streaming, OR
+    //   (b) the code block hasn't changed for a full 800ms.
+    clearTimeout(finalizeTimer);
+    finalizeTimer = setTimeout(function() {
+      if (finalized) return;
+      if (isMessageDone(code) || code.textContent === raw) {
+        finalize(raw);
+      }
+    }, 800);
   }
 
-  // Initial attempt (in case the code block already exists when we mount)
-  render();
+  // ---- Inject fade-in CSS into our OWN document ----------------------
+  (function injectFadeCss() {
+    var s = document.createElement('style');
+    s.textContent =
+      '@keyframes iv-fade-in-kf {' +
+      '  from { opacity: 0; transform: translateY(2px); }' +
+      '  to   { opacity: 1; transform: none; }' +
+      '}' +
+      '@keyframes iv-fade-in-svg-kf {' +
+      '  from { opacity: 0; } to { opacity: 1; }' +
+      '}' +
+      '#iv-render .iv-fade-in { animation: iv-fade-in-kf 500ms ease-out both; }' +
+      '#iv-render svg .iv-fade-in { animation: iv-fade-in-svg-kf 500ms ease-out both; }';
+    document.head.appendChild(s);
+  })();
 
-  // Observe parent for streaming mutations.
+  // ---- Go ------------------------------------------------------------
+  tick();
   try {
-    var mo = new MutationObserver(function() { render(); });
-    mo.observe(parent.document.body, {
+    new MutationObserver(tick).observe(parent.document.body, {
       childList: true, subtree: true, characterData: true
     });
   } catch(e) {
-    setInterval(render, 300);
+    setInterval(tick, 300);
   }
 })();
 </script>
