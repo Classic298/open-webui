@@ -969,11 +969,18 @@ STREAMING_OBSERVER_SCRIPT = """
   // ---------------------------------------------------------------------
   // Safe-cut partial-HTML parser
   //
-  // Returns the last index in `text` where markup is in a fully balanced
-  // state — no open tag, no unclosed attribute, no open script/style, no
-  // comment mid-delimiter, and nesting depth === 0. Rendering text up to
-  // this cut guarantees we never inject a half-written element like
-  // `<a href="` that would break the render area.
+  // Returns the last index in `text` where markup is in a safe state to
+  // flush to innerHTML: parser is in TEXT state (not mid-tag, not
+  // mid-attribute, not inside script/style content), and no comment or
+  // CDATA is mid-delimiter.
+  //
+  // We do NOT require depth === 0. Browsers' HTML parser auto-closes
+  // open tags when innerHTML is set, so flushing `<svg><rect/><g>` is
+  // perfectly valid — the resulting DOM is `<svg><rect/><g></g></svg>`
+  // with an empty <g>. Next tick we flush `<svg><rect/><g><path/></g></svg>`
+  // and the DOM updates. This is what enables progressive SVG render —
+  // previously depth === 0 meant a single top-level <svg> only flushed
+  // on its closing tag (no progressive render at all).
   // ---------------------------------------------------------------------
   var VOID_TAGS = {area:1,base:1,br:1,col:1,embed:1,hr:1,img:1,input:1,
                    link:1,meta:1,param:1,source:1,track:1,wbr:1};
@@ -981,7 +988,6 @@ STREAMING_OBSERVER_SCRIPT = """
 
   function findSafeCut(text) {
     var i = 0, len = text.length;
-    var depth = 0;
     var state = 'TEXT';
     var quote = 0;
     var safeCut = 0;
@@ -995,15 +1001,17 @@ STREAMING_OBSERVER_SCRIPT = """
       var ch = text.charCodeAt(i);
 
       if (state === 'RAW') {
+        // Inside <script>/<style>. The contents are NOT a safe cut — we
+        // have to wait for the full close tag before flushing, otherwise
+        // innerHTML would include partial JS/CSS.
         var marker = '</' + rawTag;
         if (text.substr(i, marker.length).toLowerCase() === marker) {
           var end = text.indexOf('>', i + marker.length);
           if (end === -1) break;
-          if (depth > 0) depth--;
           rawTag = '';
           state = 'TEXT';
           i = end + 1;
-          if (depth === 0) safeCut = i;
+          safeCut = i;
           continue;
         }
         i++; continue;
@@ -1015,14 +1023,14 @@ STREAMING_OBSERVER_SCRIPT = """
             var ce = text.indexOf('-->', i + 4);
             if (ce === -1) break;
             i = ce + 3;
-            if (depth === 0) safeCut = i;
+            safeCut = i;
             continue;
           }
           if (text.substr(i, 9) === '<![CDATA[') {
             var ke = text.indexOf(']]>', i + 9);
             if (ke === -1) break;
             i = ke + 3;
-            if (depth === 0) safeCut = i;
+            safeCut = i;
             continue;
           }
           state = 'TAG';
@@ -1031,7 +1039,7 @@ STREAMING_OBSERVER_SCRIPT = """
           i++; continue;
         }
         i++;
-        if (depth === 0) safeCut = i;
+        safeCut = i;
         continue;
       }
 
@@ -1042,13 +1050,11 @@ STREAMING_OBSERVER_SCRIPT = """
         }
         if (ch === 62 /* > */) {
           var tn = tagNameBuf.toLowerCase();
-          if (inClosingTag) { if (depth > 0) depth--; }
-          else if (!selfClosing && !VOID_TAGS[tn]) {
-            depth++;
-            if (RAW_TAGS[tn]) { state = 'RAW'; rawTag = tn; i++; continue; }
+          if (!inClosingTag && !selfClosing && RAW_TAGS[tn]) {
+            state = 'RAW'; rawTag = tn; i++; continue;
           }
           state = 'TEXT'; i++;
-          if (depth === 0) safeCut = i;
+          safeCut = i;
           continue;
         }
         if (ch === 32 || ch === 9 || ch === 10 || ch === 13) {
@@ -1061,13 +1067,11 @@ STREAMING_OBSERVER_SCRIPT = """
       if (state === 'ATTR_NAME') {
         if (ch === 62) {
           var tn2 = tagNameBuf.toLowerCase();
-          if (inClosingTag) { if (depth > 0) depth--; }
-          else if (!selfClosing && !VOID_TAGS[tn2]) {
-            depth++;
-            if (RAW_TAGS[tn2]) { state = 'RAW'; rawTag = tn2; i++; continue; }
+          if (!inClosingTag && !selfClosing && RAW_TAGS[tn2]) {
+            state = 'RAW'; rawTag = tn2; i++; continue;
           }
           state = 'TEXT'; i++;
-          if (depth === 0) safeCut = i;
+          safeCut = i;
           continue;
         }
         if (ch === 47) { selfClosing = true; i++; continue; }
