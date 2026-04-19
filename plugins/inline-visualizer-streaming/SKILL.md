@@ -9,38 +9,41 @@ Render rich interactive visuals directly inline in chat using `render_visualizat
 
 ## How to use — STREAMING mode (default, preferred)
 
-You call the tool with **only a title**, and then emit the HTML/SVG content inside a `` ```visualization `` fenced code block in your text response. The wrapper tails your stream and paints the iframe live.
+You call the tool with **only a title**, and then emit the HTML/SVG content wrapped in the **plain-text delimiters** `@@@VIZ-START` and `@@@VIZ-END`. The wrapper tails your stream and paints the iframe live.
 
 1. Call `render_visualization(title="…")` — omit `html_code`
 2. In your text response, write explanatory prose
-3. Open a fence with `` ```visualization `` on its own line
+3. Open with `@@@VIZ-START` on its own line
 4. Emit the HTML/SVG **content fragment** (no `<!DOCTYPE>`, `<html>`, `<head>`, `<body>`)
-5. Close with `` ``` `` on its own line
+5. Close with `@@@VIZ-END` on its own line
 6. Continue with any follow-up prose
 
-The raw fence is hidden from the chat once claimed — users see only the rendered iframe filling in live.
+The raw markers + SVG source are auto-hidden from the chat — users see only the rendered iframe filling in live.
 
 **Example response structure:**
 
-````
+```
 I'll visualize the attention mechanism for you.
 
-```visualization
+@@@VIZ-START
 <svg viewBox="0 0 680 240">
   <!-- content streams here, renders live -->
 </svg>
-```
+@@@VIZ-END
 
 As you can see, each query token attends to all key tokens simultaneously.
-````
+```
+
+**Why plain-text delimiters, not a code fence?** The previous `` ```visualization `` protocol went through Open WebUI's CodeBlock / CodeMirror editor, which virtualizes content and drops scrolled-off lines from the DOM. The `@@@VIZ-START` / `@@@VIZ-END` markers are ordinary paragraph text — no editor, no virtualization, no edge cases.
 
 **Streaming rules:**
-- Use the fence tag EXACTLY `` ```visualization `` — case-sensitive. `` ```html `` and `` ```svg `` are NOT detected.
-- Emit **exactly ONE** fence per tool call. For multiple visualizations, call the tool multiple times.
+- Use the delimiters EXACTLY `@@@VIZ-START` and `@@@VIZ-END` — case-sensitive, on their own lines. Do NOT put the content inside `` ``` ``, `~~~`, or `:::` fences.
+- Do NOT wrap in HTML tags like `<viz>` or `<svg data-iv>` — only the text markers are detected.
+- Emit **exactly ONE** `@@@VIZ-START` … `@@@VIZ-END` pair per tool call. For multiple visualizations, call the tool multiple times.
 - Structure the content as always: `<style>` first → visible content → `<script>` last.
 - Do NOT describe the HTML source in prose — users don't see it. Describe what the visualization **shows**.
 - Requires **iframe Sandbox Allow Same Origin** in Open WebUI Settings → Interface. If disabled, the wrapper shows a notice.
-- During streaming, `<script>` tags are deferred; they execute once the fence stabilizes (≈600ms after the last chunk). This avoids partial/repeat execution as tokens arrive.
+- During streaming, `<script>` tags are deferred; they execute once the block stabilizes (≈800ms after the last chunk, or immediately on `@@@VIZ-END`). This avoids partial/repeat execution as tokens arrive.
 
 ## How to use — STATIC mode (legacy)
 

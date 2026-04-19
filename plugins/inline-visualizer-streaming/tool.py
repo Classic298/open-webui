@@ -2,7 +2,7 @@
 title: Inline Visualizer (Streaming)
 author: Classic298
 version: 2.0.0
-description: Renders interactive HTML/SVG visualizations inline in chat. Supports a STREAMING mode — the tool emits an empty wrapper, then parasitically tails the model's streaming text for a ```visualization code fence and renders it live token-by-token. Requires "iframe Sandbox Allow Same Origin" to be enabled in Open WebUI Settings → Interface. For design instructions, the model should call view_skill("visualize").
+description: Renders interactive HTML/SVG visualizations inline in chat. Supports a STREAMING mode — the tool emits an empty wrapper, then parasitically tails the model's streaming text for an @@@VIZ-START … @@@VIZ-END plain-text block and renders it live token-by-token. Requires "iframe Sandbox Allow Same Origin" to be enabled in Open WebUI Settings → Interface. For design instructions, the model should call view_skill("visualize").
 """
 
 import re
@@ -780,36 +780,60 @@ STRICT_SECURITY_SCRIPT = """
 """
 
 # ---------------------------------------------------------------------------
-# STREAMING mode — parasitic-wrapper observer
+# STREAMING mode — text-marker observer (CodeBlock-free)
 # ---------------------------------------------------------------------------
 #
-# In streaming mode the tool returns a wrapper containing an empty render
-# area (#iv-render) + this observer script. The wrapper then watches the
-# PARENT DOM (requires Same-Origin) for a ```visualization fenced code
-# block in the model's streaming response and incrementally renders its
-# contents into #iv-render.
+# Why this design:
+#   The previous approach used ```visualization code fences, which went
+#   through Open WebUI's CodeBlock.svelte → CodeMirror. CodeMirror
+#   virtualizes long code and drops scrolled-off content from the DOM,
+#   corrupts whitespace at line wraps, and re-renders unpredictably on
+#   refresh. Every fix uncovered a new CodeMirror quirk.
 #
-# Design:
-# - Markdown renders ```visualization as <code class="language-visualization">
-# - On every MutationObserver tick, we read the code element's textContent
-#   (the raw HTML source the model is streaming) and set it as innerHTML
-#   on the render area. Browsers happily render partial HTML.
-# - <script> tags are stripped during streaming (to avoid repeat
-#   execution) and re-injected once the content stops changing for 600ms.
-# - The original <pre>/CodeBlock wrapper in the chat is hidden after claim
-#   so the user sees only the rendered visualization.
-# - Each wrapper claims ONE code block by setting data-iv-claimed="true"
-#   so multiple concurrent visualizations don't collide.
+# New protocol:
+#   The model emits plain text markers — NOT a code fence, NOT HTML tags,
+#   NOT ``` ``` or :::
+#       @@@VIZ-START
+#       <svg>…</svg>
+#       @@@VIZ-END
+#   Markdown's default tokenizer treats these as ordinary paragraph/html
+#   tokens. Neither Open WebUI's CodeBlock nor CodeMirror ever sees them.
+#   There is no virtualization, no line eviction, no soft-wrap mangling.
 #
-# Requires iframe Sandbox Allow Same Origin. If disabled, a visible
-# explanation is rendered instead.
+# How the observer works:
+#   1. Find enclosing message (frame.closest('[id^="message-"]')).
+#   2. Read message.textContent — always the full, authoritative source.
+#   3. Regex-extract content between @@@VIZ-START and @@@VIZ-END
+#      (or until end of message, for mid-stream).
+#   4. Reconcile into #iv-render via the same safe-cut + DOM diff path as
+#      before.
+#   5. Walk the message DOM to locate the marker paragraphs + the
+#      between-marker nodes and hide them with inline display:none, so
+#      the user sees only the rendered iframe — not the raw SVG source.
+#
+# Claim:
+#   Each embed container has id "{messageId}-embeds-{idx}". We derive the
+#   wrapper's index from that id and take the idx-th VIZ block in the
+#   message. Stable across refresh, chat switches, and scroll.
+#
+# Requires iframe Sandbox Allow Same Origin.
 # ---------------------------------------------------------------------------
 
 STREAMING_OBSERVER_SCRIPT = """
 <script>
 (function() {
   'use strict';
-  var SENTINEL = 'visualization';
+  // Delimiters — must match SKILL.md exactly. Chosen because:
+  //   * no collision with ``` / ~~~ / ::: / $$ / --- / *** / ===
+  //   * markdown tokenizes them as ordinary paragraph / html content,
+  //     never as a code block, so Open WebUI's CodeBlock.svelte +
+  //     CodeMirror never touch them → no virtualization edge cases.
+  var START_MARK = '@@@VIZ-START';
+  var END_MARK = '@@@VIZ-END';
+  // Regex finds one block. Non-greedy, handles unclosed (streaming) by
+  // falling through to end-of-input. Match [1] is the inner SVG source.
+  var BLOCK_RE = /@@@VIZ-START\\n?([\\s\\S]*?)(?:\\n?@@@VIZ-END|$)/g;
+
   var renderArea = document.getElementById('iv-render');
   if (!renderArea) return;
 
@@ -829,33 +853,19 @@ STREAMING_OBSERVER_SCRIPT = """
   }
 
   // ---------------------------------------------------------------------
-  // Claim strategy — DOM-local, no global counter.
+  // Claim — by embed index, not by DOM element.
   //
-  // Each wrapper's iframe lives inside some parent DOM node (a tool-call
-  // embed container inside an assistant message). The fence that belongs
-  // to us is the first unclaimed `.language-visualization` we can reach by:
-  //   (1) searching within our enclosing [id^="message-"] container,
-  //   (2) if none, searching forward through subsequent messages.
-  //
-  // This is stable across chat navigations and page reloads: we don't rely
-  // on a global counter that persists across chat switches. The previous
-  // counter approach broke when opening a new chat — the counter from the
-  // previous chat's wrappers leaked, making new wrappers wait for a fence
-  // index that will never exist.
-  //
-  // Multiple wrappers in the same message claim in DOM order because each
-  // sets data-iv-claimed="1" on the element they take, and subsequent
-  // wrappers skip claimed elements.
+  // Each tool call produces one embed iframe at "{messageId}-embeds-{N}".
+  // The N-th embed owns the N-th @@@VIZ-START / @@@VIZ-END pair in the
+  // message text. Stable across refresh, scroll, and chat switches.
   // ---------------------------------------------------------------------
 
-  var claimedBlock = null;
-  var hiddenWrapper = null;
+  var myMessage = null;
+  var myIndex = null;        // this wrapper's position among embed siblings
   var lastRawText = '';
   var lastSafeRendered = '';
-  var stableTimer = null;
   var finalizeTimer = null;
   var finalized = false;
-  var myMessage = null;  // cached enclosing message container
 
   function findMyMessage() {
     if (myMessage && parent.document.contains(myMessage)) return myMessage;
@@ -867,103 +877,185 @@ STREAMING_OBSERVER_SCRIPT = """
     } catch(e) { return null; }
   }
 
-  // ---- Claim: first unclaimed fence at or after our message -----------
-  //
-  // Open WebUI's CodeBlock defaults to edit mode (CodeMirror), so there is
-  // NO <code class="language-X"> element — the `language-X` class lives on
-  // the wrapper <div> at CodeBlock.svelte:547. We match any element with
-  // that class and keep only the outermost per block.
-  function getOutermostFences(root) {
-    var raw = root.querySelectorAll(
-      '[class~="language-' + SENTINEL + '"]'
-    );
-    var arr = Array.from(raw);
-    return arr.filter(function(m) {
-      for (var i = 0; i < arr.length; i++) {
-        if (arr[i] !== m && arr[i].contains(m)) return false;
+  function determineIndex() {
+    if (myIndex !== null) return myIndex;
+    try {
+      var f = window.frameElement;
+      if (!f) return null;
+      var embedContainer = f.closest && f.closest('[id*="-embeds-"]');
+      if (embedContainer) {
+        var m = embedContainer.id.match(/-embeds-(\\d+)$/);
+        if (m) { myIndex = parseInt(m[1], 10); return myIndex; }
       }
-      return true;
-    });
-  }
-
-  function claim() {
-    if (claimedBlock && parent.document.contains(claimedBlock)) return claimedBlock;
-    var msg = findMyMessage();
-    var candidates = [];
-    if (msg) {
-      // 1. Fences inside my own message
-      candidates = getOutermostFences(msg);
-      // 2. Fences in subsequent messages (tool call can spawn separate turn)
-      if (candidates.length === 0 || candidates.every(hasBeenClaimed)) {
-        var next = msg.nextElementSibling;
-        while (next) {
-          if (next.matches && next.matches('[id^="message-"]')) {
-            var more = getOutermostFences(next);
-            for (var i = 0; i < more.length; i++) candidates.push(more[i]);
-            if (candidates.some(function(x) { return !hasBeenClaimed(x); })) break;
-          }
-          next = next.nextElementSibling;
+      // Fallback: count preceding sibling iframes within the same message.
+      var msg = findMyMessage();
+      if (msg) {
+        var iframes = msg.querySelectorAll('iframe');
+        for (var i = 0, n = 0; i < iframes.length; i++) {
+          if (iframes[i] === f) { myIndex = n; return myIndex; }
+          n++;
         }
       }
-    } else {
-      // Fallback — whole document
-      candidates = getOutermostFences(parent.document);
-    }
-    // First unclaimed, preferring the earliest
-    for (var j = 0; j < candidates.length; j++) {
-      if (!hasBeenClaimed(candidates[j])) {
-        candidates[j].setAttribute('data-iv-claimed', '1');
-        claimedBlock = candidates[j];
-        hideWrapperOf(claimedBlock);
-        return claimedBlock;
-      }
+    } catch(e) {}
+    return null;
+  }
+
+  // Read the full assistant message text and return the myIndex-th VIZ
+  // block's inner content (or null if not yet present).
+  function readSource() {
+    var msg = findMyMessage();
+    if (!msg) return null;
+    var idx = determineIndex();
+    if (idx === null) idx = 0;
+    var text = msg.textContent || '';
+    BLOCK_RE.lastIndex = 0;
+    var m, n = 0;
+    while ((m = BLOCK_RE.exec(text)) !== null) {
+      if (n === idx) return m[1];
+      n++;
+      // Guard against zero-length match infinite loop
+      if (m.index === BLOCK_RE.lastIndex) BLOCK_RE.lastIndex++;
     }
     return null;
   }
 
-  function hasBeenClaimed(el) {
-    return el.getAttribute('data-iv-claimed') === '1';
+  // ---------------------------------------------------------------------
+  // Hide raw markers + between-marker content in the chat.
+  //
+  // The markers and SVG source would otherwise be visible as plain text.
+  // We walk the message DOM, identify every element / text node whose
+  // textContent participates in a START…END span, and mark it with
+  // data-iv-chat-hidden. A single injected <style> (once) hides them.
+  //
+  // Runs every tick, so Svelte re-renders that swap the underlying nodes
+  // (e.g. paragraph→html-block token flip mid-stream) are re-hidden on
+  // the next observation cycle — no flicker, no regressions.
+  // ---------------------------------------------------------------------
+  var hidingStyleInjected = false;
+  function ensureHidingStyle() {
+    if (hidingStyleInjected) return;
+    try {
+      var doc = parent.document;
+      if (!doc.getElementById('iv-hide-style')) {
+        var s = doc.createElement('style');
+        s.id = 'iv-hide-style';
+        s.textContent =
+          '[data-iv-chat-hidden]{display:none!important}' +
+          '.iv-chat-hide-wrap{display:none!important}';
+        doc.head.appendChild(s);
+      }
+      hidingStyleInjected = true;
+    } catch(e) {}
   }
 
-  // Extract the streaming source text. CodeMirror renders into .cm-line
-  // children inside .cm-content (and also renders gutter line numbers in
-  // .cm-gutters, which we MUST skip). hljs-mode just has raw textContent
-  // on the <code>.
-  function readSource(el) {
-    try {
-      var cmContent = el.querySelector && el.querySelector('.cm-content');
-      if (cmContent) {
-        var lines = cmContent.querySelectorAll('.cm-line');
-        if (lines.length > 0) {
-          var out = [];
-          for (var i = 0; i < lines.length; i++) {
-            out.push(lines[i].textContent || '');
-          }
-          return out.join('\\n');
+  // Locate marker carriers and hide them + everything between pairs.
+  // Uses a two-pass strategy:
+  //   Pass 1 — find the innermost elements whose textContent carries a
+  //            marker, tag each with data-iv-chat-hidden, remember
+  //            whether it's a start or end carrier.
+  //   Pass 2 — for each start carrier, walk forward through DOM siblings
+  //            (lifting both ends to a common parent) and hide every
+  //            element + bare text node until the matching end carrier
+  //            (or end-of-parent for unclosed streaming blocks).
+  // Idempotent: every marked element stays marked, re-walking is cheap,
+  // and already-wrapped text nodes are detected and skipped.
+  function hideMarkerRange() {
+    var msg = findMyMessage();
+    if (!msg) return;
+    ensureHidingStyle();
+
+    // Pass 1 — tag leaf marker carriers.
+    var markers = [];  // ordered list: { el, type:'start'|'end' }
+    var allEls = msg.querySelectorAll('*');
+    for (var i = 0; i < allEls.length; i++) {
+      var el = allEls[i];
+      if (el.tagName === 'IFRAME' || el.tagName === 'STYLE' ||
+          el.tagName === 'SCRIPT') continue;
+      var tc = el.textContent || '';
+      var hasStart = tc.indexOf(START_MARK) !== -1;
+      var hasEnd = tc.indexOf(END_MARK) !== -1;
+      if (!hasStart && !hasEnd) continue;
+      // Only take the INNERMOST carrier — the one whose children do
+      // NOT themselves carry either marker. This prevents us from
+      // hiding the entire message container.
+      var innerCarrier = false;
+      for (var j = 0; j < el.children.length; j++) {
+        var ctc = el.children[j].textContent || '';
+        if (ctc.indexOf(START_MARK) !== -1 || ctc.indexOf(END_MARK) !== -1) {
+          innerCarrier = true; break;
         }
-        return cmContent.textContent || '';
       }
-    } catch(e) {}
-    return (el && el.textContent) || '';
+      if (innerCarrier) continue;
+      if (!el.hasAttribute('data-iv-chat-hidden')) {
+        el.setAttribute('data-iv-chat-hidden', '1');
+      }
+      // A single element COULD carry both markers (e.g. single-paragraph
+      // collapse during early streaming). Treat as start — the end is
+      // the same element so nothing sits between.
+      markers.push({ el: el, type: hasStart ? 'start' : 'end' });
+    }
+
+    // Pass 2 — walk pairs in order. For each start, find the nearest
+    // following end; hide everything in between. If no matching end
+    // (unclosed streaming block), hide until end-of-parent.
+    for (var k = 0; k < markers.length; k++) {
+      if (markers[k].type !== 'start') continue;
+      var endEl = null;
+      for (var p = k + 1; p < markers.length; p++) {
+        if (markers[p].type === 'end') { endEl = markers[p].el; break; }
+        // Bail on a nested start without intervening end — the streaming
+        // model shouldn't emit that, and trying to pair makes a mess.
+        if (markers[p].type === 'start') break;
+      }
+      hideRangeBetween(markers[k].el, endEl);
+    }
   }
 
-  // CodeBlock's top-level container is a div with `rounded-2xl border`
-  // (CodeBlock.svelte:448). That's the thing we want to hide — it wraps
-  // the header toolbar, the code, and any output panels.
-  function hideWrapperOf(code) {
-    try {
-      var el = code;
-      for (var i = 0; i < 12 && el; i++) {
-        if (el.matches && el.matches('.rounded-2xl[class*="border"]')) {
-          hiddenWrapper = el; el.style.display = 'none'; return;
-        }
-        el = el.parentElement;
+  // Hide every node strictly between startEl and endEl in document order.
+  // Works even when they aren't direct siblings: we lift startEl up to
+  // the ancestor that shares a parent with endEl, then walk siblings
+  // from there. If endEl is null (unclosed stream), hide through to the
+  // end of startEl's parent.
+  function hideRangeBetween(startEl, endEl) {
+    var a = startEl;
+    var b = endEl;
+    if (b) {
+      // Lift a until a.parentNode contains b (or b's ancestor).
+      while (a && a.parentNode && !a.parentNode.contains(b)) {
+        a = a.parentNode;
       }
-      // Fallbacks in DOM-structural order
-      var pre = code.closest && code.closest('pre');
-      if (pre) { hiddenWrapper = pre; pre.style.display = 'none'; return; }
-      if (code.style) code.style.display = 'none';
-    } catch(e) {}
+      // Lift b to the same parent as a.
+      while (b && b.parentNode && b.parentNode !== a.parentNode) {
+        b = b.parentNode;
+      }
+      if (!a.parentNode || a.parentNode !== b.parentNode) return;
+    }
+    var parent = a.parentNode;
+    if (!parent) return;
+    var cur = a.nextSibling;
+    var doc = parent.ownerDocument || document;
+    while (cur) {
+      if (b && cur === b) break;
+      var next = cur.nextSibling;
+      if (cur.nodeType === 1 /* element */) {
+        if (!cur.hasAttribute('data-iv-chat-hidden')) {
+          cur.setAttribute('data-iv-chat-hidden', '1');
+        }
+      } else if (cur.nodeType === 3 /* text */) {
+        // Skip nodes already inside a hide wrapper.
+        var parentEl = cur.parentElement;
+        var alreadyWrapped = parentEl && parentEl.classList &&
+          parentEl.classList.contains('iv-chat-hide-wrap');
+        if (!alreadyWrapped && (cur.nodeValue || '').trim().length > 0) {
+          var wrap = doc.createElement('span');
+          wrap.className = 'iv-chat-hide-wrap';
+          wrap.setAttribute('data-iv-chat-hidden', '1');
+          parent.insertBefore(wrap, cur);
+          wrap.appendChild(cur);
+        }
+      }
+      cur = next;
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -1265,23 +1357,46 @@ STREAMING_OBSERVER_SCRIPT = """
 
   // ---- Is the enclosing assistant message still streaming? -----------
   // Open WebUI adds a .shimmer class to containers in "executing" state.
-  // When nothing with .shimmer remains near our code block, the fence
-  // has closed and we can safely finalize even if textContent is stable
-  // only briefly.
-  function isMessageDone(code) {
-    try {
-      var msg = code.closest('[id^="message-"]');
-      if (!msg) return false;
-      return !msg.querySelector('.shimmer');
-    } catch(e) { return false; }
+  // Also: the presence of an END_MARK in the message text is a definitive
+  // signal that THIS block has finished emitting, even if later tokens
+  // are still arriving for prose that follows.
+  function isMessageDone() {
+    var msg = findMyMessage();
+    if (!msg) return false;
+    try { if (msg.querySelector('.shimmer')) return false; } catch(e) {}
+    return true;
+  }
+
+  function isBlockClosed() {
+    var msg = findMyMessage();
+    if (!msg) return false;
+    var idx = determineIndex();
+    if (idx === null) idx = 0;
+    var text = msg.textContent || '';
+    // Re-scan: if the idx-th block's FULL match contains END_MARK, the
+    // block is closed and we can finalize immediately.
+    BLOCK_RE.lastIndex = 0;
+    var m, n = 0;
+    while ((m = BLOCK_RE.exec(text)) !== null) {
+      if (n === idx) return m[0].indexOf(END_MARK) !== -1;
+      n++;
+      if (m.index === BLOCK_RE.lastIndex) BLOCK_RE.lastIndex++;
+    }
+    return false;
   }
 
   function tick() {
     if (finalized) return;
-    var code = claim();
-    if (!code) return;
-    var raw = readSource(code);
-    if (raw === lastRawText) return;
+    // Hide chat-side raw text on every cycle — idempotent and cheap.
+    hideMarkerRange();
+
+    var raw = readSource();
+    if (raw === null) return;
+    if (raw === lastRawText) {
+      // Still converge to finalize even when content stops growing.
+      scheduleFinalize(raw);
+      return;
+    }
     lastRawText = raw;
 
     var cut = findSafeCut(raw);
@@ -1296,14 +1411,21 @@ STREAMING_OBSERVER_SCRIPT = """
       scheduleHeight();
     }
 
-    // Finalize when either:
-    //   (a) the enclosing message is no longer streaming, OR
-    //   (b) the source hasn't changed for a full 800ms.
+    scheduleFinalize(raw);
+  }
+
+  function scheduleFinalize(raw) {
+    // Finalize when any of:
+    //   (a) the block's END_MARK has arrived (definitive), OR
+    //   (b) the enclosing message is no longer streaming, OR
+    //   (c) the source hasn't changed for a full 800ms.
     clearTimeout(finalizeTimer);
+    if (isBlockClosed()) { finalize(raw); return; }
     finalizeTimer = setTimeout(function() {
       if (finalized) return;
-      var latest = readSource(code);
-      if (isMessageDone(code) || latest === raw) {
+      var latest = readSource();
+      if (latest === null) return;
+      if (isBlockClosed() || isMessageDone() || latest === raw) {
         finalize(latest);
       }
     }, 800);
@@ -1322,9 +1444,9 @@ STREAMING_OBSERVER_SCRIPT = """
       '}' +
       '#iv-render .iv-fade-in { animation: iv-fade-in-kf 500ms ease-out both; }' +
       '#iv-render svg .iv-fade-in { animation: iv-fade-in-svg-kf 500ms ease-out both; }' +
-      // Loader shown while the wrapper is waiting for a fence to appear /
-      // claim / produce its first safe-cut flush. Three pulsing dots +
-      // subtle label; replaced the moment real content lands.
+      // Loader shown while the wrapper is waiting for @@@VIZ-START to
+      // appear and produce its first safe-cut flush. Three pulsing dots
+      // + subtle label; replaced the moment real content lands.
       '@keyframes iv-pulse-kf {' +
       '  0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); }' +
       '  40%           { opacity: 1;    transform: scale(1); }' +
@@ -1362,22 +1484,25 @@ STREAMING_OBSERVER_SCRIPT = """
   // ---- Go ------------------------------------------------------------
   //
   // Defense in depth:
-  //   1. Outer MutationObserver on parent.document.body — sees new fences
-  //      appearing as the model streams.
-  //   2. Inner MutationObserver scoped to the claimed block once we have
-  //      one — catches CodeMirror internal DOM churn (line insertion,
-  //      textContent updates) that the outer observer sometimes misses
-  //      because CodeMirror uses reconciled child updates.
+  //   1. Outer MutationObserver on parent.document.body — sees new
+  //      messages / embed containers appearing as the chat scrolls or
+  //      navigates between conversations.
+  //   2. Inner MutationObserver scoped to OUR assistant message once
+  //      located — catches every text mutation as the model streams.
+  //      characterData:true fires per character, so textContent snapshots
+  //      stay fresh.
   //   3. 400ms poll as a safety net — cheap, guarantees forward progress
-  //      even if both observers miss something (e.g. reactive DOM swaps
-  //      during chat navigation).
+  //      even if both observers miss something (reactive DOM swaps,
+  //      cross-origin iframes, etc).
   // ---------------------------------------------------------------------
   var innerMo = null;
   function attachInnerObserver() {
-    if (innerMo || !claimedBlock) return;
+    if (innerMo) return;
+    var msg = findMyMessage();
+    if (!msg) return;
     try {
       innerMo = new MutationObserver(tick);
-      innerMo.observe(claimedBlock, {
+      innerMo.observe(msg, {
         childList: true, subtree: true, characterData: true
       });
     } catch(e) {}
@@ -1496,8 +1621,8 @@ def _build_html(content: str, security_level: str = "strict",
 
     If ``streaming`` is True, ``content`` is ignored and the body contains
     an empty render area (#iv-render) plus the parasitic-wrapper observer
-    script, which tails the parent chat DOM for a ``` ``` ``visualization``
-    fenced code block and renders its contents live.
+    script, which tails the parent chat DOM for an ``@@@VIZ-START`` …
+    ``@@@VIZ-END`` plain-text block and renders its contents live.
     """
     csp_tag = _build_csp_tag(security_level)
     strict_script = STRICT_SECURITY_SCRIPT if security_level == "strict" else ""
@@ -1610,28 +1735,30 @@ class Tools:
 
         Call this tool with ONLY ``title`` and omit ``html_code``. The tool will mount
         an empty visualization wrapper in the chat. Then, in your text response that
-        follows, emit the HTML/SVG inside a ```visualization fenced code block:
+        follows, wrap the HTML/SVG in the TEXT DELIMITERS @@@VIZ-START / @@@VIZ-END
+        (NOT a ``` code fence, NOT HTML tags, NOT a ::: fence — plain text markers):
 
-            ```visualization
+            @@@VIZ-START
             <svg viewBox="0 0 680 240">...</svg>
-            ```
+            @@@VIZ-END
 
-        The wrapper parasitically tails your streaming text and renders the contents
-        of that code block LIVE, token-by-token, into the iframe. Users see the
+        The wrapper parasitically tails your streaming text and renders the content
+        between the markers LIVE, token-by-token, into the iframe. Users see the
         visualization paint progressively as you generate it.
 
-        The raw ```visualization fence is hidden from the chat once claimed, so the
-        user sees only the rendered visualization. You may write explanatory prose
-        before and after the fence — it renders normally in the chat.
+        The raw markers + SVG source are hidden from the chat once they're visible,
+        so the user sees only the rendered visualization. You may write explanatory
+        prose before and after the block — it renders normally in the chat.
 
         Requirements for streaming mode:
         - "iframe Sandbox Allow Same Origin" must be enabled in Open WebUI
           Settings → Interface. If disabled, the wrapper shows a notice telling
           the user to enable it.
-        - Use the fence tag EXACTLY ``` ```visualization ``` — case-sensitive, no
-          other tag is detected. Do NOT use ```html or ```svg for streaming.
-        - Emit ONE fence per tool call. If you need multiple visualizations, call
-          the tool multiple times (each call claims one fence in DOM order).
+        - Use the delimiters EXACTLY: ``@@@VIZ-START`` and ``@@@VIZ-END`` —
+          case-sensitive, each on its own line. No other wrapping is detected.
+          Do NOT put the content inside a ``` fence or ::: fence.
+        - Emit ONE block per tool call. If you need multiple visualizations, call
+          the tool multiple times (each call claims one block in DOM order).
 
         === STATIC MODE (LEGACY, BACKWARD COMPAT) ===
 
@@ -1653,15 +1780,15 @@ class Tools:
 
         After calling this tool, do NOT repeat the HTML/SVG source as plain text — the
         visualization is rendered and visible to the user. Briefly describe what the
-        visualization shows in plain language around (or after) the streaming fence.
+        visualization shows in plain language around (or after) the @@@VIZ-START/END block.
 
         :param title: Short descriptive title for the visualization.
         :param html_code: Optional HTML or SVG content fragment. If provided, triggers
                           STATIC mode. If omitted (default), STREAMING mode is used and
-                          you must emit the content inside a ```visualization fence in
-                          your text response. Do NOT include DOCTYPE, html, head, or
-                          body tags. Structure: <style> first, visible content next,
-                          <script> last. Load Chart.js via CDN when needed:
+                          you must emit the content wrapped in @@@VIZ-START / @@@VIZ-END
+                          text markers in your response. Do NOT include DOCTYPE, html,
+                          head, or body tags. Structure: <style> first, visible content
+                          next, <script> last. Load Chart.js via CDN when needed:
                           <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>.
         :return: Interactive rich embed rendered in the chat, with LLM context.
         """
@@ -1711,13 +1838,17 @@ return (() => {
         if streaming:
             result_context = (
                 f'Visualization wrapper "{title}" is mounted and waiting for content. '
-                f"Now emit the HTML/SVG content inside a ```visualization fenced code "
-                f"block in your NEXT text response. The wrapper will tail your stream "
-                f"and render it live. Use the fence tag EXACTLY: ```visualization on "
-                f"its own line to open, ``` on its own line to close. Write explanatory "
-                f"prose BEFORE and AFTER the fence — do not describe the HTML source "
-                f"itself. Do NOT use ```html or ```svg — only ```visualization is "
-                f"detected. Emit exactly ONE fence for this tool call."
+                f"Now emit the HTML/SVG in your NEXT text response wrapped in the "
+                f"TEXT delimiters @@@VIZ-START and @@@VIZ-END, each on their own line. "
+                f"The wrapper will tail your stream and render live. These are PLAIN "
+                f"TEXT markers — NOT a ``` code fence, NOT HTML tags, NOT a ::: fence. "
+                f"Example:\n\n"
+                f"    @@@VIZ-START\n"
+                f"    <svg viewBox=\"0 0 680 240\">…</svg>\n"
+                f"    @@@VIZ-END\n\n"
+                f"Write explanatory prose BEFORE and AFTER the block — do not describe "
+                f"the HTML source itself. Emit exactly ONE @@@VIZ-START/@@@VIZ-END pair "
+                f"for this tool call."
             )
         else:
             result_context = (
