@@ -922,140 +922,148 @@ STREAMING_OBSERVER_SCRIPT = """
   // ---------------------------------------------------------------------
   // Hide raw markers + between-marker content in the chat.
   //
-  // The markers and SVG source would otherwise be visible as plain text.
-  // We walk the message DOM, identify every element / text node whose
-  // textContent participates in a START…END span, and mark it with
-  // data-iv-chat-hidden. A single injected <style> (once) hides them.
+  // Linear single-pass walk over every text node in the message, state
+  // machine tracks whether we're "inside" a VIZ block:
   //
-  // Runs every tick, so Svelte re-renders that swap the underlying nodes
-  // (e.g. paragraph→html-block token flip mid-stream) are re-hidden on
-  // the next observation cycle — no flicker, no regressions.
+  //   OUTSIDE → START seen → INSIDE
+  //   INSIDE  → END seen   → OUTSIDE
+  //
+  // For every text node whose position is INSIDE the block (or IS one of
+  // the marker lines), we hide its enclosing block-level ancestor with
+  // INLINE `display:none !important` via setProperty. Inline styles beat
+  // every stylesheet and survive Svelte updates that preserve the element
+  // (Svelte only overwrites inline styles it sets itself in the template).
+  //
+  // Why inline instead of a <style> rule? Injecting a <style> into the
+  // parent document requires same-origin access + head mutation + no
+  // interference from other stylesheets. Inline `style` is unambiguous,
+  // foolproof, and cannot silently fail.
+  //
+  // For bare text nodes (marked's inline-html token renders the raw SVG
+  // text as a naked text sibling), we wrap the node in a hidden <span>
+  // so it can be CSS-hidden. The wrapper carries data-iv-chat-wrap so
+  // the next tick skips re-wrapping.
+  //
+  // Runs every observer tick. Idempotent: hiding an already-hidden
+  // element or wrapped text node is a no-op.
   // ---------------------------------------------------------------------
-  var hidingStyleInjected = false;
-  function ensureHidingStyle() {
-    if (hidingStyleInjected) return;
+
+  function hideEl(el) {
+    if (!el || el.nodeType !== 1) return;
+    if (el.getAttribute('data-iv-chat-hidden') !== '1') {
+      el.setAttribute('data-iv-chat-hidden', '1');
+    }
+    // setProperty(_, _, 'important') emits `display: none !important`
+    // as an inline style — beats any stylesheet without specificity
+    // fights, and survives DOM re-renders that keep the element alive.
+    try { el.style.setProperty('display', 'none', 'important'); } catch(e) {}
+  }
+
+  function wrapAndHideText(textNode) {
+    var parent = textNode.parentNode;
+    if (!parent) return;
+    if (parent.nodeType === 1 &&
+        parent.getAttribute &&
+        parent.getAttribute('data-iv-chat-wrap') === '1') return;
     try {
-      var doc = parent.document;
-      if (!doc.getElementById('iv-hide-style')) {
-        var s = doc.createElement('style');
-        s.id = 'iv-hide-style';
-        s.textContent =
-          '[data-iv-chat-hidden]{display:none!important}' +
-          '.iv-chat-hide-wrap{display:none!important}';
-        doc.head.appendChild(s);
-      }
-      hidingStyleInjected = true;
+      var doc = parent.ownerDocument || document;
+      var wrap = doc.createElement('span');
+      wrap.setAttribute('data-iv-chat-wrap', '1');
+      wrap.setAttribute('data-iv-chat-hidden', '1');
+      wrap.style.setProperty('display', 'none', 'important');
+      parent.insertBefore(wrap, textNode);
+      wrap.appendChild(textNode);
     } catch(e) {}
   }
 
-  // Locate marker carriers and hide them + everything between pairs.
-  // Uses a two-pass strategy:
-  //   Pass 1 — find the innermost elements whose textContent carries a
-  //            marker, tag each with data-iv-chat-hidden, remember
-  //            whether it's a start or end carrier.
-  //   Pass 2 — for each start carrier, walk forward through DOM siblings
-  //            (lifting both ends to a common parent) and hide every
-  //            element + bare text node until the matching end carrier
-  //            (or end-of-parent for unclosed streaming blocks).
-  // Idempotent: every marked element stays marked, re-walking is cheap,
-  // and already-wrapped text nodes are detected and skipped.
+  // Nearest ancestor that's a block-ish container — we prefer hiding
+  // block elements over inline ones so we don't leave empty block
+  // boxes visible. Stops at `stopAt` (the message root) — never hides
+  // the message itself.
+  function nearestBlockAncestor(el, stopAt) {
+    var BLOCK = { P:1, DIV:1, SECTION:1, ARTICLE:1, BLOCKQUOTE:1,
+                  PRE:1, H1:1, H2:1, H3:1, H4:1, H5:1, H6:1,
+                  UL:1, OL:1, LI:1, TABLE:1 };
+    var cur = el;
+    while (cur && cur !== stopAt) {
+      if (cur.nodeType === 1 && BLOCK[cur.tagName]) return cur;
+      cur = cur.parentNode;
+    }
+    return null;
+  }
+
   function hideMarkerRange() {
     var msg = findMyMessage();
     if (!msg) return;
-    ensureHidingStyle();
+    var myFrame = window.frameElement;
 
-    // Pass 1 — tag leaf marker carriers.
-    var markers = [];  // ordered list: { el, type:'start'|'end' }
-    var allEls = msg.querySelectorAll('*');
-    for (var i = 0; i < allEls.length; i++) {
-      var el = allEls[i];
-      if (el.tagName === 'IFRAME' || el.tagName === 'STYLE' ||
-          el.tagName === 'SCRIPT') continue;
-      var tc = el.textContent || '';
-      var hasStart = tc.indexOf(START_MARK) !== -1;
-      var hasEnd = tc.indexOf(END_MARK) !== -1;
-      if (!hasStart && !hasEnd) continue;
-      // Only take the INNERMOST carrier — the one whose children do
-      // NOT themselves carry either marker. This prevents us from
-      // hiding the entire message container.
-      var innerCarrier = false;
-      for (var j = 0; j < el.children.length; j++) {
-        var ctc = el.children[j].textContent || '';
-        if (ctc.indexOf(START_MARK) !== -1 || ctc.indexOf(END_MARK) !== -1) {
-          innerCarrier = true; break;
+    // Find my own embed container so we NEVER hide it — our iframe
+    // lives inside it. Everything else in the message body is fair game.
+    var myEmbedContainer = null;
+    try { myEmbedContainer = myFrame && myFrame.closest('[id*="-embeds-"]'); }
+    catch(e) {}
+    var embedsRoot = null;
+    try { embedsRoot = myFrame && myFrame.closest('[id$="-embeds-container"]'); }
+    catch(e) {}
+
+    // Walk every text node in document order.
+    var walker;
+    try {
+      walker = parent.document.createTreeWalker(
+        msg, NodeFilter.SHOW_TEXT, null
+      );
+    } catch(e) { return; }
+
+    var inside = false;
+    var tn;
+    var toHideEls = [];
+    var toWrapText = [];
+
+    while ((tn = walker.nextNode())) {
+      // Skip text nodes that live inside our embed container / iframe —
+      // those are our own rendered UI, never chat content to hide.
+      if (embedsRoot && embedsRoot.contains(tn)) continue;
+      if (myEmbedContainer && myEmbedContainer.contains(tn)) continue;
+
+      var tv = tn.nodeValue || '';
+      var startIdx = tv.indexOf(START_MARK);
+      var endIdx = tv.indexOf(END_MARK);
+      var hadStartLocal = startIdx !== -1;
+      var hadEndLocal = endIdx !== -1;
+
+      var hideThis = inside || hadStartLocal || hadEndLocal;
+
+      if (hideThis) {
+        var block = nearestBlockAncestor(tn.parentNode, msg);
+        if (block && block !== msg) {
+          // Make sure we're not about to hide the message itself, or
+          // any ancestor of our iframe.
+          if (!block.contains(myFrame)) {
+            toHideEls.push(block);
+          } else {
+            toWrapText.push(tn);
+          }
+        } else {
+          toWrapText.push(tn);
         }
       }
-      if (innerCarrier) continue;
-      if (!el.hasAttribute('data-iv-chat-hidden')) {
-        el.setAttribute('data-iv-chat-hidden', '1');
+
+      // State flip AFTER this node is processed (so the node carrying
+      // END_MARK is itself hidden).
+      if (hadStartLocal && hadEndLocal) {
+        // Both markers in same text — treat as self-contained block,
+        // remain OUTSIDE afterwards.
+        inside = false;
+      } else if (hadStartLocal) {
+        inside = true;
+      } else if (hadEndLocal) {
+        inside = false;
       }
-      // A single element COULD carry both markers (e.g. single-paragraph
-      // collapse during early streaming). Treat as start — the end is
-      // the same element so nothing sits between.
-      markers.push({ el: el, type: hasStart ? 'start' : 'end' });
     }
 
-    // Pass 2 — walk pairs in order. For each start, find the nearest
-    // following end; hide everything in between. If no matching end
-    // (unclosed streaming block), hide until end-of-parent.
-    for (var k = 0; k < markers.length; k++) {
-      if (markers[k].type !== 'start') continue;
-      var endEl = null;
-      for (var p = k + 1; p < markers.length; p++) {
-        if (markers[p].type === 'end') { endEl = markers[p].el; break; }
-        // Bail on a nested start without intervening end — the streaming
-        // model shouldn't emit that, and trying to pair makes a mess.
-        if (markers[p].type === 'start') break;
-      }
-      hideRangeBetween(markers[k].el, endEl);
-    }
-  }
-
-  // Hide every node strictly between startEl and endEl in document order.
-  // Works even when they aren't direct siblings: we lift startEl up to
-  // the ancestor that shares a parent with endEl, then walk siblings
-  // from there. If endEl is null (unclosed stream), hide through to the
-  // end of startEl's parent.
-  function hideRangeBetween(startEl, endEl) {
-    var a = startEl;
-    var b = endEl;
-    if (b) {
-      // Lift a until a.parentNode contains b (or b's ancestor).
-      while (a && a.parentNode && !a.parentNode.contains(b)) {
-        a = a.parentNode;
-      }
-      // Lift b to the same parent as a.
-      while (b && b.parentNode && b.parentNode !== a.parentNode) {
-        b = b.parentNode;
-      }
-      if (!a.parentNode || a.parentNode !== b.parentNode) return;
-    }
-    var parent = a.parentNode;
-    if (!parent) return;
-    var cur = a.nextSibling;
-    var doc = parent.ownerDocument || document;
-    while (cur) {
-      if (b && cur === b) break;
-      var next = cur.nextSibling;
-      if (cur.nodeType === 1 /* element */) {
-        if (!cur.hasAttribute('data-iv-chat-hidden')) {
-          cur.setAttribute('data-iv-chat-hidden', '1');
-        }
-      } else if (cur.nodeType === 3 /* text */) {
-        // Skip nodes already inside a hide wrapper.
-        var parentEl = cur.parentElement;
-        var alreadyWrapped = parentEl && parentEl.classList &&
-          parentEl.classList.contains('iv-chat-hide-wrap');
-        if (!alreadyWrapped && (cur.nodeValue || '').trim().length > 0) {
-          var wrap = doc.createElement('span');
-          wrap.className = 'iv-chat-hide-wrap';
-          wrap.setAttribute('data-iv-chat-hidden', '1');
-          parent.insertBefore(wrap, cur);
-          wrap.appendChild(cur);
-        }
-      }
-      cur = next;
-    }
+    // Apply hides (deduped via the attribute check inside hideEl).
+    for (var i = 0; i < toHideEls.length; i++) hideEl(toHideEls[i]);
+    for (var j = 0; j < toWrapText.length; j++) wrapAndHideText(toWrapText[j]);
   }
 
   // ---------------------------------------------------------------------
