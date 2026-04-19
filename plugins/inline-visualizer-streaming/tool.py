@@ -1136,6 +1136,7 @@ STREAMING_OBSERVER_SCRIPT = """
     if (finalized) return;
     finalized = true;
     renderArea.innerHTML = fullText;
+    loaderVisible = false;
     renderArea.querySelectorAll('script').forEach(function(old) {
       var s = document.createElement('script');
       for (var a = 0; a < old.attributes.length; a++) {
@@ -1176,11 +1177,13 @@ STREAMING_OBSERVER_SCRIPT = """
     var cut = findSafeCut(raw);
     var safe = raw.substring(0, cut);
 
-    if (safe !== lastSafeRendered) {
+    if (safe !== lastSafeRendered && safe.length > 0) {
       lastSafeRendered = safe;
       // Live partial render — no scripts yet (final pass re-injects them).
+      // This overwrites the loader automatically on the first flush.
       renderArea.innerHTML = safe.replace(/<script[\\s\\S]*?<\\/script>/gi, '')
                                  .replace(/<script[\\s\\S]*$/i, '');
+      loaderVisible = false;
       markAndAnimate(renderArea);
       scheduleHeight();
     }
@@ -1198,7 +1201,7 @@ STREAMING_OBSERVER_SCRIPT = """
     }, 800);
   }
 
-  // ---- Inject fade-in CSS into our OWN document ----------------------
+  // ---- Inject fade-in + loader CSS into our OWN document -------------
   (function injectFadeCss() {
     var s = document.createElement('style');
     s.textContent =
@@ -1210,9 +1213,42 @@ STREAMING_OBSERVER_SCRIPT = """
       '  from { opacity: 0; } to { opacity: 1; }' +
       '}' +
       '#iv-render .iv-fade-in { animation: iv-fade-in-kf 500ms ease-out both; }' +
-      '#iv-render svg .iv-fade-in { animation: iv-fade-in-svg-kf 500ms ease-out both; }';
+      '#iv-render svg .iv-fade-in { animation: iv-fade-in-svg-kf 500ms ease-out both; }' +
+      // Loader shown while the wrapper is waiting for a fence to appear /
+      // claim / produce its first safe-cut flush. Three pulsing dots +
+      // subtle label; replaced the moment real content lands.
+      '@keyframes iv-pulse-kf {' +
+      '  0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); }' +
+      '  40%           { opacity: 1;    transform: scale(1); }' +
+      '}' +
+      '.iv-loading {' +
+      '  display: flex; flex-direction: column; align-items: center;' +
+      '  justify-content: center; gap: 12px;' +
+      '  padding: 48px 20px; min-height: 120px;' +
+      '  color: var(--color-text-tertiary);' +
+      '  font-size: 12px; letter-spacing: 0.02em;' +
+      '}' +
+      '.iv-loading-dots { display: inline-flex; gap: 8px; }' +
+      '.iv-loading-dots span {' +
+      '  width: 8px; height: 8px; border-radius: 50%;' +
+      '  background: var(--color-text-tertiary);' +
+      '  animation: iv-pulse-kf 1.4s infinite ease-in-out both;' +
+      '}' +
+      '.iv-loading-dots span:nth-child(1) { animation-delay: -0.32s; }' +
+      '.iv-loading-dots span:nth-child(2) { animation-delay: -0.16s; }' +
+      '.iv-loading-label { opacity: 0.6; }';
     document.head.appendChild(s);
   })();
+
+  // ---- Show the loader immediately so the iframe isn't a dead box ----
+  renderArea.innerHTML =
+    '<div class="iv-loading" aria-live="polite">' +
+    '<div class="iv-loading-dots"><span></span><span></span><span></span></div>' +
+    '<div class="iv-loading-label">Preparing visualization\u2026</div>' +
+    '</div>';
+  // Flag so we know the current innerHTML is the loader and can safely
+  // replace it on first real flush without worrying about fade-in markers.
+  var loaderVisible = true;
 
   // ---- Go ------------------------------------------------------------
   //
