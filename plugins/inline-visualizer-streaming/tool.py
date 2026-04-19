@@ -1101,6 +1101,119 @@ STREAMING_OBSERVER_SCRIPT = """
     return safeCut;
   }
 
+  // ---------------------------------------------------------------------
+  // Incremental DOM reconciler — avoids flicker.
+  //
+  // Previously we did `renderArea.innerHTML = safe` every tick, which
+  // tore down and rebuilt the entire subtree. For an SVG with dozens of
+  // elements this meant a full reflow per streaming chunk + every
+  // element re-triggering its fade-in animation = visible flicker.
+  //
+  // Since the safe-cut output is append-only (each new safe is a prefix
+  // superset of the last), we can parse the new safe into a detached
+  // tree and walk both trees in parallel, only APPENDING new nodes and
+  // UPDATING text content that grew. Existing element nodes stay put —
+  // no reflow, no animation re-trigger, no flicker.
+  //
+  // Attributes are immutable between safe cuts (the parser can't cut
+  // inside an open tag or unfinished attribute), so we never need to
+  // sync attributes on existing elements.
+  // ---------------------------------------------------------------------
+
+  // Import an incoming node (from a detached parse) into the live DOM
+  // at `parent`. Uses document.importNode to preserve SVG namespaces.
+  // <script> is handled specially so it executes when inserted.
+  function importAndAppend(parent, incoming) {
+    var nt = incoming.nodeType;
+    if (nt === 3) {
+      parent.appendChild(document.createTextNode(incoming.textContent));
+      return;
+    }
+    if (nt === 8) {
+      parent.appendChild(document.createComment(incoming.textContent));
+      return;
+    }
+    if (nt !== 1) return;
+    var tag = incoming.nodeName;
+    var el;
+    if (tag === 'SCRIPT' || tag === 'script') {
+      // Fresh script element so it executes when inserted.
+      el = document.createElement('script');
+      for (var a = 0; a < incoming.attributes.length; a++) {
+        el.setAttribute(incoming.attributes[a].name, incoming.attributes[a].value);
+      }
+      el.textContent = incoming.textContent;
+      parent.appendChild(el);
+      return;
+    }
+    // importNode(shallow) preserves the correct namespace (HTML vs SVG).
+    el = document.importNode(incoming, false);
+    parent.appendChild(el);
+    for (var i = 0; i < incoming.childNodes.length; i++) {
+      importAndAppend(el, incoming.childNodes[i]);
+    }
+  }
+
+  function reconcile(existing, incoming) {
+    var existCh = existing.childNodes;
+    var incCh = incoming.childNodes;
+    var i;
+    for (i = 0; i < incCh.length; i++) {
+      var inc = incCh[i];
+      var exist = existCh[i];
+      if (!exist) {
+        importAndAppend(existing, inc);
+        continue;
+      }
+      // Position mismatch (different nodeType or different tag) -> replace.
+      // Rare with append-only streams, but guard anyway.
+      if (exist.nodeType !== inc.nodeType ||
+          (exist.nodeType === 1 && exist.nodeName !== inc.nodeName)) {
+        existing.removeChild(exist);
+        // Insert fresh at this position
+        var next = existCh[i] || null;
+        var holder = document.createDocumentFragment();
+        importAndAppend(holder, inc);
+        if (next) existing.insertBefore(holder, next);
+        else existing.appendChild(holder);
+        continue;
+      }
+      if (exist.nodeType === 3) {
+        // Text node — cheap update if content grew/changed.
+        if (exist.nodeValue !== inc.nodeValue) exist.nodeValue = inc.nodeValue;
+        continue;
+      }
+      if (exist.nodeType === 1) {
+        // Same element — descend. Attributes are immutable post-open-tag.
+        reconcile(exist, inc);
+      }
+    }
+    // If stream shrank (shouldn't with append-only), trim surplus.
+    while (existing.childNodes.length > incCh.length) {
+      existing.removeChild(existing.lastChild);
+    }
+  }
+
+  // Render the given source text into renderArea via reconcile.
+  // If `withScripts` is true, <script> tags are materialized as executable
+  // elements (used by finalize); otherwise they're stripped from the
+  // parsed HTML beforehand (used during streaming).
+  function renderSafeInto(text, withScripts) {
+    var html = withScripts
+      ? text
+      : text.replace(/<script[\\s\\S]*?<\\/script>/gi, '')
+            .replace(/<script[\\s\\S]*$/i, '');
+    var temp = document.createElement('div');
+    try {
+      temp.innerHTML = html;
+    } catch(e) {
+      // Fallback to full replace on any parse oddity.
+      renderArea.innerHTML = html;
+      return;
+    }
+    reconcile(renderArea, temp);
+  }
+
   // ---- Fade-in animation for newly-complete elements ------------------
   function markAndAnimate(root) {
     var toAnimate = [];
@@ -1135,17 +1248,14 @@ STREAMING_OBSERVER_SCRIPT = """
   function finalize(fullText) {
     if (finalized) return;
     finalized = true;
-    renderArea.innerHTML = fullText;
+    // Reconcile with the full text (scripts included). The reconciler
+    // creates fresh <script> elements inline, so they execute when
+    // inserted — no need to replace them afterwards. Existing DOM is
+    // preserved; only the previously-stripped scripts get appended.
+    renderSafeInto(fullText, true);
     hideLoader();
-    renderArea.querySelectorAll('script').forEach(function(old) {
-      var s = document.createElement('script');
-      for (var a = 0; a < old.attributes.length; a++) {
-        s.setAttribute(old.attributes[a].name, old.attributes[a].value);
-      }
-      s.textContent = old.textContent;
-      old.parentNode.replaceChild(s, old);
-    });
-    // Animate everything in one final pass (skips nodes already marked).
+    // Animate any newly-revealed elements (fade-in is idempotent via
+    // data-iv-faded markers).
     markAndAnimate(renderArea);
     // Kick the height reporter twice — once immediately, once after layout.
     scheduleHeight();
@@ -1179,10 +1289,9 @@ STREAMING_OBSERVER_SCRIPT = """
 
     if (safe !== lastSafeRendered && safe.length > 0) {
       lastSafeRendered = safe;
-      // Live partial render — no scripts yet (final pass re-injects them).
-      // The loader stays visible BELOW this during streaming.
-      renderArea.innerHTML = safe.replace(/<script[\\s\\S]*?<\\/script>/gi, '')
-                                 .replace(/<script[\\s\\S]*$/i, '');
+      // Reconcile into the existing DOM — only NEW nodes get appended,
+      // existing ones stay put. No flicker, no re-triggered animations.
+      renderSafeInto(safe, false);
       markAndAnimate(renderArea);
       scheduleHeight();
     }
