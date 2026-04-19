@@ -829,20 +829,24 @@ STREAMING_OBSERVER_SCRIPT = """
   }
 
   // ---------------------------------------------------------------------
-  // Monotonic claim index — guarantees older wrappers NEVER steal newer
-  // fences. Each wrapper registers on parent.window.__ivClaimNext__ at
-  // mount time and takes a strictly increasing index. It then claims the
-  // Nth `language-visualization` code block in DOM order, where N is its
-  // index. If the Nth block hasn't appeared yet, it waits.
+  // Claim strategy — DOM-local, no global counter.
+  //
+  // Each wrapper's iframe lives inside some parent DOM node (a tool-call
+  // embed container inside an assistant message). The fence that belongs
+  // to us is the first unclaimed `.language-visualization` we can reach by:
+  //   (1) searching within our enclosing [id^="message-"] container,
+  //   (2) if none, searching forward through subsequent messages.
+  //
+  // This is stable across chat navigations and page reloads: we don't rely
+  // on a global counter that persists across chat switches. The previous
+  // counter approach broke when opening a new chat — the counter from the
+  // previous chat's wrappers leaked, making new wrappers wait for a fence
+  // index that will never exist.
+  //
+  // Multiple wrappers in the same message claim in DOM order because each
+  // sets data-iv-claimed="1" on the element they take, and subsequent
+  // wrappers skip claimed elements.
   // ---------------------------------------------------------------------
-  try {
-    if (typeof parent.window.__ivClaimNext__ !== 'number') {
-      parent.window.__ivClaimNext__ = 0;
-    }
-  } catch(e) {}
-  var MY_CLAIM_IDX;
-  try { MY_CLAIM_IDX = parent.window.__ivClaimNext__++; }
-  catch(e) { MY_CLAIM_IDX = 0; }
 
   var claimedBlock = null;
   var hiddenWrapper = null;
@@ -851,15 +855,26 @@ STREAMING_OBSERVER_SCRIPT = """
   var stableTimer = null;
   var finalizeTimer = null;
   var finalized = false;
+  var myMessage = null;  // cached enclosing message container
 
-  // ---- Claim: take exactly the Nth block in DOM order -----------------
+  function findMyMessage() {
+    if (myMessage && parent.document.contains(myMessage)) return myMessage;
+    try {
+      var f = window.frameElement;
+      if (!f) return null;
+      myMessage = f.closest && f.closest('[id^="message-"]');
+      return myMessage;
+    } catch(e) { return null; }
+  }
+
+  // ---- Claim: first unclaimed fence at or after our message -----------
   //
   // Open WebUI's CodeBlock defaults to edit mode (CodeMirror), so there is
-  // NO <code class="language-X"> element at all — the `language-X` class
-  // lives on the wrapper <div> at CodeBlock.svelte:547. We match any
-  // element carrying that class and keep only the outermost per block.
-  function getAllFences() {
-    var raw = parent.document.querySelectorAll(
+  // NO <code class="language-X"> element — the `language-X` class lives on
+  // the wrapper <div> at CodeBlock.svelte:547. We match any element with
+  // that class and keep only the outermost per block.
+  function getOutermostFences(root) {
+    var raw = root.querySelectorAll(
       '[class~="language-' + SENTINEL + '"]'
     );
     var arr = Array.from(raw);
@@ -873,15 +888,41 @@ STREAMING_OBSERVER_SCRIPT = """
 
   function claim() {
     if (claimedBlock && parent.document.contains(claimedBlock)) return claimedBlock;
-    var fences = getAllFences();
-    if (fences.length <= MY_CLAIM_IDX) return null;
-    var c = fences[MY_CLAIM_IDX];
-    var prev = c.getAttribute('data-iv-claim-idx');
-    if (prev !== null && prev !== String(MY_CLAIM_IDX)) return null;
-    c.setAttribute('data-iv-claim-idx', String(MY_CLAIM_IDX));
-    claimedBlock = c;
-    hideWrapperOf(c);
-    return c;
+    var msg = findMyMessage();
+    var candidates = [];
+    if (msg) {
+      // 1. Fences inside my own message
+      candidates = getOutermostFences(msg);
+      // 2. Fences in subsequent messages (tool call can spawn separate turn)
+      if (candidates.length === 0 || candidates.every(hasBeenClaimed)) {
+        var next = msg.nextElementSibling;
+        while (next) {
+          if (next.matches && next.matches('[id^="message-"]')) {
+            var more = getOutermostFences(next);
+            for (var i = 0; i < more.length; i++) candidates.push(more[i]);
+            if (candidates.some(function(x) { return !hasBeenClaimed(x); })) break;
+          }
+          next = next.nextElementSibling;
+        }
+      }
+    } else {
+      // Fallback — whole document
+      candidates = getOutermostFences(parent.document);
+    }
+    // First unclaimed, preferring the earliest
+    for (var j = 0; j < candidates.length; j++) {
+      if (!hasBeenClaimed(candidates[j])) {
+        candidates[j].setAttribute('data-iv-claimed', '1');
+        claimedBlock = candidates[j];
+        hideWrapperOf(claimedBlock);
+        return claimedBlock;
+      }
+    }
+    return null;
+  }
+
+  function hasBeenClaimed(el) {
+    return el.getAttribute('data-iv-claimed') === '1';
   }
 
   // Extract the streaming source text. CodeMirror renders into .cm-line
@@ -1170,14 +1211,42 @@ STREAMING_OBSERVER_SCRIPT = """
   })();
 
   // ---- Go ------------------------------------------------------------
-  tick();
+  //
+  // Defense in depth:
+  //   1. Outer MutationObserver on parent.document.body — sees new fences
+  //      appearing as the model streams.
+  //   2. Inner MutationObserver scoped to the claimed block once we have
+  //      one — catches CodeMirror internal DOM churn (line insertion,
+  //      textContent updates) that the outer observer sometimes misses
+  //      because CodeMirror uses reconciled child updates.
+  //   3. 400ms poll as a safety net — cheap, guarantees forward progress
+  //      even if both observers miss something (e.g. reactive DOM swaps
+  //      during chat navigation).
+  // ---------------------------------------------------------------------
+  var innerMo = null;
+  function attachInnerObserver() {
+    if (innerMo || !claimedBlock) return;
+    try {
+      innerMo = new MutationObserver(tick);
+      innerMo.observe(claimedBlock, {
+        childList: true, subtree: true, characterData: true
+      });
+    } catch(e) {}
+  }
+
+  function tickWithInner() {
+    tick();
+    attachInnerObserver();
+  }
+
+  tickWithInner();
   try {
-    new MutationObserver(tick).observe(parent.document.body, {
+    new MutationObserver(tickWithInner).observe(parent.document.body, {
       childList: true, subtree: true, characterData: true
     });
-  } catch(e) {
-    setInterval(tick, 300);
-  }
+  } catch(e) {}
+  // Unconditional poll — belt-and-braces, ~2.5 ticks/sec, negligible cost.
+  setInterval(tickWithInner, 400);
 })();
 </script>
 """
