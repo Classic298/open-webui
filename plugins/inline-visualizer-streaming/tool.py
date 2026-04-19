@@ -853,13 +853,29 @@ STREAMING_OBSERVER_SCRIPT = """
   var finalized = false;
 
   // ---- Claim: take exactly the Nth block in DOM order -----------------
+  //
+  // Open WebUI's CodeBlock defaults to edit mode (CodeMirror), so there is
+  // NO <code class="language-X"> element at all — the `language-X` class
+  // lives on the wrapper <div> at CodeBlock.svelte:547. We match any
+  // element carrying that class and keep only the outermost per block.
+  function getAllFences() {
+    var raw = parent.document.querySelectorAll(
+      '[class~="language-' + SENTINEL + '"]'
+    );
+    var arr = Array.from(raw);
+    return arr.filter(function(m) {
+      for (var i = 0; i < arr.length; i++) {
+        if (arr[i] !== m && arr[i].contains(m)) return false;
+      }
+      return true;
+    });
+  }
+
   function claim() {
     if (claimedBlock && parent.document.contains(claimedBlock)) return claimedBlock;
-    var all = parent.document.querySelectorAll('code.language-' + SENTINEL);
-    if (all.length <= MY_CLAIM_IDX) return null;
-    var c = all[MY_CLAIM_IDX];
-    // If already claimed by a different wrapper (shouldn't happen with a
-    // monotonic counter, but guard anyway), refuse.
+    var fences = getAllFences();
+    if (fences.length <= MY_CLAIM_IDX) return null;
+    var c = fences[MY_CLAIM_IDX];
     var prev = c.getAttribute('data-iv-claim-idx');
     if (prev !== null && prev !== String(MY_CLAIM_IDX)) return null;
     c.setAttribute('data-iv-claim-idx', String(MY_CLAIM_IDX));
@@ -868,18 +884,44 @@ STREAMING_OBSERVER_SCRIPT = """
     return c;
   }
 
+  // Extract the streaming source text. CodeMirror renders into .cm-line
+  // children inside .cm-content (and also renders gutter line numbers in
+  // .cm-gutters, which we MUST skip). hljs-mode just has raw textContent
+  // on the <code>.
+  function readSource(el) {
+    try {
+      var cmContent = el.querySelector && el.querySelector('.cm-content');
+      if (cmContent) {
+        var lines = cmContent.querySelectorAll('.cm-line');
+        if (lines.length > 0) {
+          var out = [];
+          for (var i = 0; i < lines.length; i++) {
+            out.push(lines[i].textContent || '');
+          }
+          return out.join('\\n');
+        }
+        return cmContent.textContent || '';
+      }
+    } catch(e) {}
+    return (el && el.textContent) || '';
+  }
+
+  // CodeBlock's top-level container is a div with `rounded-2xl border`
+  // (CodeBlock.svelte:448). That's the thing we want to hide — it wraps
+  // the header toolbar, the code, and any output panels.
   function hideWrapperOf(code) {
     try {
-      var el = code.parentElement;
-      for (var i = 0; i < 8 && el; i++) {
-        var cls = el.className || '';
-        if (typeof cls === 'string' && /(rounded-2xl|rounded-xl|my-2)/.test(cls)) {
+      var el = code;
+      for (var i = 0; i < 12 && el; i++) {
+        if (el.matches && el.matches('.rounded-2xl[class*="border"]')) {
           hiddenWrapper = el; el.style.display = 'none'; return;
         }
         el = el.parentElement;
       }
-      var pre = code.closest('pre');
-      if (pre) { hiddenWrapper = pre; pre.style.display = 'none'; }
+      // Fallbacks in DOM-structural order
+      var pre = code.closest && code.closest('pre');
+      if (pre) { hiddenWrapper = pre; pre.style.display = 'none'; return; }
+      if (code.style) code.style.display = 'none';
     } catch(e) {}
   }
 
@@ -1082,7 +1124,7 @@ STREAMING_OBSERVER_SCRIPT = """
     if (finalized) return;
     var code = claim();
     if (!code) return;
-    var raw = code.textContent || '';
+    var raw = readSource(code);
     if (raw === lastRawText) return;
     lastRawText = raw;
 
@@ -1100,12 +1142,13 @@ STREAMING_OBSERVER_SCRIPT = """
 
     // Finalize when either:
     //   (a) the enclosing message is no longer streaming, OR
-    //   (b) the code block hasn't changed for a full 800ms.
+    //   (b) the source hasn't changed for a full 800ms.
     clearTimeout(finalizeTimer);
     finalizeTimer = setTimeout(function() {
       if (finalized) return;
-      if (isMessageDone(code) || code.textContent === raw) {
-        finalize(raw);
+      var latest = readSource(code);
+      if (isMessageDone(code) || latest === raw) {
+        finalize(latest);
       }
     }, 800);
   }
