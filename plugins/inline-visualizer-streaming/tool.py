@@ -1136,7 +1136,7 @@ STREAMING_OBSERVER_SCRIPT = """
     if (finalized) return;
     finalized = true;
     renderArea.innerHTML = fullText;
-    loaderVisible = false;
+    hideLoader();
     renderArea.querySelectorAll('script').forEach(function(old) {
       var s = document.createElement('script');
       for (var a = 0; a < old.attributes.length; a++) {
@@ -1180,10 +1180,9 @@ STREAMING_OBSERVER_SCRIPT = """
     if (safe !== lastSafeRendered && safe.length > 0) {
       lastSafeRendered = safe;
       // Live partial render — no scripts yet (final pass re-injects them).
-      // This overwrites the loader automatically on the first flush.
+      // The loader stays visible BELOW this during streaming.
       renderArea.innerHTML = safe.replace(/<script[\\s\\S]*?<\\/script>/gi, '')
                                  .replace(/<script[\\s\\S]*$/i, '');
-      loaderVisible = false;
       markAndAnimate(renderArea);
       scheduleHeight();
     }
@@ -1240,15 +1239,16 @@ STREAMING_OBSERVER_SCRIPT = """
     document.head.appendChild(s);
   })();
 
-  // ---- Show the loader immediately so the iframe isn't a dead box ----
-  renderArea.innerHTML =
-    '<div class="iv-loading" aria-live="polite">' +
-    '<div class="iv-loading-dots"><span></span><span></span><span></span></div>' +
-    '<div class="iv-loading-label">Preparing visualization\u2026</div>' +
-    '</div>';
-  // Flag so we know the current innerHTML is the loader and can safely
-  // replace it on first real flush without worrying about fade-in markers.
-  var loaderVisible = true;
+  // The loader (#iv-loader) is already rendered by the Python side as a
+  // sibling BELOW #iv-render. The observer only needs to remove it once
+  // streaming completes (see finalize()). This placement creates the
+  // illusion of content flowing downward toward a pulsing progress head.
+  function hideLoader() {
+    try {
+      var l = document.getElementById('iv-loader');
+      if (l && l.parentNode) l.parentNode.removeChild(l);
+    } catch(e) {}
+  }
 
   // ---- Go ------------------------------------------------------------
   //
@@ -1399,8 +1399,15 @@ def _build_html(content: str, security_level: str = "strict",
     safe_lang = re.sub(r'[^a-z]', '', lang.split('-')[0].lower()[:5]) or "en"
 
     if streaming:
+        # Loader sits *below* the render area so content appears to flow
+        # downward toward the pulsing dots — like a cursor following a pen.
+        # The observer removes #iv-loader entirely on finalize().
         body_inner = (
             '<div id="iv-render"></div>\n'
+            '<div id="iv-loader" class="iv-loading" aria-live="polite">'
+            '<div class="iv-loading-dots"><span></span><span></span><span></span></div>'
+            '<div class="iv-loading-label">Painting visualization\u2026</div>'
+            '</div>\n'
             f'{DOWNLOAD_BUTTON}\n'
             f'{BODY_SCRIPTS}'
             f'{STREAMING_OBSERVER_SCRIPT}'
