@@ -258,10 +258,8 @@ code {
 # ---------------------------------------------------------------------------
 # Injected JavaScript — theme detection (head), height reporting & bridges (body)
 # ---------------------------------------------------------------------------
-
-# Runs in <head> BEFORE any user content so CSS variables resolve to the
-# correct theme when model scripts read them at parse time.
-# Also sets up a MutationObserver to react to live theme switches.
+# Theme script runs in <head> before user content so CSS vars are resolved
+# when model scripts read them at parse time.
 THEME_DETECTION_SCRIPT = """
 <script>
 (function() {
@@ -275,7 +273,6 @@ THEME_DETECTION_SCRIPT = """
     var theme = isDark ? 'dark' : 'light';
     if (document.documentElement.getAttribute('data-theme') === theme) return;
     document.documentElement.setAttribute('data-theme', theme);
-    // Re-render Chart.js instances with updated theme colors
     if (window.Chart && Chart.instances) {
       var s = getComputedStyle(document.documentElement);
       var tc = s.getPropertyValue('--color-text-secondary').trim();
@@ -297,12 +294,11 @@ THEME_DETECTION_SCRIPT = """
   try {
     var p = parent.document.documentElement;
     applyTheme(detectTheme(p));
-    // Watch for live theme changes on the parent
     new MutationObserver(function() {
       applyTheme(detectTheme(p));
     }).observe(p, { attributes: true, attributeFilter: ['class', 'data-theme', 'style'] });
   } catch(e) {
-    // No same-origin access — fall back to OS preference
+    // No same-origin access — fall back to OS preference.
     var mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
     if (mq) {
       applyTheme(mq.matches);
@@ -322,8 +318,8 @@ var _rh_raf = 0;           // rAF id for debouncing ResizeObserver
 
 function reportHeight() {
   var b = document.body;
-  // Measure SVG overflow (content beyond viewBox) before collapsing body,
-  // since getBoundingClientRect needs normal layout.
+  // Measure SVG overflow before the body collapse below — getBBox
+  // needs normal layout.
   var svgOverflow = 0;
   document.querySelectorAll('svg[viewBox]').forEach(function(svg) {
     try {
@@ -339,9 +335,8 @@ function reportHeight() {
     } catch(e) {}
   });
 
-  // Neutralize viewport-relative heights (100vh etc.) during measurement.
-  // In an auto-sizing iframe, vh tracks iframe height → creates feedback loops.
-  // Force body and all direct children to height:auto so we measure true content.
+  // Force height:auto on body + direct children — vh in an auto-sized
+  // iframe tracks iframe height, creating a feedback loop.
   var savedBody = b.style.cssText;
   b.style.setProperty('height', 'auto', 'important');
   b.style.setProperty('overflow', 'visible', 'important');
@@ -356,12 +351,10 @@ function reportHeight() {
     el.style.setProperty('overflow', 'visible', 'important');
   });
   var h = b.scrollHeight + svgOverflow;
-  // Restore original inline styles
   b.style.cssText = savedBody;
   saved.forEach(function(s) { s.el.style.cssText = s.css; });
 
-  // Safety net: detect residual feedback loops (e.g. nested vh elements).
-  // 3+ consecutive small monotonic increases → stop reporting.
+  // Loop guard: 3+ consecutive small monotonic increases → stop.
   var delta = h - _rh_last;
   if (_rh_last > 0 && delta > 0 && delta < 50) {
     _rh_consecutive++;
@@ -375,26 +368,24 @@ function reportHeight() {
 }
 window.addEventListener('load', reportHeight);
 window.addEventListener('resize', reportHeight);
-// Debounce ResizeObserver through rAF to avoid tight synchronous loops
+// rAF-debounced ResizeObserver avoids tight synchronous loops.
 new ResizeObserver(function() {
   cancelAnimationFrame(_rh_raf);
   _rh_raf = requestAnimationFrame(reportHeight);
 }).observe(document.body);
-// Explicitly handle <details> toggle — ResizeObserver misses this in some browsers
+// <details> toggle — ResizeObserver misses this in some browsers.
 document.addEventListener('toggle', function() {
   _rh_consecutive = 0;
   setTimeout(reportHeight, 50);
 }, true);
-// Watch for DOM mutations (SPA page swaps via innerHTML, dynamic content).
-// ResizeObserver misses these when content changes inside overflow:auto containers.
+// Dynamic content swaps (innerHTML assignments, SPA-style updates).
 var _rh_mutRaf = 0;
 new MutationObserver(function() {
   _rh_consecutive = 0;
   cancelAnimationFrame(_rh_mutRaf);
   _rh_mutRaf = requestAnimationFrame(reportHeight);
 }).observe(document.body, { childList: true, subtree: true });
-// Reset loop detector on click — covers custom expand/collapse (style.display
-// toggles, class changes) that MutationObserver childList doesn't catch.
+// Click covers custom expand/collapse via style.display / class swaps.
 document.addEventListener('click', function() {
   _rh_consecutive = 0;
   cancelAnimationFrame(_rh_mutRaf);
@@ -414,7 +405,6 @@ window.addEventListener('load', function() {
     Chart.defaults.plugins.legend.maxHeight = 120;
     Chart.defaults.plugins.legend.labels.boxWidth = 12;
     Chart.defaults.plugins.legend.labels.font = { size: 11 };
-    // Re-render existing charts with corrected legend constraints
     Object.values(Chart.instances || {}).forEach(function(chart) {
       var leg = chart.options.plugins && chart.options.plugins.legend;
       if (leg) {
@@ -427,14 +417,12 @@ window.addEventListener('load', function() {
     });
   }
 
-  // SVG axis-label overlap — stagger only labels in a tight horizontal band
-  // (skips complex diagrams where text is scattered across the full canvas).
-  // Opt-out: add data-no-stagger to any <svg> to disable for that element.
+  // De-overlap SVG axis labels only — add data-no-stagger on a <svg>
+  // to opt out.
   document.querySelectorAll('svg').forEach(function(svg) {
     if (svg.hasAttribute('data-no-stagger')) return;
     var texts = Array.from(svg.querySelectorAll('text'));
     if (texts.length < 4) return;
-    // Collect bounding info for all visible texts
     var items = [];
     texts.forEach(function(t) {
       var r = t.getBoundingClientRect();
@@ -442,8 +430,8 @@ window.addEventListener('load', function() {
       items.push({ el: t, rect: r, cx: r.left + r.width / 2, cy: r.top + r.height / 2 });
     });
     if (items.length < 4) return;
-    // Only stagger texts that sit in a narrow y-band (axis labels).
-    // If texts span a wide vertical range, this is a diagram — skip entirely.
+    // Only touch texts in a narrow y-band (axis labels). Diagrams with
+    // texts spread across the canvas are left alone.
     var minY = Infinity, maxY = -Infinity;
     items.forEach(function(it) {
       if (it.cy < minY) minY = it.cy;
@@ -451,17 +439,14 @@ window.addEventListener('load', function() {
     });
     var ySpan = maxY - minY;
     if (ySpan < 1) return;
-    // Find the y-band with the most texts (likely the axis row)
-    var bandSize = 30; // px tolerance for "same row"
+    // Pick the densest y-band (likely the axis row).
+    var bandSize = 30;
     var bestBand = [], bestCount = 0;
     items.forEach(function(anchor) {
       var band = items.filter(function(it) { return Math.abs(it.cy - anchor.cy) < bandSize; });
       if (band.length > bestCount) { bestCount = band.length; bestBand = band; }
     });
-    // Only proceed if the best band has 3+ labels AND doesn't cover most texts
-    // (if most texts are in the band, it's likely a simple chart; otherwise a diagram)
     if (bestBand.length < 3 || bestBand.length === items.length && ySpan > 60) return;
-    // Use only the best-band texts for grouping/stagger
     var groups = [];
     bestBand.forEach(function(it) {
       for (var i = 0; i < groups.length; i++) {
@@ -497,8 +482,8 @@ window.addEventListener('load', function() {
 // --- sendPrompt bridge (requires iframe Sandbox Allow Same Origin) ---
 function sendPrompt(text) {
   try {
-    // Use Open WebUI's native postMessage protocol.
-    // submitPrompt automatically queues the message if the AI is still generating.
+    // Open WebUI's native prompt-submit postMessage — queues if the
+    // model is mid-generation.
     parent.postMessage({ type: 'input:prompt:submit', text: text }, '*');
   } catch(e) { /* iframe sandbox restriction */ }
 }
@@ -510,13 +495,9 @@ function openLink(url) {
 }
 
 // --- navigator.vibrate silencer ---
-// Chrome blocks vibrate() without a prior user gesture and spams the
-// console with `[Intervention] Blocked call to navigator.vibrate…`
-// every time. Models occasionally reach for haptic feedback in their
-// visualizations (celebration on click, bounce feedback, etc.) which
-// fills the console. Silently no-op the API inside the iframe so
-// Chrome's block path never fires. Returning `false` matches what the
-// spec says vibrate returns when the request is rejected.
+// Chrome spams `[Intervention] Blocked call to navigator.vibrate…` on
+// every call without a prior user gesture. Replace with a no-op so the
+// block path never runs.
 try {
   if (typeof navigator !== 'undefined' && navigator.vibrate) {
     navigator.vibrate = function() { return false; };
@@ -524,9 +505,7 @@ try {
 } catch(e) {}
 
 // --- Toast bridge ---
-// Floating auto-dismissing banner, anchored top-right inside the iframe
-// so it sits beside (not over) the download button. Uses theme CSS vars
-// so it adapts to light/dark automatically.
+// Floating auto-dismissing top-right banner. kind = success/info/warn/error.
 function toast(msg, kind) {
   kind = kind || 'success';
   var color = kind === 'error' ? 'var(--color-text-danger)'
@@ -567,15 +546,10 @@ function toast(msg, kind) {
 }
 
 // --- copyText bridge ---
-// Copies `text` via the async Clipboard API and falls back to the
-// legacy execCommand path when the iframe's sandbox blocks the async
-// API (Open WebUI's iframe does NOT ship allow-clipboard-write).
-//
-// The toast fires UNCONDITIONALLY on every attempt — execCommand can
-// return false / throw in some browsers without any observable effect,
-// and swallowing the feedback would leave the user wondering whether
-// their click did anything. If the caller passes silent=true, the
-// toast is suppressed.
+// Async Clipboard API with execCommand fallback (Open WebUI's iframe
+// sandbox lacks allow-clipboard-write). Toast fires unconditionally —
+// execCommand can silently fail and swallowing feedback leaves the user
+// confused. silent=true suppresses the toast.
 function copyText(text, silent) {
   var s = String(text == null ? '' : text);
   var label = (typeof _ivCopiedStr !== 'undefined' &&
@@ -609,11 +583,9 @@ function copyText(text, silent) {
 }
 
 // --- saveState / loadState bridges ---
-// Per-message localStorage proxy. State is scoped to the assistant
-// message id so interactive visuals can remember toggles, sliders,
-// picked tabs across reloads — but two separate chats each get their
-// own state, and state never leaks between different visualizations.
-// Silently no-ops if localStorage / parent access is blocked.
+// parent.localStorage proxy scoped to the assistant message id — state
+// persists across reloads but never leaks between chats / messages.
+// Silent no-op if localStorage / parent is unreachable.
 function _ivStatePrefix() {
   try {
     var f = window.frameElement;
@@ -638,14 +610,11 @@ function loadState(key, fallback) {
 }
 
 // --- Happy chime ---
-// C-major arpeggio (C5 → E5 → G5) played on soft sine oscillators with
-// a bell-like exponential decay envelope. ~300 ms total, gentle volume.
-// Modern browsers require a user gesture before AudioContext plays;
-// since the user kicked off the chat before streaming, the context
-// is usually already unlocked. If not, the call silently no-ops.
-//
-// Mute via: saveState('iv-sound', false) from the visualization code,
-// or set localStorage key "iv-sound-off" = "1" to mute globally.
+// C-major arpeggio (C5 → E5 → G5) on sine oscillators with exponential
+// decay. ~300 ms, gentle volume. Silent no-op if AudioContext is still
+// suspended (no prior user gesture).
+// Mute: saveState('iv-sound', false) per-viz, or localStorage
+// 'iv-sound-off' = '1' globally.
 var _ivAudioCtx = null;
 function playDoneSound() {
   try {
@@ -677,10 +646,9 @@ function playDoneSound() {
 }
 
 // --- Print fix for Chart.js canvases ---
-// Chart.js sets explicit pixel widths as inline styles on canvas and its
-// container div at render time (e.g. style="width: 1400px"). CSS max-width
-// from a stylesheet can't reliably override this in Chrome's print engine.
-// Fix: directly mutate inline styles before print, restore after.
+// Chart.js writes explicit pixel widths as inline styles that CSS
+// max-width can't override in Chrome's print engine. Mutate inline
+// styles before print, restore after.
 (function() {
   window.addEventListener('beforeprint', function() {
     document.querySelectorAll('canvas').forEach(function(c) {
@@ -1022,45 +990,19 @@ var _ivErrBodyStr = {
 // ---------------------------------------------------------------------------
 // Download as self-contained HTML
 // ---------------------------------------------------------------------------
-//
-// Strategy — why blob <a download>, and why iOS needs special handling:
-//
-//   Desktop / Android:
-//     Blob + <a download> triggers the browser's native "Save As" dialog.
-//     target="_blank" is added as a safety net: if the iframe sandbox lacks
-//     the allow-downloads permission, the click gracefully opens the HTML
-//     in a new tab instead of navigating (and destroying) the iframe. The
-//     user can then save from the new tab. Non-destructive fallback.
-//
-//   iOS (Safari AND PWA / standalone):
-//     Blob + <a download> triggers the iOS share sheet / download manager.
-//     This is the ONLY approach that works reliably on iOS:
-//       - target="_blank" MUST NOT be set. In PWA / standalone mode it
-//         navigates the entire app away from the chat with NO back button —
-//         the user is stuck on the blob page and must re-launch the app.
-//         In Safari it opens a new tab showing raw HTML source instead of
-//         triggering the download sheet.
-//       - The blob click is deferred via setTimeout(0) so the calling
-//         function returns cleanly before WebKit processes the navigation.
-//         Without this, iOS WebKit can throw a synchronous "Load failed"
-//         TypeError that propagates as an error toast in Open WebUI.
-//       - window.onerror and unhandledrejection listeners suppress the
-//         "Load failed" error for 60 s, then restore the original handlers.
-//         This is the same pattern used by the PDF export and Gamma
-//         presentation actions, which discovered these iOS quirks through
-//         extensive production testing.
-//
-// iOS detection: UA string catches iPhone/iPod; the MacIntel +
-// maxTouchPoints > 1 heuristic catches iPadOS (reports as desktop Mac).
+// Desktop / Android: blob + <a download> + target="_blank" safety net
+// (gracefully opens in a new tab if the iframe sandbox blocks downloads).
+// iOS: NO target="_blank" (would strand PWA users on a blob page with no
+// back button), setTimeout(0) deferral avoids a synchronous WebKit
+// "Load failed" throw, and error listeners suppress the residual toast
+// for 60s. iOS detection also catches iPadOS via MacIntel+touchpoints.
 // ---------------------------------------------------------------------------
 
 var _ivIsIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
   || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 function _ivDownload() {
-  // Clean up the serialized HTML for standalone use:
-  // - Remove download button (not needed in saved file)
-  // - Strip overflow:hidden so the file is scrollable in a browser
+  // Strip download button + overflow:hidden for standalone use.
   var w = document.getElementById('iv-dl-wrap');
   if (w) w.remove();
   var html = '<!DOCTYPE html>\\n' + document.documentElement.outerHTML;
@@ -1069,8 +1011,7 @@ function _ivDownload() {
 
   var fname = (document.title || 'visualization').replace(/[<>:"\\/|?*]+/g, '-').replace(/\s+/g, ' ').trim();
   if (!fname) fname = 'visualization';
-  // Cap at 200 chars to stay within Windows 255-char filename limit
-  // (leaves room for the .html extension and filesystem overhead).
+  // Cap at 200 chars to stay under the Windows 255-char filename limit.
   if (fname.length > 200) fname = fname.substring(0, 200).trim();
   fname += '.html';
 
@@ -1078,12 +1019,8 @@ function _ivDownload() {
   var url = URL.createObjectURL(blob);
 
   if (_ivIsIOS) {
-    // iOS path — deferred blob download with "Load failed" error
-    // suppression. Mirrors the battle-tested approach from the PDF
-    // export and Gamma presentation actions.
+    // iOS — deferred click + "Load failed" error suppression.
     setTimeout(function() {
-      // Suppress iOS WebKit "Load failed" TypeError that fires on
-      // blob <a> clicks. Without this, Open WebUI shows an error toast.
       var _origOnerror = window.onerror;
       window.onerror = function(msg) {
         if (typeof msg === 'string' && msg.indexOf('Load failed') !== -1) return true;
@@ -1100,11 +1037,11 @@ function _ivDownload() {
       a.style.display = 'none';
       a.href = url;
       a.download = fname;
-      // No target="_blank" — see comment block above.
+      // No target="_blank" on iOS — strands PWA users on a blob page.
       document.body.appendChild(a);
       a.click();
 
-      // Restore original error handlers and clean up after 60 s.
+      // Restore original handlers after 60s.
       setTimeout(function() {
         window.onerror = _origOnerror;
         window.removeEventListener('error', _sup, true);
@@ -1114,12 +1051,11 @@ function _ivDownload() {
       }, 60000);
     }, 0);
   } else {
-    // Desktop / Android path — straightforward blob download.
+    // Desktop / Android — straightforward blob download.
     var a = document.createElement('a');
     a.href = url;
     a.download = fname;
-    // Safety net: if the iframe sandbox blocks the download,
-    // open in a new tab rather than navigating the iframe.
+    // Safety net: new tab if the iframe sandbox blocks downloads.
     a.target = '_blank';
     a.style.display = 'none';
     document.body.appendChild(a);
@@ -1131,12 +1067,10 @@ function _ivDownload() {
 """
 
 # ---------------------------------------------------------------------------
-# STRICT-mode script — query-parameter hygiene for link navigation.
-# Strips search params from openLink(), window.open(), and <a href>.
-# This is supplementary hygiene, NOT a hard exfiltration control —
-# data can still appear in URL paths/fragments, and location.assign/
-# replace are not intercepted. The primary exfil blocker is the CSP
-# connect-src directive.
+# STRICT-mode script — strip query params from openLink / window.open /
+# <a href>. Supplementary hygiene only; the real exfil blocker is the
+# CSP connect-src directive. Paths, fragments, and location.assign are
+# not intercepted.
 # ---------------------------------------------------------------------------
 
 STRICT_SECURITY_SCRIPT = """
@@ -1179,39 +1113,21 @@ STRICT_SECURITY_SCRIPT = """
 # ---------------------------------------------------------------------------
 # STREAMING mode — text-marker observer (CodeBlock-free)
 # ---------------------------------------------------------------------------
+# Model emits plain-text @@@VIZ-START … @@@VIZ-END markers (NOT a code
+# fence — that path routed through CodeMirror's virtualizer and lost
+# content on scroll / refresh). Markdown renders them as ordinary
+# paragraph/html tokens, so nothing we scan goes through CodeBlock.
 #
-# Why this design:
-#   The previous approach used ```visualization code fences, which went
-#   through Open WebUI's CodeBlock.svelte → CodeMirror. CodeMirror
-#   virtualizes long code and drops scrolled-off content from the DOM,
-#   corrupts whitespace at line wraps, and re-renders unpredictably on
-#   refresh. Every fix uncovered a new CodeMirror quirk.
+# Observer loop:
+#   1. Find enclosing message via frame.closest('[id^="message-"]').
+#   2. Read msg.textContent (skipping <details type="tool_calls"> etc).
+#   3. Regex-extract the idx-th @@@VIZ-START … @@@VIZ-END block.
+#   4. Safe-cut partial HTML, reconcile into #iv-render.
+#   5. Walk the message DOM to hide the raw markers + between-marker
+#      content inline (display:none !important).
 #
-# New protocol:
-#   The model emits plain text markers — NOT a code fence, NOT HTML tags,
-#   NOT ``` ``` or :::
-#       @@@VIZ-START
-#       <svg>…</svg>
-#       @@@VIZ-END
-#   Markdown's default tokenizer treats these as ordinary paragraph/html
-#   tokens. Neither Open WebUI's CodeBlock nor CodeMirror ever sees them.
-#   There is no virtualization, no line eviction, no soft-wrap mangling.
-#
-# How the observer works:
-#   1. Find enclosing message (frame.closest('[id^="message-"]')).
-#   2. Read message.textContent — always the full, authoritative source.
-#   3. Regex-extract content between @@@VIZ-START and @@@VIZ-END
-#      (or until end of message, for mid-stream).
-#   4. Reconcile into #iv-render via the same safe-cut + DOM diff path as
-#      before.
-#   5. Walk the message DOM to locate the marker paragraphs + the
-#      between-marker nodes and hide them with inline display:none, so
-#      the user sees only the rendered iframe — not the raw SVG source.
-#
-# Claim:
-#   Each embed container has id "{messageId}-embeds-{idx}". We derive the
-#   wrapper's index from that id and take the idx-th VIZ block in the
-#   message. Stable across refresh, chat switches, and scroll.
+# idx comes from the embed container id "{messageId}-embeds-{N}", so
+# multiple visualizations in the same message claim in order.
 #
 # Requires iframe Sandbox Allow Same Origin.
 # ---------------------------------------------------------------------------
@@ -1266,13 +1182,8 @@ STREAMING_OBSERVER_SCRIPT = """
     return;
   }
 
-  // ---------------------------------------------------------------------
-  // Claim — by embed index, not by DOM element.
-  //
-  // Each tool call produces one embed iframe at "{messageId}-embeds-{N}".
-  // The N-th embed owns the N-th @@@VIZ-START / @@@VIZ-END pair in the
-  // message text. Stable across refresh, scroll, and chat switches.
-  // ---------------------------------------------------------------------
+  // Claim: each tool call renders an embed at "{messageId}-embeds-{N}".
+  // The N-th embed owns the N-th @@@VIZ-START/END pair in the message.
 
   var myMessage = null;
   var myIndex = null;        // this wrapper's position among embed siblings
@@ -1373,34 +1284,12 @@ STREAMING_OBSERVER_SCRIPT = """
     return null;
   }
 
-  // ---------------------------------------------------------------------
-  // Hide raw markers + between-marker content in the chat.
-  //
-  // Linear single-pass walk over every text node in the message, state
-  // machine tracks whether we're "inside" a VIZ block:
-  //
-  //   OUTSIDE → START seen → INSIDE
-  //   INSIDE  → END seen   → OUTSIDE
-  //
-  // For every text node whose position is INSIDE the block (or IS one of
-  // the marker lines), we hide its enclosing block-level ancestor with
-  // INLINE `display:none !important` via setProperty. Inline styles beat
-  // every stylesheet and survive Svelte updates that preserve the element
-  // (Svelte only overwrites inline styles it sets itself in the template).
-  //
-  // Why inline instead of a <style> rule? Injecting a <style> into the
-  // parent document requires same-origin access + head mutation + no
-  // interference from other stylesheets. Inline `style` is unambiguous,
-  // foolproof, and cannot silently fail.
-  //
-  // For bare text nodes (marked's inline-html token renders the raw SVG
-  // text as a naked text sibling), we wrap the node in a hidden <span>
-  // so it can be CSS-hidden. The wrapper carries data-iv-chat-wrap so
-  // the next tick skips re-wrapping.
-  //
-  // Runs every observer tick. Idempotent: hiding an already-hidden
-  // element or wrapped text node is a no-op.
-  // ---------------------------------------------------------------------
+  // Hide markers + between-marker content with inline
+  // `display:none !important` (beats every stylesheet, survives Svelte
+  // updates). Bare text nodes that marked emits for inline-html get
+  // wrapped in a hidden <span data-iv-chat-wrap>. Single-pass walker
+  // with a small state machine (OUTSIDE → START → INSIDE → END →
+  // OUTSIDE). Runs every tick, idempotent.
 
   function hideEl(el) {
     if (!el || el.nodeType !== 1) return;
@@ -1545,22 +1434,14 @@ STREAMING_OBSERVER_SCRIPT = """
     for (var j = 0; j < toWrapText.length; j++) wrapAndHideText(toWrapText[j]);
   }
 
-  // ---------------------------------------------------------------------
   // Safe-cut partial-HTML parser
   //
-  // Returns the last index in `text` where markup is in a safe state to
-  // flush to innerHTML: parser is in TEXT state (not mid-tag, not
-  // mid-attribute, not inside script/style content), and no comment or
-  // CDATA is mid-delimiter.
-  //
-  // We do NOT require depth === 0. Browsers' HTML parser auto-closes
-  // open tags when innerHTML is set, so flushing `<svg><rect/><g>` is
-  // perfectly valid — the resulting DOM is `<svg><rect/><g></g></svg>`
-  // with an empty <g>. Next tick we flush `<svg><rect/><g><path/></g></svg>`
-  // and the DOM updates. This is what enables progressive SVG render —
-  // previously depth === 0 meant a single top-level <svg> only flushed
-  // on its closing tag (no progressive render at all).
-  // ---------------------------------------------------------------------
+  // Returns the last index in `text` where the parser is in a safe
+  // state (TEXT, not mid-tag / mid-attribute / mid-script / mid-CDATA)
+  // so we can flush the prefix to innerHTML without breakage. Depth
+  // doesn't matter — the browser auto-closes open tags on innerHTML
+  // assignment, which is what lets a <svg> progressively render as
+  // children stream in.
   var VOID_TAGS = {area:1,base:1,br:1,col:1,embed:1,hr:1,img:1,input:1,
                    link:1,meta:1,param:1,source:1,track:1,wbr:1};
   var RAW_TAGS = {script:1, style:1};
@@ -1680,28 +1561,17 @@ STREAMING_OBSERVER_SCRIPT = """
     return safeCut;
   }
 
-  // ---------------------------------------------------------------------
   // Incremental DOM reconciler — avoids flicker.
   //
-  // Previously we did `renderArea.innerHTML = safe` every tick, which
-  // tore down and rebuilt the entire subtree. For an SVG with dozens of
-  // elements this meant a full reflow per streaming chunk + every
-  // element re-triggering its fade-in animation = visible flicker.
-  //
-  // Since the safe-cut output is append-only (each new safe is a prefix
-  // superset of the last), we can parse the new safe into a detached
-  // tree and walk both trees in parallel, only APPENDING new nodes and
-  // UPDATING text content that grew. Existing element nodes stay put —
-  // no reflow, no animation re-trigger, no flicker.
-  //
-  // Attributes are immutable between safe cuts (the parser can't cut
-  // inside an open tag or unfinished attribute), so we never need to
-  // sync attributes on existing elements.
-  // ---------------------------------------------------------------------
+  // Safe-cut output is append-only (each flush is a prefix superset of
+  // the last), so we parse the new safe into a detached tree and walk
+  // both trees in parallel, APPENDING new nodes and UPDATING grown
+  // text. Existing element nodes stay put — no reflow, no animation
+  // re-trigger. Attributes are immutable between cuts (the parser
+  // can't cut mid-tag), so we never sync them on existing elements.
 
-  // Import an incoming node (from a detached parse) into the live DOM
-  // at `parent`. Uses document.importNode to preserve SVG namespaces.
-  // <script> is handled specially so it executes when inserted.
+  // importNode preserves SVG namespaces. <script> gets a fresh element
+  // so it executes when inserted.
   function importAndAppend(parent, incoming) {
     var nt = incoming.nodeType;
     if (nt === 3) {
@@ -1732,7 +1602,7 @@ STREAMING_OBSERVER_SCRIPT = """
       parent.appendChild(el);
       return;
     }
-    // importNode(shallow) preserves the correct namespace (HTML vs SVG).
+    // Shallow import preserves HTML-vs-SVG namespace.
     el = document.importNode(incoming, false);
     parent.appendChild(el);
     for (var i = 0; i < incoming.childNodes.length; i++) {
@@ -1751,12 +1621,10 @@ STREAMING_OBSERVER_SCRIPT = """
         importAndAppend(existing, inc);
         continue;
       }
-      // Position mismatch (different nodeType or different tag) -> replace.
-      // Rare with append-only streams, but guard anyway.
+      // Position mismatch — rare with append-only streams, guard anyway.
       if (exist.nodeType !== inc.nodeType ||
           (exist.nodeType === 1 && exist.nodeName !== inc.nodeName)) {
         existing.removeChild(exist);
-        // Insert fresh at this position
         var next = existCh[i] || null;
         var holder = document.createDocumentFragment();
         importAndAppend(holder, inc);
@@ -1769,21 +1637,16 @@ STREAMING_OBSERVER_SCRIPT = """
         if (exist.nodeValue !== inc.nodeValue) exist.nodeValue = inc.nodeValue;
         continue;
       }
-      if (exist.nodeType === 1) {
-        // Same element — descend. Attributes are immutable post-open-tag.
-        reconcile(exist, inc);
-      }
+      if (exist.nodeType === 1) reconcile(exist, inc);
     }
-    // If stream shrank (shouldn't with append-only), trim surplus.
+    // Shouldn't happen with append-only, but trim if it does.
     while (existing.childNodes.length > incCh.length) {
       existing.removeChild(existing.lastChild);
     }
   }
 
-  // Render the given source text into renderArea via reconcile.
-  // If `withScripts` is true, <script> tags are materialized as executable
-  // elements (used by finalize); otherwise they're stripped from the
-  // parsed HTML beforehand (used during streaming).
+  // withScripts=true materializes <script> tags (finalize path).
+  // withScripts=false strips them during streaming to avoid repeat exec.
   function renderSafeInto(text, withScripts) {
     var html = withScripts
       ? text
@@ -1834,22 +1697,16 @@ STREAMING_OBSERVER_SCRIPT = """
   function finalize(fullText) {
     if (finalized) return;
     finalized = true;
-    // Reconcile with the full text (scripts included). The reconciler
-    // creates fresh <script> elements inline, so they execute when
-    // inserted — no need to replace them afterwards. Existing DOM is
-    // preserved; only the previously-stripped scripts get appended.
+    // Reconcile with scripts included — the reconciler materializes
+    // fresh <script> elements which execute on insertion.
     renderSafeInto(fullText, true);
     hideLoader();
-    // Animate any newly-revealed elements (fade-in is idempotent via
-    // data-iv-faded markers).
     markAndAnimate(renderArea);
-    // Kick the height reporter twice — once immediately, once after layout.
+    // Nudge the height reporter across layout settle.
     scheduleHeight();
     setTimeout(scheduleHeight, 120);
     setTimeout(scheduleHeight, 400);
-    // "Rendering done" announcement — fires ONLY when we witnessed the
-    // stream live (saw .shimmer at least once). Refresh / rehydration
-    // of already-complete messages is silent.
+    // Done announcement — only on live streams, not on rehydration.
     if (wasStreaming) {
       try {
         var label = (typeof _ivDoneStr !== 'undefined' &&
@@ -1860,22 +1717,13 @@ STREAMING_OBSERVER_SCRIPT = """
     }
   }
 
-  // NOTE: a previous version used `.shimmer` as a "still streaming"
-  // signal. That class actually decorates tool-execution / reasoning
-  // status badges (StatusItem.svelte, HTMLToken.svelte) — NOT the
-  // assistant message body. Once the tool call returns, .shimmer is
-  // gone even though the model is still streaming the response. So the
-  // check returned "done" on every tick from that moment, the 800 ms
-  // idle timer rubber-stamped the partial content as final, and the
-  // live render got wiped 3-5 seconds in. Signal dropped.
   function isBlockClosed() {
     var msg = findMyMessage();
     if (!msg) return false;
     var idx = determineIndex();
     if (idx === null) idx = 0;
     var text = getSearchableText(msg);
-    // Re-scan: if the idx-th block's FULL match contains END_MARK, the
-    // block is closed and we can finalize immediately.
+    // True iff the idx-th block's full match contains END_MARK.
     BLOCK_RE.lastIndex = 0;
     var m, n = 0;
     while ((m = BLOCK_RE.exec(text)) !== null) {
@@ -1886,52 +1734,33 @@ STREAMING_OBSERVER_SCRIPT = """
     return false;
   }
 
-  // Efficiency cache: skip all per-tick work when the message's
-  // textContent hasn't changed AND no DOM structural mutation was
-  // observed. Structural mutations (childList changes) can destroy our
-  // inline hide styles even if the text string matches, so the inner
-  // observer forwards `forceHide=true` on those to guarantee re-apply.
-  // The 400ms safety poll never forces (nothing has changed; work is
-  // pointless).
+  // Tick skips its whole pipeline when the searchable text is
+  // unchanged. A childList mutation sets forceHide=true so Svelte
+  // rebuilds that preserve the text string still get re-hidden.
   var lastMsgText = null;
   var wasStreaming = false;
-  var firstSeenLen = null;  // searchable-text length on first tick
+  var firstSeenLen = null;
 
   function tick(forceHide) {
     if (finalized) return;
     var msg = findMyMessage();
     if (!msg) return;
 
-    // Cache & compare against SEARCHABLE text (skips <details> subtrees,
-    // which carry our own tool-result example markers). Full textContent
-    // would include the static tool-result example and look "changed" on
-    // every render, defeating the cache.
     var currentText = getSearchableText(msg);
     var textChanged = currentText !== lastMsgText;
     lastMsgText = currentText;
 
-    // Detect live streaming by GROWTH, not by .shimmer. The shimmer
-    // class lives on status pills (StatusItem / HTMLToken) which vanish
-    // as soon as the tool call returns — long before text streaming
-    // ends, so it's unreliable for "is the model still writing?".
-    // Instead: record the searchable text length the first time we see
-    // the message, then flip wasStreaming as soon as anything longer
-    // shows up. Refreshes of completed messages never grow past the
-    // initial length and stay silent — which is what we want.
+    // Live-stream detection by GROWTH — the first-seen searchable
+    // length never grows on refreshes of completed messages, so
+    // wasStreaming stays false and we don't fire the done toast/chime.
     if (firstSeenLen === null) firstSeenLen = currentText.length;
     else if (!wasStreaming && currentText.length > firstSeenLen) {
       wasStreaming = true;
     }
 
-    // Hide work runs when text grew OR when a DOM structural mutation
-    // might have destroyed our hidden attributes.
-    if (textChanged || forceHide) {
-      hideMarkerRange();
-    }
+    if (textChanged || forceHide) hideMarkerRange();
 
-    // The rest of the pipeline (readSource / safe-cut / reconcile) is
-    // pure function of textContent — no point redoing it when nothing
-    // changed. Any pending finalize timer continues to fire on its own.
+    // Source-dependent work only runs on actual changes.
     if (!textChanged) return;
 
     var raw = readSource();
@@ -1947,8 +1776,6 @@ STREAMING_OBSERVER_SCRIPT = """
 
     if (safe !== lastSafeRendered && safe.length > 0) {
       lastSafeRendered = safe;
-      // Reconcile into the existing DOM — only NEW nodes get appended,
-      // existing ones stay put. No flicker, no re-triggered animations.
       renderSafeInto(safe, false);
       markAndAnimate(renderArea);
       scheduleHeight();
@@ -1957,10 +1784,8 @@ STREAMING_OBSERVER_SCRIPT = """
     scheduleFinalize(raw);
   }
 
-  // Returns true if any of the given MutationRecords indicates a DOM
-  // structural mutation (childList). Passed to tick() as `forceHide` so
-  // hideMarkerRange re-runs even when textContent length is unchanged
-  // — Svelte can rebuild a text node without altering its string content.
+  // Forces hideMarkerRange to re-run even when textContent is unchanged
+  // — Svelte can rebuild a text node without altering its string value.
   function _ivHasChildListMutation(records) {
     if (!records) return false;
     for (var i = 0; i < records.length; i++) {
@@ -1970,21 +1795,11 @@ STREAMING_OBSERVER_SCRIPT = """
   }
 
   function scheduleFinalize(raw) {
-    // Primary signal: @@@VIZ-END arrived in the source. Fires
-    // immediately — no wait, no risk of wiping live content.
-    //
-    // Fallback for cases where END never lands (user stops generation,
-    // model forgets to close the block). 5 seconds was too aggressive:
-    //   * Gemini 3.1 Pro streams ~200-token chunks with 3-6s gaps
-    //   * Proxies sometimes buffer chunks for 10-30s in poor network
-    //   * Even Claude occasionally stalls a few seconds between chunks
-    // Any of those tripped the timer mid-stream, finalize() ran on
-    // partial <style>…</style>, the reconciler overwrote the live tree,
-    // and the iframe collapsed to a thin strip.
-    //
-    // 30s is long enough that no realistic stall-between-chunks fires
-    // it, but short enough that a real user-stop still recovers without
-    // needing a page refresh.
+    // Primary signal: @@@VIZ-END present → finalize instantly.
+    // Fallback: 30s of completely stable source (user stopped
+    // generation / model forgot END / network died). 30s is longer
+    // than any realistic inter-chunk stall (Gemini 3.1 Pro 200-token
+    // chunks, proxy buffering, etc) so we can't trip it mid-stream.
     clearTimeout(finalizeTimer);
     if (isBlockClosed()) { finalize(raw); return; }
     finalizeTimer = setTimeout(function() {
@@ -2010,9 +1825,7 @@ STREAMING_OBSERVER_SCRIPT = """
       '}' +
       '#iv-render .iv-fade-in { animation: iv-fade-in-kf 500ms ease-out both; }' +
       '#iv-render svg .iv-fade-in { animation: iv-fade-in-svg-kf 500ms ease-out both; }' +
-      // Loader shown while the wrapper is waiting for @@@VIZ-START to
-      // appear and produce its first safe-cut flush. Three pulsing dots
-      // + subtle label; replaced the moment real content lands.
+      // Three pulsing dots + label shown while waiting for content.
       '@keyframes iv-pulse-kf {' +
       '  0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); }' +
       '  40%           { opacity: 1;    transform: scale(1); }' +
@@ -2036,10 +1849,8 @@ STREAMING_OBSERVER_SCRIPT = """
     document.head.appendChild(s);
   })();
 
-  // The loader (#iv-loader) is already rendered by the Python side as a
-  // sibling BELOW #iv-render. The observer only needs to remove it once
-  // streaming completes (see finalize()). This placement creates the
-  // illusion of content flowing downward toward a pulsing progress head.
+  // #iv-loader is rendered server-side as a sibling below #iv-render;
+  // we only need to remove it on finalize.
   function hideLoader() {
     try {
       var l = document.getElementById('iv-loader');
@@ -2047,20 +1858,10 @@ STREAMING_OBSERVER_SCRIPT = """
     } catch(e) {}
   }
 
-  // ---- Go ------------------------------------------------------------
-  //
-  // Defense in depth:
-  //   1. Outer MutationObserver on parent.document.body — sees new
-  //      messages / embed containers appearing as the chat scrolls or
-  //      navigates between conversations.
-  //   2. Inner MutationObserver scoped to OUR assistant message once
-  //      located — catches every text mutation as the model streams.
-  //      characterData:true fires per character, so textContent snapshots
-  //      stay fresh.
-  //   3. 400ms poll as a safety net — cheap, guarantees forward progress
-  //      even if both observers miss something (reactive DOM swaps,
-  //      cross-origin iframes, etc).
-  // ---------------------------------------------------------------------
+  // Defense in depth: outer observer on parent.document.body sees new
+  // messages as chat scrolls / navigates; inner observer on our own
+  // message catches every streaming text mutation; 400ms poll is a
+  // safety net in case the observers miss anything.
   var innerMo = null;
   function attachInnerObserver() {
     if (innerMo) return;
@@ -2076,15 +1877,11 @@ STREAMING_OBSERVER_SCRIPT = """
     } catch(e) {}
   }
 
-  // Poll entry — pure "nothing has changed, verify" path. Never forces
-  // hide work. Cheap when idle.
   function pollTick() {
     tick(false);
     attachInnerObserver();
   }
 
-  // First call — must force-hide because the cache starts empty, so
-  // textChanged=true anyway, but explicit force makes the intent clear.
   tick(false);
   attachInnerObserver();
   try {
