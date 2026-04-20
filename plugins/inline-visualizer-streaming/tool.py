@@ -1149,6 +1149,9 @@ STRICT_SECURITY_SCRIPT = """
 
 STREAMING_OBSERVER_SCRIPT = """
 <script>
+window.addEventListener('error', function(ev) {
+  try { console.error('[iv-debug] window.error', { msg: ev.message, src: ev.filename, line: ev.lineno, col: ev.colno, err: ev.error && ev.error.stack }); } catch(_){}
+}, true);
 (function() {
   'use strict';
   // Delimiters — must match SKILL.md exactly. Chosen because:
@@ -1626,6 +1629,7 @@ STREAMING_OBSERVER_SCRIPT = """
     // redeclares `const` / rebinds classes / double-wires event
     // listeners — always a bug, so collapse here.
     var key = src ? ('src:' + src) : ('code:' + code.length + ':' + _ivHashScript(code));
+    try { console.log('[iv-debug] enqueueScript', { src: src, codeLen: code.length, key: key, duplicate: !!_ivEnqueuedScripts[key] }); } catch(e) {}
     if (_ivEnqueuedScripts[key]) return;
     _ivEnqueuedScripts[key] = true;
 
@@ -1638,18 +1642,21 @@ STREAMING_OBSERVER_SCRIPT = """
         return new Promise(function(resolve) {
           var el = document.createElement('script');
           attrs.forEach(function(pair) { el.setAttribute(pair[0], pair[1]); });
-          el.onload = el.onerror = function() { resolve(); };
+          el.onload = function() { try { console.log('[iv-debug] src-script loaded', src); } catch(_){} resolve(); };
+          el.onerror = function() { try { console.error('[iv-debug] src-script FAILED', src); } catch(_){} resolve(); };
           document.head.appendChild(el);
         });
       });
     } else {
       _ivScriptChain = _ivScriptChain.then(function() {
         try {
+          try { console.log('[iv-debug] inline-script exec begin', { codeLen: code.length, gridExists: !!document.getElementById('grid') }); } catch(_){}
           var el = document.createElement('script');
           attrs.forEach(function(pair) { el.setAttribute(pair[0], pair[1]); });
           el.textContent = code;
           document.head.appendChild(el);
-        } catch(e) { try { console.error(e); } catch(_){} }
+          try { console.log('[iv-debug] inline-script exec end (no throw from insertion)'); } catch(_){}
+        } catch(e) { try { console.error('[iv-debug] inline-script THREW', e); } catch(_){} }
       });
     }
   }
@@ -1781,6 +1788,7 @@ STREAMING_OBSERVER_SCRIPT = """
   function finalize(fullText) {
     if (finalized) return;
     finalized = true;
+    try { console.log('[iv-debug] finalize', { len: fullText.length, hasScriptTag: fullText.indexOf('<' + 'script') !== -1, tail: fullText.slice(-80) }); } catch(e) {}
     // Reconcile with scripts included — the reconciler materializes
     // fresh script elements which execute on insertion.
     renderSafeInto(fullText, true);
@@ -1833,6 +1841,7 @@ STREAMING_OBSERVER_SCRIPT = """
     var currentText = getSearchableText(msg);
     var textChanged = currentText !== lastMsgText;
     lastMsgText = currentText;
+    try { console.log('[iv-debug] tick', { textChanged: textChanged, textLen: currentText.length, closed: isBlockClosed() }); } catch(e) {}
 
     // Live-stream detection by GROWTH — the first-seen searchable
     // length never grows on refreshes of completed messages, so
