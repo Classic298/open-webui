@@ -13,7 +13,7 @@ from typing import Literal
 # `data-iv-build` on <html>, or the `iv[version]` console log).
 # Bump on every protocol-level change so stale cached iframes can
 # be spotted immediately.
-_IV_BUILD = "2.0.1+script-end-fix"
+_IV_BUILD = "2.0.2+dbl-escape-fix"
 
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
@@ -1462,13 +1462,13 @@ STREAMING_OBSERVER_SCRIPT = """
     var tagNameEnd = false;
     var inClosingTag = false;
     var selfClosing = false;
-    var rawTag = '';  // active <script>/<style> close tag name
+    var rawTag = '';  // active raw-text tag close-tag name
 
     while (i < len) {
       var ch = text.charCodeAt(i);
 
       if (state === 'RAW') {
-        // Inside <script>/<style>. The contents are NOT a safe cut — we
+        // Inside a raw-text element. Contents are NOT a safe cut — we
         // have to wait for the full close tag before flushing, otherwise
         // innerHTML would include partial JS/CSS.
         var marker = '</' + rawTag;
@@ -1486,14 +1486,22 @@ STREAMING_OBSERVER_SCRIPT = """
 
       if (state === 'TEXT') {
         if (ch === 60 /* < */) {
-          if (text.substr(i, 4) === '<!--') {
-            var ce = text.indexOf('-->', i + 4);
+          // Built by concatenation so the HTML tokenizer never sees
+          // the raw comment / CDATA delimiters inside this very
+          // script — those tokens would put the outer parser into
+          // data-escape / double-escape mode and corrupt our
+          // enclosing element's boundary.
+          var CMT_OPEN = '<' + '!--';
+          var CMT_CLOSE = '--' + '>';
+          var CDATA_OPEN = '<' + '![CDATA[';
+          if (text.substr(i, 4) === CMT_OPEN) {
+            var ce = text.indexOf(CMT_CLOSE, i + 4);
             if (ce === -1) break;
             i = ce + 3;
             safeCut = i;
             continue;
           }
-          if (text.substr(i, 9) === '<![CDATA[') {
+          if (text.substr(i, 9) === CDATA_OPEN) {
             var ke = text.indexOf(']]>', i + 9);
             if (ke === -1) break;
             i = ke + 3;
@@ -1577,12 +1585,12 @@ STREAMING_OBSERVER_SCRIPT = """
   // re-trigger. Attributes are immutable between cuts (the parser
   // can't cut mid-tag), so we never sync them on existing elements.
 
-  // Promise chain that serializes <script> execution across an entire
+  // Promise chain that serializes script execution across an entire
   // visualization. Each enqueue returns a fresh link in the chain that
   // resolves only after the previous script has fully executed (or, for
   // external scripts, fully loaded). Inline scripts created via
   // createElement run synchronously on insertion, so the only way to
-  // make them wait for a preceding external <script src> is to defer
+  // make them wait for a preceding external src-script is to defer
   // the insertion itself via this chain.
   var _ivScriptChain = Promise.resolve();
   function enqueueScript(incoming) {
@@ -1613,9 +1621,9 @@ STREAMING_OBSERVER_SCRIPT = """
     }
   }
 
-  // importNode preserves SVG namespaces. <script> is specially handled
-  // via enqueueScript so external + inline scripts execute in source
-  // order with proper load-waiting.
+  // importNode preserves SVG namespaces. Script elements are handled
+  // specially via enqueueScript so external + inline scripts execute
+  // in source order with proper load-waiting.
   function importAndAppend(parent, incoming) {
     var nt = incoming.nodeType;
     if (nt === 3) {
@@ -1681,13 +1689,20 @@ STREAMING_OBSERVER_SCRIPT = """
     }
   }
 
-  // withScripts=true materializes <script> tags (finalize path).
+  // withScripts=true materializes inline script tags (finalize path).
   // withScripts=false strips them during streaming to avoid repeat exec.
+  // Regexes built at runtime via string concatenation — writing them
+  // as literals would bake the raw open/close tokens into our own
+  // embedded script, which the outer HTML parser sees and flips into
+  // double-escape mode (corrupts our enclosing element boundary).
+  var _ivOpen = '<' + 'script';
+  var _ivClose = '<' + '\\/script>';
+  var _ivStripPaired = new RegExp(_ivOpen + '[\\s\\S]*?' + _ivClose, 'gi');
+  var _ivStripOpen = new RegExp(_ivOpen + '[\\s\\S]*$', 'i');
   function renderSafeInto(text, withScripts) {
     var html = withScripts
       ? text
-      : text.replace(/<script[\\s\\S]*?<\\/script>/gi, '')
-            .replace(/<script[\\s\\S]*$/i, '');
+      : text.replace(_ivStripPaired, '').replace(_ivStripOpen, '');
     var temp = document.createElement('div');
     try {
       temp.innerHTML = html;
@@ -1734,7 +1749,7 @@ STREAMING_OBSERVER_SCRIPT = """
     if (finalized) return;
     finalized = true;
     // Reconcile with scripts included — the reconciler materializes
-    // fresh <script> elements which execute on insertion.
+    // fresh script elements which execute on insertion.
     renderSafeInto(fullText, true);
     hideLoader();
     markAndAnimate(renderArea);
