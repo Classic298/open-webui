@@ -509,6 +509,113 @@ function openLink(url) {
   catch(e) { window.open(url, '_blank'); }
 }
 
+// --- Toast bridge ---
+// Floating auto-dismissing banner, anchored top-right inside the iframe
+// so it sits beside (not over) the download button. Uses theme CSS vars
+// so it adapts to light/dark automatically.
+function toast(msg, kind) {
+  kind = kind || 'success';
+  var color = kind === 'error' ? 'var(--color-text-danger)'
+           : kind === 'info'  ? 'var(--color-text-info)'
+           : kind === 'warn'  ? 'var(--color-text-warning)'
+           : 'var(--color-text-success)';
+  var wrap = document.getElementById('iv-toast-wrap');
+  if (!wrap) {
+    wrap = document.createElement('div');
+    wrap.id = 'iv-toast-wrap';
+    wrap.style.cssText =
+      'position:fixed;top:4px;right:38px;z-index:9998;' +
+      'display:flex;flex-direction:column;gap:4px;pointer-events:none;' +
+      'max-width:280px;';
+    document.body.appendChild(wrap);
+  }
+  var el = document.createElement('div');
+  el.style.cssText =
+    'padding:6px 12px;border-radius:var(--radius-md);' +
+    'background:var(--color-bg-secondary);' +
+    'border:0.5px solid var(--color-border-tertiary);' +
+    'color:' + color + ';font-size:12px;line-height:1.4;' +
+    'font-family:var(--font-sans);font-weight:500;' +
+    'opacity:0;transform:translateY(-4px);transition:all 0.2s ease;' +
+    'pointer-events:auto;white-space:nowrap;' +
+    'overflow:hidden;text-overflow:ellipsis;';
+  el.textContent = String(msg == null ? '' : msg);
+  wrap.appendChild(el);
+  requestAnimationFrame(function() {
+    el.style.opacity = '1';
+    el.style.transform = 'none';
+  });
+  setTimeout(function() {
+    el.style.opacity = '0';
+    el.style.transform = 'translateY(-4px)';
+    setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 220);
+  }, 2200);
+}
+
+// --- copyText bridge ---
+// Copies `text` via the async Clipboard API, falling back to the legacy
+// execCommand path for non-secure contexts / older browsers. Always
+// confirms success via toast(). If the caller passes `silent=true`, the
+// confirmation toast is suppressed (rare; mainly for chained calls).
+function copyText(text, silent) {
+  var s = String(text == null ? '' : text);
+  function done() {
+    if (silent) return;
+    var label = (typeof _ivCopiedStr !== 'undefined' &&
+                 (_ivCopiedStr[_ivLang] || _ivCopiedStr.en)) || 'Copied';
+    toast(label, 'success');
+  }
+  function fallback() {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = s;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+      done();
+    } catch(e) {}
+  }
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(s).then(done).catch(fallback);
+    } else {
+      fallback();
+    }
+  } catch(e) { fallback(); }
+}
+
+// --- saveState / loadState bridges ---
+// Per-message localStorage proxy. State is scoped to the assistant
+// message id so interactive visuals can remember toggles, sliders,
+// picked tabs across reloads — but two separate chats each get their
+// own state, and state never leaks between different visualizations.
+// Silently no-ops if localStorage / parent access is blocked.
+function _ivStatePrefix() {
+  try {
+    var f = window.frameElement;
+    var msg = f && f.closest && f.closest('[id^="message-"]');
+    return 'iv-state:' + ((msg && msg.id) || 'global') + ':';
+  } catch(e) { return 'iv-state:global:'; }
+}
+function saveState(key, value) {
+  try {
+    parent.localStorage.setItem(
+      _ivStatePrefix() + String(key),
+      JSON.stringify(value === undefined ? null : value)
+    );
+  } catch(e) {}
+}
+function loadState(key, fallback) {
+  try {
+    var v = parent.localStorage.getItem(_ivStatePrefix() + String(key));
+    if (v == null) return fallback === undefined ? null : fallback;
+    return JSON.parse(v);
+  } catch(e) { return fallback === undefined ? null : fallback; }
+}
+
 // --- Print fix for Chart.js canvases ---
 // Chart.js sets explicit pixel widths as inline styles on canvas and its
 // container div at render time (e.g. style="width: 1400px"). CSS max-width
@@ -700,6 +807,79 @@ var _ivErrTitleStr = {
   hi: 'स्ट्रीमिंग विज़ुअलाइज़ेशन अनुपलब्ध',
   bn: 'স্ট্রিমিং ভিজ্যুয়ালাইজেশন অনুপলব্ধ',
   sw: 'Taswira ya utiririshaji haipatikani'
+};
+
+// Confirmation toast shown after copyText() succeeds.
+var _ivCopiedStr = {
+  en: 'Copied', de: 'Kopiert', cs: 'Zkopírováno', hu: 'Másolva',
+  hr: 'Kopirano', pl: 'Skopiowano', fr: 'Copié', nl: 'Gekopieerd',
+  es: 'Copiado', pt: 'Copiado', it: 'Copiato', ca: 'Copiat',
+  gl: 'Copiado', eu: 'Kopiatuta',
+  da: 'Kopieret', sv: 'Kopierat', no: 'Kopiert', fi: 'Kopioitu',
+  is: 'Afritað',
+  sk: 'Skopírované', sl: 'Kopirano', sr: 'Копирано', bs: 'Kopirano',
+  bg: 'Копирано', mk: 'Копирано', uk: 'Скопійовано', ru: 'Скопировано',
+  be: 'Скапіявана',
+  lt: 'Nukopijuota', lv: 'Nokopēts', et: 'Kopeeritud',
+  ro: 'Copiat', el: 'Αντιγράφηκε', sq: 'U kopjua',
+  tr: 'Kopyalandı', ar: 'تم النسخ', he: 'הועתק',
+  zh: '已复制', ja: 'コピーしました', ko: '복사됨',
+  vi: 'Đã sao chép', th: 'คัดลอกแล้ว', id: 'Disalin', ms: 'Disalin',
+  hi: 'कॉपी किया गया', bn: 'অনুলিপি করা হয়েছে',
+  sw: 'Imenakiliwa'
+};
+
+// Shown as a top-right toast when streaming completes and the
+// visualization has finished rendering. Only appears if we actually
+// witnessed live streaming — refreshes of completed messages stay silent.
+var _ivDoneStr = {
+  en: 'Visualization ready',
+  de: 'Visualisierung bereit',
+  cs: 'Vizualizace připravena',
+  hu: 'Vizualizáció kész',
+  hr: 'Vizualizacija spremna',
+  pl: 'Wizualizacja gotowa',
+  fr: 'Visualisation prête',
+  nl: 'Visualisatie klaar',
+  es: 'Visualización lista',
+  pt: 'Visualização pronta',
+  it: 'Visualizzazione pronta',
+  ca: 'Visualització llesta',
+  gl: 'Visualización lista',
+  eu: 'Bistaratzea prest',
+  da: 'Visualisering klar',
+  sv: 'Visualisering klar',
+  no: 'Visualisering klar',
+  fi: 'Visualisointi valmis',
+  is: 'Sjónræn framsetning tilbúin',
+  sk: 'Vizualizácia pripravená',
+  sl: 'Vizualizacija pripravljena',
+  sr: 'Визуализација спремна',
+  bs: 'Vizualizacija spremna',
+  bg: 'Визуализацията е готова',
+  mk: 'Визуализацијата е подготвена',
+  uk: 'Візуалізація готова',
+  ru: 'Визуализация готова',
+  be: 'Візуалізацыя гатовая',
+  lt: 'Vizualizacija paruošta',
+  lv: 'Vizualizācija gatava',
+  et: 'Visualiseering valmis',
+  ro: 'Vizualizare gata',
+  el: 'Η οπτικοποίηση είναι έτοιμη',
+  sq: 'Vizualizimi gati',
+  tr: 'Görselleştirme hazır',
+  ar: 'التصور جاهز',
+  he: 'ההדמיה מוכנה',
+  zh: '可视化已完成',
+  ja: 'ビジュアライゼーション完成',
+  ko: '시각화 완료',
+  vi: 'Hình ảnh đã sẵn sàng',
+  th: 'การแสดงภาพพร้อมแล้ว',
+  id: 'Visualisasi siap',
+  ms: 'Visualisasi sedia',
+  hi: 'विज़ुअलाइज़ेशन तैयार',
+  bn: 'ভিজ্যুয়ালাইজেশন প্রস্তুত',
+  sw: 'Taswira tayari'
 };
 
 var _ivErrBodyStr = {
@@ -1530,6 +1710,16 @@ STREAMING_OBSERVER_SCRIPT = """
     scheduleHeight();
     setTimeout(scheduleHeight, 120);
     setTimeout(scheduleHeight, 400);
+    // "Rendering done" announcement — fires ONLY when we witnessed the
+    // stream live (saw .shimmer at least once). Refresh / rehydration
+    // of already-complete messages is silent.
+    if (wasStreaming) {
+      try {
+        var label = (typeof _ivDoneStr !== 'undefined' &&
+                     (_ivDoneStr[_ivLang] || _ivDoneStr.en)) || 'Visualization ready';
+        if (typeof toast === 'function') toast(label, 'success');
+      } catch(e) {}
+    }
   }
 
   // ---- Is the enclosing assistant message still streaming? -----------
@@ -1562,15 +1752,46 @@ STREAMING_OBSERVER_SCRIPT = """
     return false;
   }
 
-  function tick() {
+  // Efficiency cache: skip all per-tick work when the message's
+  // textContent hasn't changed AND no DOM structural mutation was
+  // observed. Structural mutations (childList changes) can destroy our
+  // inline hide styles even if the text string matches, so the inner
+  // observer forwards `forceHide=true` on those to guarantee re-apply.
+  // The 400ms safety poll never forces (nothing has changed; work is
+  // pointless).
+  var lastMsgText = null;
+  var wasStreaming = false;
+
+  function tick(forceHide) {
     if (finalized) return;
-    // Hide chat-side raw text on every cycle — idempotent and cheap.
-    hideMarkerRange();
+    var msg = findMyMessage();
+    if (!msg) return;
+
+    // Capture streaming state for the "done" toast. .shimmer is present
+    // on the assistant message while tokens are still arriving; seeing
+    // it at ANY point proves we're not just rehydrating a stored message.
+    if (!wasStreaming) {
+      try { if (msg.querySelector('.shimmer')) wasStreaming = true; } catch(e) {}
+    }
+
+    var currentText = msg.textContent || '';
+    var textChanged = currentText !== lastMsgText;
+    lastMsgText = currentText;
+
+    // Hide work runs when text grew OR when a DOM structural mutation
+    // might have destroyed our hidden attributes.
+    if (textChanged || forceHide) {
+      hideMarkerRange();
+    }
+
+    // The rest of the pipeline (readSource / safe-cut / reconcile) is
+    // pure function of textContent — no point redoing it when nothing
+    // changed. Any pending finalize timer continues to fire on its own.
+    if (!textChanged) return;
 
     var raw = readSource();
     if (raw === null) return;
     if (raw === lastRawText) {
-      // Still converge to finalize even when content stops growing.
       scheduleFinalize(raw);
       return;
     }
@@ -1589,6 +1810,18 @@ STREAMING_OBSERVER_SCRIPT = """
     }
 
     scheduleFinalize(raw);
+  }
+
+  // Returns true if any of the given MutationRecords indicates a DOM
+  // structural mutation (childList). Passed to tick() as `forceHide` so
+  // hideMarkerRange re-runs even when textContent length is unchanged
+  // — Svelte can rebuild a text node without altering its string content.
+  function _ivHasChildListMutation(records) {
+    if (!records) return false;
+    for (var i = 0; i < records.length; i++) {
+      if (records[i] && records[i].type === 'childList') return true;
+    }
+    return false;
   }
 
   function scheduleFinalize(raw) {
@@ -1678,26 +1911,35 @@ STREAMING_OBSERVER_SCRIPT = """
     var msg = findMyMessage();
     if (!msg) return;
     try {
-      innerMo = new MutationObserver(tick);
+      innerMo = new MutationObserver(function(records) {
+        tick(_ivHasChildListMutation(records));
+      });
       innerMo.observe(msg, {
         childList: true, subtree: true, characterData: true
       });
     } catch(e) {}
   }
 
-  function tickWithInner() {
-    tick();
+  // Poll entry — pure "nothing has changed, verify" path. Never forces
+  // hide work. Cheap when idle.
+  function pollTick() {
+    tick(false);
     attachInnerObserver();
   }
 
-  tickWithInner();
+  // First call — must force-hide because the cache starts empty, so
+  // textChanged=true anyway, but explicit force makes the intent clear.
+  tick(false);
+  attachInnerObserver();
   try {
-    new MutationObserver(tickWithInner).observe(parent.document.body, {
+    new MutationObserver(function(records) {
+      tick(_ivHasChildListMutation(records));
+      attachInnerObserver();
+    }).observe(parent.document.body, {
       childList: true, subtree: true, characterData: true
     });
   } catch(e) {}
-  // Unconditional poll — belt-and-braces, ~2.5 ticks/sec, negligible cost.
-  setInterval(tickWithInner, 400);
+  setInterval(pollTick, 400);
 })();
 </script>
 """

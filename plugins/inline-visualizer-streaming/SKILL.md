@@ -422,6 +422,71 @@ Use `openLink` for external references, documentation links, or source code link
 
 ---
 
+## copyText + toast bridges — feedback on user actions
+
+`copyText(text)` copies `text` to the system clipboard and automatically shows a localized "Copied" toast in the top-right corner of the iframe. Works from HTTPS and HTTP origins (falls back to `execCommand('copy')` if the async Clipboard API is blocked). Use this on "Copy" buttons inside interactive visualizations — data tables, code snippets, shareable values.
+
+```html
+<button onclick="copyText(JSON.stringify(data, null, 2))">Copy JSON</button>
+```
+
+`toast(message, kind)` shows a small auto-dismissing banner inside the iframe. `kind` is optional and controls the text color: `'success'` (green, default), `'info'` (blue), `'warn'` (amber), `'error'` (red). Use it for status notifications inside long-running interactive tools — "Calculation done", "Invalid input", etc.
+
+```html
+<button onclick="recompute(); toast('Recomputed', 'info')">Recompute</button>
+```
+
+Toasts auto-dismiss after ~2.2 s and stack vertically if fired in quick succession.
+
+---
+
+## saveState + loadState bridges — persistent interactive state
+
+`saveState(key, value)` and `loadState(key, fallback)` proxy `parent.localStorage` with a key prefix scoped to **this assistant message**. State survives page reloads and tab switches, but two different chats (or different messages in the same chat) each get their own independent state — no cross-contamination.
+
+```html
+<script>
+  // Restore toggle state on load
+  var showRaw = loadState('showRaw', false);
+  document.getElementById('raw-toggle').checked = showRaw;
+  applyView(showRaw);
+
+  function onToggleChange(el) {
+    saveState('showRaw', el.checked);
+    applyView(el.checked);
+  }
+</script>
+```
+
+Use it for: selected tabs, picked chart range, hidden/shown layers, theme overrides, collapsed sections — anything the user would expect to be remembered when they re-open the chat.
+
+Values are JSON-serialized. If `localStorage` is blocked (private browsing, sandboxed), both functions silently no-op and `loadState` returns `fallback`.
+
+---
+
+## CDN libraries — batteries included
+
+The strict-mode CSP allowlists three major CDN hosts, so the model can load **any library** served from them without touching any plugin setting. Prefer these over self-hosted paths for reliability.
+
+Allowed hosts:
+- `cdnjs.cloudflare.com` — Cloudflare's CDN, widest coverage
+- `cdn.jsdelivr.net` — npm / GitHub-backed, good for minor-version pinning
+- `unpkg.com` — npm mirror, same as jsdelivr
+
+Recommended libraries for visualization work:
+
+| Library | Why reach for it | Example loader |
+|---------|------------------|----------------|
+| **Chart.js** | Bar / line / doughnut / scatter charts with animation out of the box | `<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>` |
+| **D3.js** | Custom data-driven SVG (force graphs, arcs, maps, non-standard charts) | `<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>` |
+| **Three.js** | 3D scenes (WebGL) — physical simulations, orbit-camera explorables, 3D model viewers | `<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>` |
+| **Vega-Lite** | Declarative grammar of graphics — feed it a JSON spec, it draws the chart | `<script src="https://cdn.jsdelivr.net/npm/vega@5"></script><script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script><script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>` |
+| **Mermaid** | Text-to-diagram (flowcharts, ER, Gantt, sequence). Note: Open WebUI already renders ``` ```mermaid ``` code fences natively in chat — use the library here only when you need Mermaid *inside* a visualization iframe | `<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.0/mermaid.min.js"></script>` |
+
+Any other library on those three CDNs also works — React, vis-network, d3-force, echarts, apexcharts, plotly, tone.js, wavesurfer, etc. The host auto-detects completion and executes your `<script>` block once the fence stabilizes.
+
+---
+
 ## Quick reference
 
 | Rule | Value |
