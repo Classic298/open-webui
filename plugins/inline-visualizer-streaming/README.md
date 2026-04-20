@@ -381,7 +381,7 @@ Open WebUI doesn't hot-reload tool source from disk. You have to paste the new c
 
 Additionally, existing chats keep their old iframe baked into `message.embeds[]` — only newly-triggered tool calls pick up the update.
 
-On **multi-worker deployments** (`UVICORN_WORKERS > 1`), each worker process has its own in-memory tool module cache. A save updates the worker that handled the save request; every other worker keeps its old compiled module until the backend restarts. If you're on a multi-worker setup and you see stale behavior even from fresh chats, restart the backend — or use the separate [`claude/cross-worker-plugin-cache`](https://github.com/Classic298/open-webui/tree/claude/cross-worker-plugin-cache) branch which adds Redis pub/sub invalidation across workers.
+On **multi-worker deployments** (`UVICORN_WORKERS > 1`), each worker process has its own in-memory tool module cache. A save updates the worker that handled the save request; every other worker keeps its old compiled module until the backend restarts. If you're on a multi-worker setup and you see stale behavior even from fresh chats, restart the backend.
 </details>
 
 ---
