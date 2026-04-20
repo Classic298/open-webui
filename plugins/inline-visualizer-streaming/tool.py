@@ -1,19 +1,16 @@
 """
 title: Inline Visualizer (Streaming)
 author: Classic298
-version: 2.0.1
-description: Renders interactive HTML/SVG visualizations inline in chat. Supports a STREAMING mode — the tool emits an empty wrapper, then parasitically tails the model's streaming text for an @@@VIZ-START … @@@VIZ-END plain-text block and renders it live token-by-token. Requires "iframe Sandbox Allow Same Origin" to be enabled in Open WebUI Settings → Interface. For design instructions, the model should call view_skill("visualize").
+version: 2.0.0
+description: Renders interactive HTML/SVG visualizations inline in chat. Requires "iframe Sandbox Allow Same Origin" to be enabled in Open WebUI Settings -> Interface. For design instructions, the model should call view_skill("visualize").
 """
 
 import re
 from typing import Literal
 
 # Build marker embedded into the rendered iframe so the running
-# version can be verified at runtime (search DevTools for
-# `data-iv-build` on <html>, or the `iv[version]` console log).
-# Bump on every protocol-level change so stale cached iframes can
-# be spotted immediately.
-_IV_BUILD = "2.0.2+dbl-escape-fix"
+# version can be verified at runtime
+_IV_BUILD = "2.0.0"
 
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
@@ -2129,10 +2126,9 @@ class Tools:
         Do not use it when it would fit the response to visualize something but only when
         there is CLEAR INTENT by the user to want something visualized in the chat.
 
-        Call this tool with ``title`` only. The tool mounts an empty visualization
-        wrapper in the chat. Then, in your text response that follows, wrap the
-        HTML/SVG in the TEXT DELIMITERS @@@VIZ-START / @@@VIZ-END (NOT a ``` code
-        fence, NOT HTML tags, NOT a ::: fence — plain text markers on their own lines):
+        The tool mounts an empty visualization wrapper in the chat.
+        Then, in your text response that follows, wrap the HTML/SVG in the TEXT DELIMITERS
+        @@@VIZ-START / @@@VIZ-END:
 
             @@@VIZ-START
             <svg viewBox="0 0 680 240">...</svg>
