@@ -1208,7 +1208,12 @@ STREAMING_OBSERVER_SCRIPT = """
   var END_MARK = '@@@VIZ-END';
   // Regex finds one block. Non-greedy, handles unclosed (streaming) by
   // falling through to end-of-input. Match [1] is the inner SVG source.
-  var BLOCK_RE = /@@@VIZ-START\\n?([\\s\\S]*?)(?:\\n?@@@VIZ-END|$)/g;
+  // `+?` (not `*?`) forces at least 1 char of body — otherwise, the
+  // instant the model emits just `@@@VIZ-START` (no content yet), the
+  // `$` alternation matches an empty capture, readSource returns "",
+  // the 800 ms idle timer fires, finalize("") runs, and the reconciler
+  // wipes the render area → thin-strip regression.
+  var BLOCK_RE = /@@@VIZ-START\\n?([\\s\\S]+?)(?:\\n?@@@VIZ-END|$)/g;
 
   var renderArea = document.getElementById('iv-render');
   if (!renderArea) return;
