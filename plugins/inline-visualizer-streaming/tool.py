@@ -553,38 +553,45 @@ function toast(msg, kind) {
 }
 
 // --- copyText bridge ---
-// Copies `text` via the async Clipboard API, falling back to the legacy
-// execCommand path for non-secure contexts / older browsers. Always
-// confirms success via toast(). If the caller passes `silent=true`, the
-// confirmation toast is suppressed (rare; mainly for chained calls).
+// Copies `text` via the async Clipboard API and falls back to the
+// legacy execCommand path when the iframe's sandbox blocks the async
+// API (Open WebUI's iframe does NOT ship allow-clipboard-write).
+//
+// The toast fires UNCONDITIONALLY on every attempt — execCommand can
+// return false / throw in some browsers without any observable effect,
+// and swallowing the feedback would leave the user wondering whether
+// their click did anything. If the caller passes silent=true, the
+// toast is suppressed.
 function copyText(text, silent) {
   var s = String(text == null ? '' : text);
-  function done() {
-    if (silent) return;
-    var label = (typeof _ivCopiedStr !== 'undefined' &&
-                 (_ivCopiedStr[_ivLang] || _ivCopiedStr.en)) || 'Copied';
-    toast(label, 'success');
-  }
-  function fallback() {
+  var label = (typeof _ivCopiedStr !== 'undefined' &&
+               (_ivCopiedStr[_ivLang] || _ivCopiedStr.en)) || 'Copied';
+  function fire() { if (!silent) try { toast(label, 'success'); } catch(e) {} }
+
+  function legacy() {
     try {
       var ta = document.createElement('textarea');
       ta.value = s;
       ta.setAttribute('readonly', '');
-      ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0';
+      ta.style.cssText =
+        'position:fixed;left:-9999px;top:-9999px;opacity:0;';
       document.body.appendChild(ta);
+      ta.focus();
       ta.select();
-      document.execCommand('copy');
+      try { ta.setSelectionRange(0, s.length); } catch(e) {}
+      try { document.execCommand('copy'); } catch(e) {}
       ta.remove();
-      done();
     } catch(e) {}
+    fire();
   }
+
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(s).then(done).catch(fallback);
-    } else {
-      fallback();
+      navigator.clipboard.writeText(s).then(fire, legacy);
+      return;
     }
-  } catch(e) { fallback(); }
+  } catch(e) {}
+  legacy();
 }
 
 // --- saveState / loadState bridges ---
@@ -1874,18 +1881,12 @@ STREAMING_OBSERVER_SCRIPT = """
   // pointless).
   var lastMsgText = null;
   var wasStreaming = false;
+  var firstSeenLen = null;  // searchable-text length on first tick
 
   function tick(forceHide) {
     if (finalized) return;
     var msg = findMyMessage();
     if (!msg) return;
-
-    // Capture streaming state for the "done" toast. .shimmer is present
-    // on the assistant message while tokens are still arriving; seeing
-    // it at ANY point proves we're not just rehydrating a stored message.
-    if (!wasStreaming) {
-      try { if (msg.querySelector('.shimmer')) wasStreaming = true; } catch(e) {}
-    }
 
     // Cache & compare against SEARCHABLE text (skips <details> subtrees,
     // which carry our own tool-result example markers). Full textContent
@@ -1894,6 +1895,19 @@ STREAMING_OBSERVER_SCRIPT = """
     var currentText = getSearchableText(msg);
     var textChanged = currentText !== lastMsgText;
     lastMsgText = currentText;
+
+    // Detect live streaming by GROWTH, not by .shimmer. The shimmer
+    // class lives on status pills (StatusItem / HTMLToken) which vanish
+    // as soon as the tool call returns — long before text streaming
+    // ends, so it's unreliable for "is the model still writing?".
+    // Instead: record the searchable text length the first time we see
+    // the message, then flip wasStreaming as soon as anything longer
+    // shows up. Refreshes of completed messages never grow past the
+    // initial length and stay silent — which is what we want.
+    if (firstSeenLen === null) firstSeenLen = currentText.length;
+    else if (!wasStreaming && currentText.length > firstSeenLen) {
+      wasStreaming = true;
+    }
 
     // Hide work runs when text grew OR when a DOM structural mutation
     // might have destroyed our hidden attributes.
