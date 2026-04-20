@@ -483,8 +483,6 @@ Recommended libraries for visualization work:
 
 Any other library on those three CDNs also works — vis-network, d3-force, echarts, apexcharts, plotly, tone.js, wavesurfer, etc. The host auto-detects completion and executes your `<script>` block once the fence stabilizes.
 
-**Do NOT use Three.js or Mermaid here.** Three.js / WebGL has reliability issues in this iframe (sizing races, empty black canvases) that aren't worth fighting. Mermaid's JS render pipeline is brittle in v10 and often produces raw-text output. For diagrams, use an SVG flowchart (see "Diagram types"); for text-to-diagram needs outside a visualization, remember Open WebUI renders ``` ```mermaid ``` code fences natively in chat.
-
 ---
 
 ## Library init — avoid silent failures
@@ -548,4 +546,3 @@ You do NOT need `DOMContentLoaded` or `window.onload` wrappers — by the time y
 8. **Missing arrow marker in defs** — always include it
 9. **Hardcoded colors** — always use CSS variables or ramp classes
 10. **Chart.js canvas collapsed to 0 height** — wrap every canvas in `<div style="position: relative; height: Xpx;">` and set `maintainAspectRatio: false`
-11. **Reaching for Three.js / Mermaid** — don't. Three.js has canvas-sizing reliability issues here, and Mermaid's JS render pipeline is brittle. Use SVG flowcharts for diagrams; use Chart.js / D3 / Vega-Lite for data viz
