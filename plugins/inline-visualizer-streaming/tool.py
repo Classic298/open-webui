@@ -1951,7 +1951,15 @@ _KNOWN_CDNS = (
 
 
 def _build_csp_tag(level: str) -> str:
-    """Return a <meta> CSP tag for the given security level, or empty string."""
+    """Return a <meta> CSP tag for the given security level, or empty string.
+
+    'unsafe-eval' is included because runtime expression compilers like
+    Vega / Vega-Lite use new Function() internally and fail under
+    strict CSP. 'unsafe-inline' is already present (inline scripts can
+    execute arbitrary code), so adding 'unsafe-eval' does not
+    meaningfully widen the attack surface — the real exfil blockers
+    (connect-src, form-action, img-src, object-src) remain intact.
+    """
     if level == "none":
         return ""
 
@@ -1959,7 +1967,7 @@ def _build_csp_tag(level: str) -> str:
         return (
             '<meta http-equiv="Content-Security-Policy" content="'
             f"default-src 'self'; "
-            f"script-src 'unsafe-inline' {_KNOWN_CDNS}; "
+            f"script-src 'unsafe-inline' 'unsafe-eval' {_KNOWN_CDNS}; "
             "style-src 'self' 'unsafe-inline'; "
             "connect-src 'none'; "
             "form-action 'none'; "
@@ -1968,14 +1976,14 @@ def _build_csp_tag(level: str) -> str:
             "media-src 'self'; "
             "object-src 'none'; "
             "base-uri 'self'; "
-            '">' 
+            '">'
         )
 
     # balanced: block outbound connections & forms, allow external images
     return (
         '<meta http-equiv="Content-Security-Policy" content="'
         f"default-src 'self'; "
-        f"script-src 'unsafe-inline' {_KNOWN_CDNS}; "
+        f"script-src 'unsafe-inline' 'unsafe-eval' {_KNOWN_CDNS}; "
         "style-src 'self' 'unsafe-inline'; "
         "connect-src 'none'; "
         "form-action 'none'; "
@@ -1984,7 +1992,7 @@ def _build_csp_tag(level: str) -> str:
         "media-src 'self'; "
         "object-src 'none'; "
         "base-uri 'self'; "
-        '">' 
+        '">'
     )
 
 

@@ -292,9 +292,12 @@ Every visualization renders in a sandboxed iframe with a configurable Content Se
 
 ### What works in Strict mode
 
-Chart.js, D3.js, Vega-Lite, and any other pure-client-side library load and render normally — the three major CDN hosts (cdnjs, jsdelivr, unpkg) are on the `script-src` allowlist. Visualizations with **inline data** (data arrays hardcoded in the SVG/HTML source) work without limits. The SKILL tells the model to inline data by default, so this covers 99% of prompts.
+Chart.js, D3.js, Vega-Lite, and any other pure-client-side library load and render normally — the three major CDN hosts (cdnjs, jsdelivr, unpkg) are on the `script-src` allowlist, and `'unsafe-eval'` is granted so runtime expression compilers (Vega's `new Function(...)`, some templating libs) work. Visualizations with **inline data** (data arrays hardcoded in the SVG/HTML source) work without limits. The SKILL tells the model to inline data by default, so this covers 99% of prompts.
 
 **What Strict blocks:** runtime `fetch()` calls, `d3.csv('https://…')`, Vega-Lite specs with `data: { url: '…' }`, external images, form submits. If you want a live-updating weather widget or a chart that pulls a CSV at render time, switch to **None**.
+
+> [!NOTE]
+> Strict allows `'unsafe-inline'` and `'unsafe-eval'` for scripts because LLM-generated visualizations ship their own inline code and some libraries compile expressions at runtime. Those relaxations don't create exfil channels — the real outbound blockers (`connect-src 'none'`, `form-action 'none'`, `img-src` restricted, `object-src 'none'`) stay in place regardless. If you need a truly locked-down iframe, disable JavaScript entirely at the Open WebUI level; the tool can't render anything useful without `'unsafe-inline'` scripts.
 
 ### Why `script-src` allows a CDN but `connect-src` doesn't
 
