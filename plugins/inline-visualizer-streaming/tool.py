@@ -598,6 +598,160 @@ var _ivStr = {
   // African
   sw: 'Pakua kama HTML'
 };
+
+// Loader label (shown while waiting for the first content chunk).
+var _ivLoadStr = {
+  en: 'Rendering visualization\u2026',
+  de: 'Visualisierung wird erstellt\u2026',
+  cs: 'Vykresluje se vizualizace\u2026',
+  hu: 'Vizualizáció renderelése\u2026',
+  hr: 'Iscrtavanje vizualizacije\u2026',
+  pl: 'Renderowanie wizualizacji\u2026',
+  fr: 'Rendu de la visualisation\u2026',
+  nl: 'Visualisatie renderen\u2026',
+  es: 'Renderizando visualización\u2026',
+  pt: 'Renderizando visualização\u2026',
+  it: 'Rendering della visualizzazione\u2026',
+  ca: 'Renderitzant visualització\u2026',
+  gl: 'Renderizando visualización\u2026',
+  eu: 'Bistaratzea errendatzen\u2026',
+  da: 'Gengiver visualisering\u2026',
+  sv: 'Renderar visualisering\u2026',
+  no: 'Gjengir visualisering\u2026',
+  fi: 'Renderöidään visualisointia\u2026',
+  is: 'Teiknar sjónræna framsetningu\u2026',
+  sk: 'Vykresľuje sa vizualizácia\u2026',
+  sl: 'Upodabljanje vizualizacije\u2026',
+  sr: 'Исцртавање визуализације\u2026',
+  bs: 'Iscrtavanje vizualizacije\u2026',
+  bg: 'Изчертаване на визуализацията\u2026',
+  mk: 'Исцртување на визуализацијата\u2026',
+  uk: 'Відображення візуалізації\u2026',
+  ru: 'Отрисовка визуализации\u2026',
+  be: 'Адмалёўка візуалізацыі\u2026',
+  lt: 'Atvaizduojama vizualizacija\u2026',
+  lv: 'Vizualizācijas renderēšana\u2026',
+  et: 'Visualiseeringu renderdamine\u2026',
+  ro: 'Randare vizualizare\u2026',
+  el: 'Απόδοση οπτικοποίησης\u2026',
+  sq: 'Duke renderuar vizualizimin\u2026',
+  tr: 'Görselleştirme oluşturuluyor\u2026',
+  ar: 'جارٍ عرض التصور\u2026',
+  he: 'מציג הדמיה\u2026',
+  zh: '正在渲染可视化\u2026',
+  ja: 'ビジュアライゼーションを描画中\u2026',
+  ko: '시각화 렌더링 중\u2026',
+  vi: 'Đang kết xuất hình ảnh\u2026',
+  th: 'กำลังแสดงผลการแสดงภาพ\u2026',
+  id: 'Merender visualisasi\u2026',
+  ms: 'Memaparkan visualisasi\u2026',
+  hi: 'विज़ुअलाइज़ेशन रेंडर हो रहा है\u2026',
+  bn: 'ভিজ্যুয়ালাইজেশন রেন্ডার হচ্ছে\u2026',
+  sw: 'Inarendi taswira\u2026'
+};
+
+// "Streaming visualization unavailable" title + body, shown only when
+// the iframe cannot reach parent.document (Allow Same Origin disabled).
+var _ivErrTitleStr = {
+  en: 'Streaming visualization unavailable',
+  de: 'Streaming-Visualisierung nicht verfügbar',
+  cs: 'Streamovaná vizualizace není dostupná',
+  hu: 'A streamelt vizualizáció nem érhető el',
+  hr: 'Streaming vizualizacija nije dostupna',
+  pl: 'Strumieniowa wizualizacja niedostępna',
+  fr: 'Visualisation en streaming indisponible',
+  nl: 'Streaming visualisatie niet beschikbaar',
+  es: 'Visualización en streaming no disponible',
+  pt: 'Visualização em streaming indisponível',
+  it: 'Visualizzazione in streaming non disponibile',
+  ca: 'Visualització en streaming no disponible',
+  gl: 'Visualización en streaming non dispoñíbel',
+  eu: 'Streaming bistaratzea ez dago erabilgarri',
+  da: 'Streaming-visualisering utilgængelig',
+  sv: 'Strömmande visualisering otillgänglig',
+  no: 'Streaming-visualisering utilgjengelig',
+  fi: 'Suoratoistettu visualisointi ei käytettävissä',
+  is: 'Streymandi sjónræn framsetning ekki tiltæk',
+  sk: 'Streamovaná vizualizácia nie je dostupná',
+  sl: 'Pretočna vizualizacija ni na voljo',
+  sr: 'Стриминг визуализација није доступна',
+  bs: 'Streaming vizualizacija nije dostupna',
+  bg: 'Поточната визуализация е недостъпна',
+  mk: 'Стриминг визуализација недостапна',
+  uk: 'Потокова візуалізація недоступна',
+  ru: 'Потоковая визуализация недоступна',
+  be: 'Струменевая візуалізацыя недаступная',
+  lt: 'Srautinė vizualizacija nepasiekiama',
+  lv: 'Straumētā vizualizācija nav pieejama',
+  et: 'Voogedastuse visualiseering pole saadaval',
+  ro: 'Vizualizarea în streaming indisponibilă',
+  el: 'Η ροή οπτικοποίησης δεν είναι διαθέσιμη',
+  sq: 'Vizualizimi i transmetimit i padisponueshëm',
+  tr: 'Akış görselleştirmesi kullanılamıyor',
+  ar: 'التصور المتدفق غير متاح',
+  he: 'הדמיה בסטרימינג אינה זמינה',
+  zh: '流式可视化不可用',
+  ja: 'ストリーミングビジュアライゼーションは利用できません',
+  ko: '스트리밍 시각화를 사용할 수 없습니다',
+  vi: 'Hình ảnh trực quan phát trực tuyến không khả dụng',
+  th: 'การแสดงผลแบบสตรีมไม่พร้อมใช้งาน',
+  id: 'Visualisasi streaming tidak tersedia',
+  ms: 'Visualisasi strim tidak tersedia',
+  hi: 'स्ट्रीमिंग विज़ुअलाइज़ेशन अनुपलब्ध',
+  bn: 'স্ট্রিমিং ভিজ্যুয়ালাইজেশন অনুপলব্ধ',
+  sw: 'Taswira ya utiririshaji haipatikani'
+};
+
+var _ivErrBodyStr = {
+  en: 'Open User Settings \u2192 Interface, scroll down, and enable "Allow iframe same origin" to use streaming mode.',
+  de: 'Öffne Benutzereinstellungen \u2192 Oberfläche, scrolle nach unten und aktiviere „Allow iframe same origin" für den Streaming-Modus.',
+  cs: 'Otevřete Uživatelská nastavení \u2192 Rozhraní, sjeďte dolů a zapněte „Allow iframe same origin" pro režim streamování.',
+  hu: 'Nyissa meg a Felhasználói beállítások \u2192 Felület menüt, görgessen le, és kapcsolja be az „Allow iframe same origin" opciót a streamelési módhoz.',
+  hr: 'Otvorite Korisničke postavke \u2192 Sučelje, pomaknite se prema dolje i uključite „Allow iframe same origin" za streaming način.',
+  pl: 'Otwórz Ustawienia użytkownika \u2192 Interfejs, przewiń w dół i włącz „Allow iframe same origin" dla trybu strumieniowego.',
+  fr: 'Ouvrez Paramètres utilisateur \u2192 Interface, faites défiler vers le bas et activez « Allow iframe same origin » pour le mode streaming.',
+  nl: 'Open Gebruikersinstellingen \u2192 Interface, scrol omlaag en schakel "Allow iframe same origin" in voor streamingmodus.',
+  es: 'Abre Configuración de usuario \u2192 Interfaz, desplázate hacia abajo y activa "Allow iframe same origin" para el modo streaming.',
+  pt: 'Abra Configurações do usuário \u2192 Interface, role para baixo e ative "Allow iframe same origin" para o modo streaming.',
+  it: 'Apri Impostazioni utente \u2192 Interfaccia, scorri in basso e attiva "Allow iframe same origin" per la modalità streaming.',
+  ca: 'Obre Configuració d\u2019usuari \u2192 Interfície, desplaça\u2019t avall i activa "Allow iframe same origin" per al mode streaming.',
+  gl: 'Abre Configuración de usuario \u2192 Interface, desprázate cara abaixo e activa "Allow iframe same origin" para o modo streaming.',
+  eu: 'Ireki Erabiltzaile-ezarpenak \u2192 Interfazea, egin behera eta gaitu "Allow iframe same origin" streaming modua erabiltzeko.',
+  da: 'Åbn Brugerindstillinger \u2192 Grænseflade, rul ned, og aktivér "Allow iframe same origin" for streamingtilstand.',
+  sv: 'Öppna Användarinställningar \u2192 Gränssnitt, rulla ner och aktivera "Allow iframe same origin" för strömningsläge.',
+  no: 'Åpne Brukerinnstillinger \u2192 Grensesnitt, rull ned og aktiver "Allow iframe same origin" for streamingmodus.',
+  fi: 'Avaa Käyttäjäasetukset \u2192 Käyttöliittymä, vieritä alas ja ota "Allow iframe same origin" käyttöön suoratoistotilaa varten.',
+  is: 'Opnaðu Notandastillingar \u2192 Viðmót, skrunaðu niður og kveiktu á "Allow iframe same origin" fyrir streymisstillingu.',
+  sk: 'Otvorte Používateľské nastavenia \u2192 Rozhranie, posuňte sa nadol a zapnite „Allow iframe same origin" pre režim streamovania.',
+  sl: 'Odprite Uporabniške nastavitve \u2192 Vmesnik, pomaknite se navzdol in omogočite "Allow iframe same origin" za pretočni način.',
+  sr: 'Отворите Корисничка подешавања \u2192 Интерфејс, померите надоле и омогућите „Allow iframe same origin" за стриминг режим.',
+  bs: 'Otvorite Korisničke postavke \u2192 Sučelje, skrolajte prema dolje i uključite "Allow iframe same origin" za streaming mod.',
+  bg: 'Отворете Потребителски настройки \u2192 Интерфейс, превъртете надолу и активирайте „Allow iframe same origin" за поточен режим.',
+  mk: 'Отворете Кориснички поставки \u2192 Интерфејс, листајте надолу и овозможете „Allow iframe same origin" за стриминг режим.',
+  uk: 'Відкрийте Налаштування користувача \u2192 Інтерфейс, прокрутіть униз і ввімкніть «Allow iframe same origin» для потокового режиму.',
+  ru: 'Откройте Настройки пользователя \u2192 Интерфейс, прокрутите вниз и включите «Allow iframe same origin» для режима потоковой передачи.',
+  be: 'Адкрыйце Налады карыстальніка \u2192 Інтэрфейс, прагартайце ўніз і ўключыце «Allow iframe same origin» для струменевага рэжыму.',
+  lt: 'Atidarykite Naudotojo nustatymai \u2192 Sąsaja, slinkite žemyn ir įjunkite „Allow iframe same origin" srautiniam režimui.',
+  lv: 'Atveriet Lietotāja iestatījumi \u2192 Saskarne, ritiniet lejup un iespējojiet "Allow iframe same origin" straumēšanas režīmam.',
+  et: 'Ava Kasutaja seaded \u2192 Liides, keri alla ja luba „Allow iframe same origin" voogedastusrežiimi jaoks.',
+  ro: 'Deschide Setări utilizator \u2192 Interfață, derulează în jos și activează "Allow iframe same origin" pentru modul streaming.',
+  el: 'Ανοίξτε Ρυθμίσεις χρήστη \u2192 Διεπαφή, κυλήστε προς τα κάτω και ενεργοποιήστε το «Allow iframe same origin» για λειτουργία ροής.',
+  sq: 'Hapni Cilësimet e përdoruesit \u2192 Ndërfaqja, rrëshqitni poshtë dhe aktivizoni "Allow iframe same origin" për modalitetin e transmetimit.',
+  tr: 'Kullanıcı Ayarları \u2192 Arayüz\u2019ü açın, aşağı kaydırın ve akış modu için "Allow iframe same origin" seçeneğini etkinleştirin.',
+  ar: 'افتح إعدادات المستخدم \u2190 الواجهة، مرر لأسفل وفعّل "Allow iframe same origin" لاستخدام وضع التدفق.',
+  he: 'פתח הגדרות משתמש \u2190 ממשק, גלול מטה והפעל את "Allow iframe same origin" למצב סטרימינג.',
+  zh: '打开 用户设置 \u2192 界面，向下滚动并启用"Allow iframe same origin"以使用流式模式。',
+  ja: 'ユーザー設定 \u2192 インターフェースを開き、下にスクロールして「Allow iframe same origin」を有効にするとストリーミングモードを使用できます。',
+  ko: '사용자 설정 \u2192 인터페이스를 열고 아래로 스크롤하여 "Allow iframe same origin"을 활성화하면 스트리밍 모드를 사용할 수 있습니다.',
+  vi: 'Mở Cài đặt người dùng \u2192 Giao diện, cuộn xuống và bật "Allow iframe same origin" để sử dụng chế độ phát trực tiếp.',
+  th: 'เปิดการตั้งค่าผู้ใช้ \u2192 อินเทอร์เฟซ เลื่อนลงและเปิดใช้งาน "Allow iframe same origin" เพื่อใช้โหมดสตรีม',
+  id: 'Buka Pengaturan Pengguna \u2192 Antarmuka, gulir ke bawah dan aktifkan "Allow iframe same origin" untuk mode streaming.',
+  ms: 'Buka Tetapan Pengguna \u2192 Antara Muka, tatal ke bawah dan dayakan "Allow iframe same origin" untuk mod strim.',
+  hi: 'उपयोगकर्ता सेटिंग्स \u2192 इंटरफ़ेस खोलें, नीचे स्क्रॉल करें और स्ट्रीमिंग मोड के लिए "Allow iframe same origin" सक्षम करें।',
+  bn: 'ব্যবহারকারী সেটিংস \u2192 ইন্টারফেস খুলুন, নিচে স্ক্রোল করুন এবং স্ট্রিমিং মোডের জন্য "Allow iframe same origin" সক্ষম করুন।',
+  sw: 'Fungua Mipangilio ya Mtumiaji \u2192 Kiolesura, sogeza chini na washa "Allow iframe same origin" kwa hali ya utiririshaji.'
+};
+
 (function() {
   function detectLang() {
     // 1. Pre-detected via __event_call__ (baked into HTML by the tool)
@@ -620,6 +774,9 @@ var _ivStr = {
   _ivLang = detectLang();
   var btn = document.getElementById('iv-dl-btn');
   if (btn) btn.title = _ivStr[_ivLang] || _ivStr.en;
+  // Swap the server-baked English loader label for the detected locale.
+  var loadLabel = document.querySelector('.iv-loading-label');
+  if (loadLabel) loadLabel.textContent = _ivLoadStr[_ivLang] || _ivLoadStr.en;
 })();
 
 // ---------------------------------------------------------------------------
@@ -841,14 +998,26 @@ STREAMING_OBSERVER_SCRIPT = """
   var hasParentAccess = false;
   try { void parent.document.body; hasParentAccess = true; } catch(e) {}
   if (!hasParentAccess) {
+    // _ivLang / _ivErrTitleStr / _ivErrBodyStr come from BODY_SCRIPTS
+    // which runs before this observer script.
+    var _lang = (typeof _ivLang !== 'undefined' && _ivLang) || 'en';
+    var _t = (typeof _ivErrTitleStr !== 'undefined' &&
+              (_ivErrTitleStr[_lang] || _ivErrTitleStr.en)) ||
+             'Streaming visualization unavailable';
+    var _b = (typeof _ivErrBodyStr !== 'undefined' &&
+              (_ivErrBodyStr[_lang] || _ivErrBodyStr.en)) ||
+             'Open User Settings \u2192 Interface, scroll down, and enable ' +
+             '"Allow iframe same origin" to use streaming mode.';
+    function _esc(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
     renderArea.innerHTML =
       '<div style="padding:16px 18px;border:0.5px solid var(--color-border-tertiary);' +
       'border-radius:var(--radius-md);background:var(--color-bg-secondary);' +
       'color:var(--color-text-primary);font-size:13px;line-height:1.5;">' +
-      '<div style="font-weight:500;margin-bottom:6px;">Streaming visualization unavailable</div>' +
-      '<div style="color:var(--color-text-secondary);">' +
-      'Enable <b>iframe Sandbox Allow Same Origin</b> in Open WebUI ' +
-      'Settings → Interface to use streaming mode.</div></div>';
+      '<div style="font-weight:500;margin-bottom:6px;">' + _esc(_t) + '</div>' +
+      '<div style="color:var(--color-text-secondary);">' + _esc(_b) + '</div></div>';
     return;
   }
 
