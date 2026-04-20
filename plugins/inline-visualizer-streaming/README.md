@@ -308,7 +308,20 @@ Every visualization renders in a sandboxed iframe with a configurable Content Se
 <details>
 <summary><b>The iframe is a thin empty strip</b></summary>
 
-Usually means a previous version's premature finalize (fixed in current builds) OR the model emitted an empty `@@@VIZ-START … @@@VIZ-END` block. Try regenerating.
+Usually means the model emitted an empty `@@@VIZ-START … @@@VIZ-END` block, or stopped mid-stream without closing the block and hit the idle-finalize fallback. Try regenerating. See the next entry for how the idle fallback works.
+</details>
+
+<details>
+<summary><b>How does the plugin know when to stop streaming?</b></summary>
+
+Two triggers:
+
+1. **`@@@VIZ-END` marker arrives** — fires `finalize()` instantly. Scripts run, loader is replaced with the rendered viz, done toast + chime fire. This is the 99%+ case.
+2. **Idle fallback — 30 seconds of completely stable source text.** Catches three edge cases: the user stopped generation mid-viz, the model forgot to close the block, or the network died.
+
+The 30s window is deliberately much longer than any realistic inter-chunk stall. Gemini 3.1 Pro's 200-token chunks with 3-6s gaps, proxy buffering under poor network (10-20s silent pauses), and occasional Claude stalls all comfortably fit inside it. An earlier 5s fallback produced a thin-strip regression in ~40% of long streams; **30s is the sweet spot** between surviving real stalls and still recovering from a user-stop within half a minute.
+
+**If a browser tab's network completely dies for more than 30s**, the fallback will finalize on whatever partial content arrived before the outage. At that point the stream is already gone, so a frozen loader-forever would be worse. Refresh the chat and the saved markdown (which has both markers) finalizes instantly on first tick.
 </details>
 
 <details>
@@ -359,6 +372,15 @@ Run once in the browser console: `localStorage.setItem('iv-sound-off', '1')`. So
 ```
 
 The observer inside the iframe uses `parent.document` (via `allow-same-origin`) to `getSearchableText(msg)` — a TreeWalker that excludes `<details type="tool_calls">` — runs a regex for the N-th `@@@VIZ-START…@@@VIZ-END` block (N = iframe's embed index), safe-cuts the partial HTML, parses into a detached tree, and reconciles into `#iv-render`. On `@@@VIZ-END` it finalizes: injects scripts (in insertion order via `async=false`), fires the done toast + chime, hides the loader.
+
+### Finalize triggers
+
+| Trigger | Delay | When it fires |
+|---|---|---|
+| `@@@VIZ-END` in source | instant | Model closed the block cleanly (the 99%+ case) |
+| 30s of source stability | 30s | User stopped generation, model forgot END, or network died |
+
+The idle fallback is deliberately much longer than any realistic inter-chunk stall — Gemini 3.1 Pro's 200-token chunks with 3-6s gaps, proxy buffering under poor network (10-20s silent pauses), and occasional stalls on other models all fit comfortably inside. If a stream genuinely dies for 30s+, the visualization is already gone — finalizing on the partial content beats a loader frozen forever, and refreshing the chat re-finalizes instantly from the saved markdown (which has both markers).
 
 ---
 
