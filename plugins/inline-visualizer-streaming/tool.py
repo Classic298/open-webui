@@ -1946,17 +1946,27 @@ STREAMING_OBSERVER_SCRIPT = """
   }
 
   function scheduleFinalize(raw) {
-    // Finalize when any of:
-    //   (a) the block's END_MARK has arrived (definitive), OR
-    //   (b) the enclosing message is no longer streaming, OR
-    //   (c) the source hasn't changed for a full 800ms.
+    // Finalize ONLY when we have a definitive "done" signal:
+    //   (a) the block's END_MARK has arrived, OR
+    //   (b) Open WebUI removed .shimmer from the assistant message.
+    //
+    // A previous version also finalized when the source string was
+    // stable for 800 ms ("latest === raw"). That produced false
+    // positives during mid-stream network hiccups / token pauses:
+    // finalize would fire on a partial SVG, the reconciler would
+    // overwrite the live tree with the partial string, the loader
+    // would die, and every card painted after that chunk vanished.
+    //
+    // The poll still re-runs this every ~400 ms, so missing the END
+    // marker from the model doesn't strand the loader — eventually
+    // the shimmer clears when the stream closes and we finalize then.
     clearTimeout(finalizeTimer);
     if (isBlockClosed()) { finalize(raw); return; }
     finalizeTimer = setTimeout(function() {
       if (finalized) return;
       var latest = readSource();
       if (latest === null) return;
-      if (isBlockClosed() || isMessageDone() || latest === raw) {
+      if (isBlockClosed() || isMessageDone()) {
         finalize(latest);
       }
     }, 800);
