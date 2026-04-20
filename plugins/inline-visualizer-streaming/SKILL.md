@@ -487,6 +487,96 @@ Any other library on those three CDNs also works — React, vis-network, d3-forc
 
 ---
 
+## Library init — avoid silent failures
+
+Inline scripts run the instant the iframe reconciler inserts them, which is usually BEFORE the browser has finished laying out the elements you just added. Three cases bite:
+
+### 1 · Three.js / WebGL — size the canvas before creating the renderer
+
+`canvas.clientWidth` can still be `0` when the script first runs. A renderer sized `0 × H` produces a visibly empty black box. Always re-measure *after* layout, and handle resize:
+
+```html
+<canvas id="scene" style="width:100%; height:380px; display:block;"></canvas>
+<script>
+  const canvas = document.getElementById('scene');
+  function measure() {
+    return { w: canvas.clientWidth || canvas.parentElement.clientWidth, h: 380 };
+  }
+  // Run after layout so clientWidth is populated.
+  requestAnimationFrame(() => {
+    const { w, h } = measure();
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(w, h, false);
+    const camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 100);
+    // … scene setup …
+    window.addEventListener('resize', () => {
+      const { w, h } = measure();
+      renderer.setSize(w, h, false);
+      camera.aspect = w / h; camera.updateProjectionMatrix();
+    });
+  });
+</script>
+```
+
+Also: set the camera back far enough to see the whole scene. A good default for a scene with content around `±2` units: `camera.position.set(6, 4, 8)` and `camera.lookAt(0, 0, 0)`. If the viewer reports "it's just a dark rectangle", you're probably inside the geometry or looking edge-on at flat planes — rotate the camera up or tilt the planes.
+
+### 2 · Mermaid — use the `run()` → `render()` promise form, not `mermaid.run({ nodes })`
+
+The `nodes:` option exists but is brittle in v10: it silently no-ops when a node is already `data-processed`, and its error reporting lands in `console.error` only. More reliable pattern:
+
+```html
+<div id="mmd-out"></div>
+<script>
+  mermaid.initialize({ startOnLoad: false, theme: 'base' });
+  const graph = `flowchart LR
+    A[Data] --> B[Tokenize] --> C[Forward] --> D[Loss]
+    D --> E[Backprop] --> F[AdamW]
+    F --> A`;
+  mermaid.render('mmd-svg', graph)
+    .then(({ svg }) => { document.getElementById('mmd-out').innerHTML = svg; })
+    .catch(err => {
+      document.getElementById('mmd-out').textContent = 'Mermaid error: ' + err.message;
+    });
+</script>
+```
+
+Mermaid gotchas to avoid:
+- Multi-line node labels use `<br/>`, and you MUST pass `flowchart: { htmlLabels: true }` to `initialize` for them to render — otherwise the parser fails with no visible output
+- `classDef`/`class` definitions must NOT use `color:` + hex together with commas that could look like a list; stick to `fill:#…,stroke:#…` and put `color:#…` on its own line if it misbehaves
+- Don't indent the graph source inside the template literal with leading spaces on every line — mermaid is whitespace-sensitive in v10
+
+### 3 · Chart.js — wrap the canvas in a fixed-height container
+
+Chart.js inherits width from the container and uses `maintainAspectRatio: false` to respect your height. If the canvas is loose inside a flex container with no intrinsic height, the canvas collapses to zero and nothing draws:
+
+```html
+<div style="position: relative; height: 260px;">
+  <canvas id="chart"></canvas>
+</div>
+<script>
+  new Chart(document.getElementById('chart').getContext('2d'), {
+    type: 'bar',
+    data: { /* … */ },
+    options: { responsive: true, maintainAspectRatio: false, /* … */ }
+  });
+</script>
+```
+
+### 4 · Script order
+
+External `<script src="…">` tags and the inline `<script>` that uses them run in **insertion order** (the host forces `async=false` on every dynamically-inserted script). Put external libraries first, your consumer script last:
+
+```html
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
+<script>/* uses THREE and Chart */</script>
+```
+
+You do NOT need `DOMContentLoaded` or `window.onload` wrappers — by the time your script runs, the entire fragment (except any later-positioned siblings) is already in the DOM.
+
+---
+
 ## Quick reference
 
 | Rule | Value |
@@ -512,3 +602,6 @@ Any other library on those three CDNs also works — React, vis-network, d3-forc
 7. **Missing dominant-baseline="central"** — text sits 4px too high
 8. **Missing arrow marker in defs** — always include it
 9. **Hardcoded colors** — always use CSS variables or ramp classes
+10. **Three.js canvas shows as a dark rectangle** — `canvas.clientWidth` was 0 at init. Wrap setup in `requestAnimationFrame(() => { … })` and re-call `renderer.setSize` / `camera.updateProjectionMatrix` on `resize`. See the "Library init" section above
+11. **Mermaid renders as raw text** — you probably called `mermaid.run({ nodes: [el] })` on an already-`data-processed` node, or you used `<br/>` in labels without `flowchart: { htmlLabels: true }`. Prefer the `mermaid.render('id', graph).then(…)` form
+12. **Chart.js canvas collapsed to 0 height** — wrap every canvas in `<div style="position: relative; height: Xpx;">` and set `maintainAspectRatio: false`
