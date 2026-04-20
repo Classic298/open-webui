@@ -1623,12 +1623,11 @@ STREAMING_OBSERVER_SCRIPT = """
     var tag = incoming.nodeName;
     var el;
     if (tag === 'SCRIPT' || tag === 'script') {
-      // Script execution needs to be serialized: external <script src>
-      // loads async, but inline <script>code</script> runs synchronously
-      // on insertion — so the inline script that uses `d3` / `Chart`
-      // would fire before the external bundle finished downloading.
-      // Defer to a promise chain so each script (external or inline)
-      // waits for all previously-queued scripts to complete first.
+      // Serialize script execution: external src-scripts load async,
+      // inline scripts run synchronously on insertion, so an inline
+      // consumer would fire before the preceding external bundle
+      // finished loading. The promise chain makes every script wait
+      // for all previously-queued ones first.
       enqueueScript(incoming);
       return;
     }
