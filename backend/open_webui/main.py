@@ -583,6 +583,7 @@ from open_webui.tasks import (
     stop_item_tasks,
     list_tasks,
 )  # Import from tasks.py
+from open_webui.utils.plugin_cache import plugin_cache_listener
 
 from open_webui.utils.redis import get_sentinels_from_env
 
@@ -666,6 +667,7 @@ async def lifespan(app: FastAPI):
 
     if app.state.redis is not None:
         app.state.redis_task_command_listener = asyncio.create_task(redis_task_command_listener(app))
+        app.state.plugin_cache_listener = asyncio.create_task(plugin_cache_listener(app))
 
     if THREAD_POOL_SIZE and THREAD_POOL_SIZE > 0:
         limiter = anyio.to_thread.current_default_thread_limiter()
@@ -741,6 +743,8 @@ async def lifespan(app: FastAPI):
 
     if hasattr(app.state, 'redis_task_command_listener'):
         app.state.redis_task_command_listener.cancel()
+    if hasattr(app.state, 'plugin_cache_listener'):
+        app.state.plugin_cache_listener.cancel()
 
 
 app = FastAPI(

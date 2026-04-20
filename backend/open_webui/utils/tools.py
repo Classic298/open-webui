@@ -40,7 +40,10 @@ from open_webui.models.tools import Tools
 from open_webui.models.users import UserModel
 from open_webui.models.groups import Groups
 from open_webui.models.access_grants import AccessGrants
-from open_webui.utils.plugin import load_tool_module_by_id
+from open_webui.utils.plugin import (
+    load_tool_module_by_id,
+    get_tool_module_from_cache,
+)
 from open_webui.utils.access_control import has_access, has_connection_access
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 from open_webui.env import (
@@ -189,10 +192,11 @@ async def get_tools(request: Request, tool_ids: list[str], user: UserModel, extr
                 log.warning(f'Access denied to tool {tool_id} for user {user.id}')
                 continue
 
-            module = request.app.state.TOOLS.get(tool_id, None)
-            if module is None:
-                module, _ = await load_tool_module_by_id(tool_id)
-                request.app.state.TOOLS[tool_id] = module
+            # Content-hash aware cache lookup — picks up edits from other
+            # workers even before the Redis invalidation arrives.  Falls
+            # back to loading fresh from DB when cached content no longer
+            # matches DB.
+            module, _ = await get_tool_module_from_cache(request, tool_id)
 
             __user__ = {
                 **extra_params['__user__'],

@@ -23,6 +23,7 @@ from open_webui.utils.plugin import (
 )
 from open_webui.config import CACHE_DIR
 from open_webui.constants import ERROR_MESSAGES
+from open_webui.utils.plugin_cache import publish_invalidation
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from pydantic import BaseModel, HttpUrl
@@ -214,6 +215,7 @@ async def create_new_function(
                 await Functions.update_function_metadata_by_id(form_data.id, {'toggle': True}, db=db)
 
             if function:
+                await publish_invalidation(request.app, 'function', form_data.id)
                 return function
             else:
                 raise HTTPException(
@@ -257,12 +259,18 @@ async def get_function_by_id(id: str, user=Depends(get_admin_user), db: AsyncSes
 
 
 @router.post('/id/{id}/toggle', response_model=Optional[FunctionModel])
-async def toggle_function_by_id(id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+async def toggle_function_by_id(
+    request: Request,
+    id: str,
+    user=Depends(get_admin_user),
+    db: AsyncSession = Depends(get_async_session),
+):
     function = await Functions.get_function_by_id(id, db=db)
     if function:
         function = await Functions.update_function_by_id(id, {'is_active': not function.is_active}, db=db)
 
         if function:
+            await publish_invalidation(request.app, 'function', id)
             return function
         else:
             raise HTTPException(
@@ -282,12 +290,18 @@ async def toggle_function_by_id(id: str, user=Depends(get_admin_user), db: Async
 
 
 @router.post('/id/{id}/toggle/global', response_model=Optional[FunctionModel])
-async def toggle_global_by_id(id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+async def toggle_global_by_id(
+    request: Request,
+    id: str,
+    user=Depends(get_admin_user),
+    db: AsyncSession = Depends(get_async_session),
+):
     function = await Functions.get_function_by_id(id, db=db)
     if function:
         function = await Functions.update_function_by_id(id, {'is_global': not function.is_global}, db=db)
 
         if function:
+            await publish_invalidation(request.app, 'function', id)
             return function
         else:
             raise HTTPException(
@@ -331,6 +345,7 @@ async def update_function_by_id(
             await Functions.update_function_metadata_by_id(id, {'toggle': True}, db=db)
 
         if function:
+            await publish_invalidation(request.app, 'function', id)
             return function
         else:
             raise HTTPException(
@@ -363,6 +378,7 @@ async def delete_function_by_id(
         FUNCTIONS = request.app.state.FUNCTIONS
         if id in FUNCTIONS:
             del FUNCTIONS[id]
+        await publish_invalidation(request.app, 'function', id)
 
     return result
 

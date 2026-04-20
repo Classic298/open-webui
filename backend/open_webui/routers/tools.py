@@ -29,6 +29,7 @@ from open_webui.utils.plugin import (
     resolve_valves_schema_options,
 )
 from open_webui.utils.tools import get_tool_specs
+from open_webui.utils.plugin_cache import publish_invalidation
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import (
     has_permission,
@@ -375,6 +376,7 @@ async def create_new_tools(
             tool_cache_dir.mkdir(parents=True, exist_ok=True)
 
             if tools:
+                await publish_invalidation(request.app, 'tool', form_data.id)
                 return tools
             else:
                 raise HTTPException(
@@ -505,6 +507,7 @@ async def update_tools_by_id(
         tools = await Tools.update_tool_by_id(id, updated, db=db)
 
         if tools:
+            await publish_invalidation(request.app, 'tool', id)
             return tools
         else:
             raise HTTPException(
@@ -612,6 +615,7 @@ async def delete_tools_by_id(
         TOOLS = request.app.state.TOOLS
         if id in TOOLS:
             del TOOLS[id]
+        await publish_invalidation(request.app, 'tool', id)
 
     return result
 
