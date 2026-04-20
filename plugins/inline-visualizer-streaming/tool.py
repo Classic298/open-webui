@@ -1288,6 +1288,35 @@ STREAMING_OBSERVER_SCRIPT = """
     return null;
   }
 
+  // Concatenate the searchable text of `msg`, SKIPPING any text that
+  // lives inside a <details> subtree (Open WebUI renders tool-call
+  // results in collapsed <details>, and OUR own result_context
+  // includes a literal @@@VIZ-START / @@@VIZ-END example that would
+  // otherwise be matched first by the regex and rendered instead of
+  // the model's real content).
+  function getSearchableText(msg) {
+    var out = '';
+    try {
+      var walker = parent.document.createTreeWalker(
+        msg, NodeFilter.SHOW_TEXT, {
+          acceptNode: function(n) {
+            var p = n.parentNode;
+            while (p && p !== msg) {
+              if (p.nodeType === 1 && p.tagName === 'DETAILS') {
+                return NodeFilter.FILTER_REJECT;
+              }
+              p = p.parentNode;
+            }
+            return NodeFilter.FILTER_ACCEPT;
+          }
+        }
+      );
+      var t;
+      while ((t = walker.nextNode())) out += t.nodeValue || '';
+    } catch(e) { return msg.textContent || ''; }
+    return out;
+  }
+
   // Read the full assistant message text and return the myIndex-th VIZ
   // block's inner content (or null if not yet present).
   function readSource() {
@@ -1295,7 +1324,7 @@ STREAMING_OBSERVER_SCRIPT = """
     if (!msg) return null;
     var idx = determineIndex();
     if (idx === null) idx = 0;
-    var text = msg.textContent || '';
+    var text = getSearchableText(msg);
     BLOCK_RE.lastIndex = 0;
     var m, n = 0;
     while ((m = BLOCK_RE.exec(text)) !== null) {
@@ -1394,11 +1423,25 @@ STREAMING_OBSERVER_SCRIPT = """
     try { embedsRoot = myFrame && myFrame.closest('[id$="-embeds-container"]'); }
     catch(e) {}
 
-    // Walk every text node in document order.
+    // Walk every text node in document order — but skip anything inside
+    // a <details> subtree (Open WebUI renders tool-call results there,
+    // and OUR result_context carries an example @@@VIZ-START/END pair
+    // that would flip the state machine and hide unrelated chat prose).
     var walker;
     try {
       walker = parent.document.createTreeWalker(
-        msg, NodeFilter.SHOW_TEXT, null
+        msg, NodeFilter.SHOW_TEXT, {
+          acceptNode: function(n) {
+            var p = n.parentNode;
+            while (p && p !== msg) {
+              if (p.nodeType === 1 && p.tagName === 'DETAILS') {
+                return NodeFilter.FILTER_REJECT;
+              }
+              p = p.parentNode;
+            }
+            return NodeFilter.FILTER_ACCEPT;
+          }
+        }
       );
     } catch(e) { return; }
 
@@ -1779,7 +1822,7 @@ STREAMING_OBSERVER_SCRIPT = """
     if (!msg) return false;
     var idx = determineIndex();
     if (idx === null) idx = 0;
-    var text = msg.textContent || '';
+    var text = getSearchableText(msg);
     // Re-scan: if the idx-th block's FULL match contains END_MARK, the
     // block is closed and we can finalize immediately.
     BLOCK_RE.lastIndex = 0;
@@ -1814,7 +1857,11 @@ STREAMING_OBSERVER_SCRIPT = """
       try { if (msg.querySelector('.shimmer')) wasStreaming = true; } catch(e) {}
     }
 
-    var currentText = msg.textContent || '';
+    // Cache & compare against SEARCHABLE text (skips <details> subtrees,
+    // which carry our own tool-result example markers). Full textContent
+    // would include the static tool-result example and look "changed" on
+    // every render, defeating the cache.
+    var currentText = getSearchableText(msg);
     var textChanged = currentText !== lastMsgText;
     lastMsgText = currentText;
 
