@@ -28,7 +28,7 @@
 
 ## ⚡ v2 vs v1 — what's new
 
-If you came from the original [inline-visualizer](https://github.com/Classic298/open-webui-extras/tree/main/tools/inline-visualizer) plugin, **everything visible to the model stays the same** (still called `render_visualization`, still loads `view_skill("visualize")` first). Under the hood, it's been rewritten from scratch. Every row below is an actual behavior delta, not marketing copy.
+If you came from the original inline-visualizer plugin, **everything visible to the model stays the same** (still called `render_visualization`, still loads `view_skill("visualize")` first). Under the hood, it's been rewritten from scratch. Every row below is an actual behavior delta, not marketing copy.
 
 | | **v1 — classic** | **v2 — streaming** |
 |---|---|---|
@@ -159,7 +159,7 @@ Steps:
 3. Enable **Allow iframe same origin**
 
 > [!NOTE]
-> Enabling same-origin means JavaScript inside a visualization can reach the parent Open WebUI page. That is a platform-level permission the tool cannot narrow — it's the cost of this streaming architecture. If your threat model can't accept that, use the [original v1 inline-visualizer](https://github.com/Classic298/open-webui-extras/tree/main/tools/inline-visualizer) instead (static mode doesn't need same-origin).
+> Enabling same-origin means JavaScript inside a visualization can reach the parent Open WebUI page. That is a platform-level permission the tool cannot narrow — it's the cost of this streaming architecture. If your threat model can't accept that, use the original v1 inline-visualizer instead (static mode doesn't need same-origin).
 
 ---
 
@@ -316,7 +316,7 @@ Loading a library from a CDN is a plain `GET` of a fixed public URL — zero dat
 When DevTools is open, the browser attempts to fetch `.map` files for loaded libraries from the same CDN. Strict blocks those via `connect-src 'none'` — you'll see lines like `Connecting to 'https://cdn.jsdelivr.net/npm/vega.min.js.map' violates CSP…` in the console. Those are DevTools-only noise (end users with DevTools closed never see them). We intentionally don't relax `connect-src` to fix this because that would reopen the exfil surface above for all users.
 
 > [!WARNING]
-> With `allow-same-origin` enabled (required for streaming), JavaScript in a visualization has reach into the parent Open WebUI page. That is a platform-level permission — the tool cannot narrow it further. If you need full isolation, disable same-origin: v2 degrades gracefully with a localized "streaming unavailable" notice, and you can fall back to the original [inline-visualizer](https://github.com/Classic298/open-webui-extras/tree/main/tools/inline-visualizer) (static mode only) for that workflow.
+> With `allow-same-origin` enabled (required for streaming), JavaScript in a visualization has reach into the parent Open WebUI page. That is a platform-level permission — the tool cannot narrow it further. If you need full isolation, disable same-origin: v2 degrades gracefully with a localized "streaming unavailable" notice, and you can fall back to the original inline-visualizer (static mode only) for that workflow.
 
 > [!NOTE]
 > Even in **None** mode, external API calls may still fail due to CORS — that's the remote server's policy, not ours.
