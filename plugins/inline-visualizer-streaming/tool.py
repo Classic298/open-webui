@@ -9,8 +9,10 @@ import re
 from typing import Literal
 
 # Build marker embedded into the rendered iframe so the running
-# version can be verified at runtime
-_IV_BUILD = "2.0.0"
+# version can be verified at runtime (search DevTools for
+# `data-iv-build` on <html>).  Bump on every protocol-level change
+# so stale cached iframes can be spotted immediately.
+_IV_BUILD = "2.1.0+chime-valve"
 
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
@@ -613,41 +615,7 @@ function loadState(key, fallback) {
   } catch(e) { return fallback === undefined ? null : fallback; }
 }
 
-// --- Happy chime ---
-// C-major arpeggio (C5 → E5 → G5) on sine oscillators with exponential
-// decay. ~300 ms, gentle volume. Silent no-op if AudioContext is still
-// suspended (no prior user gesture).
-// Mute: saveState('iv-sound', false) per-viz, or localStorage
-// 'iv-sound-off' = '1' globally.
-var _ivAudioCtx = null;
-function playDoneSound() {
-  try {
-    if (loadState('iv-sound', true) === false) return;
-    try { if (parent.localStorage.getItem('iv-sound-off') === '1') return; }
-    catch(e) {}
-    var AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return;
-    if (!_ivAudioCtx) _ivAudioCtx = new AC();
-    var ctx = _ivAudioCtx;
-    if (ctx.state === 'suspended') { try { ctx.resume(); } catch(e) {} }
-    var now = ctx.currentTime;
-    var notes = [523.25, 659.25, 783.99]; // C5, E5, G5
-    notes.forEach(function(freq, i) {
-      var osc = ctx.createOscillator();
-      var gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = freq;
-      var start = now + i * 0.09;
-      var dur = 0.35;
-      gain.gain.setValueAtTime(0.0001, start);
-      gain.gain.exponentialRampToValueAtTime(0.16, start + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + dur);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start(start);
-      osc.stop(start + dur + 0.02);
-    });
-  } catch(e) {}
-}
+/*__CHIME_BLOCK__*/
 
 // --- Print fix for Chart.js canvases ---
 // Chart.js writes explicit pixel widths as inline styles that CSS
@@ -1068,6 +1036,49 @@ function _ivDownload() {
   }
 }
 </script>
+"""
+
+
+# ---------------------------------------------------------------------------
+# Happy chime on live-stream completion
+# ---------------------------------------------------------------------------
+# Injected into BODY_SCRIPTS via a /*__CHIME_BLOCK__*/ placeholder so the
+# ``chime`` valve can strip it out entirely when disabled — no bytes
+# shipped, not just a silent no-op. finalize() calls playDoneSound() inside
+# a ``typeof playDoneSound === 'function'`` guard, so omission is safe.
+# ---------------------------------------------------------------------------
+
+CHIME_SCRIPT = """
+// --- Happy chime ---
+// C-major arpeggio (C5 → E5 → G5) on sine oscillators with exponential
+// decay. ~300 ms, gentle volume. Silent no-op if AudioContext is still
+// suspended (no prior user gesture).
+var _ivAudioCtx = null;
+function playDoneSound() {
+  try {
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!_ivAudioCtx) _ivAudioCtx = new AC();
+    var ctx = _ivAudioCtx;
+    if (ctx.state === 'suspended') { try { ctx.resume(); } catch(e) {} }
+    var now = ctx.currentTime;
+    var notes = [523.25, 659.25, 783.99]; // C5, E5, G5
+    notes.forEach(function(freq, i) {
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      var start = now + i * 0.09;
+      var dur = 0.35;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.16, start + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + dur + 0.02);
+    });
+  } catch(e) {}
+}
 """
 
 # ---------------------------------------------------------------------------
@@ -2015,7 +2026,8 @@ def _build_csp_tag(level: str) -> str:
 
 
 def _build_html(security_level: str = "strict",
-                title: str = "Visualization", lang: str = "en") -> str:
+                title: str = "Visualization", lang: str = "en",
+                chime: bool = True) -> str:
     """Wrap the streaming visualization shell: empty render area + observer.
 
     The observer tails the parent chat DOM for an ``@@@VIZ-START`` …
@@ -2030,6 +2042,13 @@ def _build_html(security_level: str = "strict",
     # Split on '-' first so "zh-CN" → "zh", not "zhcn".
     safe_lang = re.sub(r'[^a-z]', '', lang.split('-')[0].lower()[:5]) or "en"
 
+    # Strip the chime script entirely when the valve is off — no bytes
+    # shipped, no defined playDoneSound in the iframe. finalize()'s
+    # typeof-function guard turns the missing definition into a no-op.
+    body_scripts = BODY_SCRIPTS.replace(
+        '/*__CHIME_BLOCK__*/', CHIME_SCRIPT if chime else ''
+    )
+
     # Loader sits *below* the render area so content appears to flow
     # downward toward the pulsing dots — like a cursor following a pen.
     # The observer removes #iv-loader entirely on finalize().
@@ -2040,7 +2059,7 @@ def _build_html(security_level: str = "strict",
         '<div class="iv-loading-label">Rendering visualization\u2026</div>'
         '</div>\n'
         f'{DOWNLOAD_BUTTON}\n'
-        f'{BODY_SCRIPTS}'
+        f'{body_scripts}'
         f'{STREAMING_OBSERVER_SCRIPT}'
         f'{strict_script}'
     )
@@ -2103,6 +2122,10 @@ class Tools:
         security_level: Literal["strict", "balanced", "none"] = Field(
             default="strict",
             description="Strict (default): blocks outbound fetch/XHR, images, and forms; scripts always allowed. Balanced: also allows external images. None: no restrictions.",
+        )
+        chime: bool = Field(
+            default=True,
+            description="Play a soft three-note chime when a live-streamed visualization finishes. When off, the chime script is omitted from the iframe entirely (not shipped as a no-op).",
         )
 
     def __init__(self):
@@ -2185,7 +2208,12 @@ return (() => {
                 pass
 
         response = HTMLResponse(
-            content=_build_html(self.valves.security_level, title, lang),
+            content=_build_html(
+                self.valves.security_level,
+                title,
+                lang,
+                chime=self.valves.chime,
+            ),
             headers={"Content-Disposition": "inline"},
         )
         result_context = (

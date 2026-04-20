@@ -28,21 +28,26 @@
 
 ## ⚡ v2 vs v1 — what's new
 
-If you came from the original [inline-visualizer](https://github.com/Classic298/open-webui-extras/tree/main/tools/inline-visualizer) plugin, **everything visible to the model stays the same** (still called `render_visualization`, still loads `view_skill("visualize")` first). Under the hood, it's been rewritten from scratch.
+If you came from the original [inline-visualizer](https://github.com/Classic298/open-webui-extras/tree/main/tools/inline-visualizer) plugin, **everything visible to the model stays the same** (still called `render_visualization`, still loads `view_skill("visualize")` first). Under the hood, it's been rewritten from scratch. Every row below is an actual behavior delta, not marketing copy.
 
 | | **v1 — classic** | **v2 — streaming** |
 |---|---|---|
-| **Rendering mode** | Static. Full HTML baked into the tool response, iframe appears once the model finishes | **Live streaming** — iframe paints token-by-token, user sees it grow |
-| **Protocol** | ` ```visualization ` fenced code block routed through Open WebUI's CodeBlock → CodeMirror editor | Plain-text `@@@VIZ-START … @@@VIZ-END` markers — never touch CodeBlock or CodeMirror |
-| **Refresh behavior** | Fine | Fine — observer reads the message's live DOM, state rehydrates from saved markdown on every mount |
-| **Long-content reliability** | Breaks past CodeMirror's virtualization threshold (SVG backgrounds missing, lines evicted mid-scroll) | No virtualization — `textContent` is authoritative at every tick |
-| **Flicker during stream** | N/A (no stream) | Incremental DOM reconciler — only appends new nodes; existing nodes never re-mount, animations don't re-trigger |
-| **Bridges** | `sendPrompt`, `openLink` | `sendPrompt`, `openLink`, **`copyText`**, **`toast`**, **`saveState`**, **`loadState`** |
-| **Done feedback** | — | Top-right localized toast + soft C-major chime on live-stream completion (silent on refresh) |
-| **i18n** | Download button only (46 languages) | Download + loader label + unavailable notice + copied toast + "visualization ready" toast (46 languages each) |
-| **Script loading** | N/A | External `<script src>` → inline script ordering serialized via a promise chain so `Chart`, `d3`, `vega-embed` etc. fully load before consumer code runs |
-| **Tool-result detection** | N/A | `<details type="tool_calls">` subtrees are skipped by the scanner so the skill's own example markers never hijack the render |
-| **Static-mode fallback** | Supported | **Removed.** Streaming is the only path |
+| **Rendering timing** | Static. Model finishes writing → tool assembles a complete HTML payload → iframe pops in fully formed. User stares at a blank wrapper for the entire generation. | **Live.** Iframe fills in token-by-token as the model types. First SVG elements render within ~50 ms of the opening marker arriving. Charts, cards, and diagrams appear incrementally — the user watches it materialize. |
+| **Protocol** | ` ```visualization ` fenced code block. Routes through Open WebUI's `CodeBlock.svelte` → CodeMirror. | Plain-text `@@@VIZ-START … @@@VIZ-END` markers. Tokenizes as ordinary paragraph/html content — **never touches CodeBlock, CodeMirror, virtualizers, or editors of any kind**. |
+| **Long-content reliability** | **Breaks** past CodeMirror's virtualization threshold: scrolled-off lines get evicted from the DOM mid-scroll, SVG backgrounds go missing, refresh corrupts whitespace at soft-wraps. Every fix uncovered a new CodeMirror edge case. | **Bulletproof.** `message.textContent` is authoritative at every tick. No virtualization, no line eviction, no soft-wrap mangling. 80k-char SVGs render identically to 800-char ones. |
+| **Mid-stream rendering** | N/A — user waits for the full response. | Custom safe-cut HTML parser flushes the longest valid prefix on each chunk. Incremental DOM reconciler only appends new nodes — **existing nodes never re-mount, animations never re-trigger, zero flicker**. |
+| **Refresh / reload behavior** | Fine (static HTML stored in `message.embeds[]`). | Equal to v1. On mount, the observer scans the saved markdown for its marker pair, reconstructs the iframe state, fires `finalize()` immediately. No re-streaming needed. |
+| **Bridges** | `sendPrompt`, `openLink` | `sendPrompt`, `openLink`, **`copyText`** (auto-toast), **`toast(msg, kind)`** (success/info/warn/error, auto-dismiss), **`saveState(k,v)`** / **`loadState(k,fallback)`** (per-message `localStorage` scope, survives reloads) |
+| **Stream-completion feedback** | — | Localized top-right "Visualization ready" toast + three-note C-major arpeggio synthesized on Web Audio sine oscillators. Fires **only** when the stream was witnessed live — refreshes of completed messages stay silent via a growth-based detector, never by heuristic. |
+| **i18n surface** | 1 string (download tooltip) × 46 languages = 46 translations | 5 strings × 46 languages = **230 translations baked in** — download, loader label, "unavailable" notice, "Copied" toast, "Visualization ready" toast. Auto-detected from `<html data-iv-lang>`, `localStorage.locale`, and `navigator.language`. |
+| **External script loading** | N/A | External `<script src>` + inline scripts **serialized via a Promise chain**. Each script awaits `onload` of all previously-queued scripts before executing. `Chart`, `d3`, `vega-embed` etc. are guaranteed defined before your consumer code runs. |
+| **HTML-parser safety** | Model-generated code goes straight to `innerHTML`. | Safe-cut parser tracks the tokenizer state across script-data-escape and double-escape transitions, so embedded `<!--` / `<script` literals inside the model's code can't break our own script boundary. |
+| **Tool-result-example bleed** | N/A | TreeWalker excludes `<details type="tool_calls" \| reasoning \| code_execution \| code_interpreter>` when scanning, so the skill's own example markers inside the tool-call details never hijack the regex. |
+| **`navigator.vibrate` spam** | — | Silently stubbed to a no-op inside every iframe so Chrome's `[Intervention] Blocked call to navigator.vibrate…` logs don't pollute the console when a model reaches for haptic feedback. |
+| **Per-tick efficiency** | — | `msg.textContent` is cached between ticks; unchanged → the full pipeline (regex extract, DOM walk, reconciler) short-circuits to a string compare. Only one tick per real DOM mutation does real work. |
+| **Finalize-fallback tuning** | — | 30-second idle window chosen empirically to survive Gemini 3.1 Pro's 200-token chunk spacing + proxy buffering under degraded network — premature finalize on partial content can't happen. |
+| **Static-mode fallback** | Supported | **Removed.** Streaming is the only path. `tool.py` dropped ~200 lines of dual-mode branching and `_sanitize_content` logic. |
+| **Plugin footprint** | `tool.py` + `SKILL.md` | Same two files, same install flow — **no Open WebUI core patches**. Everything sits in a parasitic same-origin iframe observer. |
 
 ### The one-line summary
 
@@ -142,16 +147,19 @@ The **tool** mounts the iframe wrapper, injects the design-system CSS/JS, and ta
 4. Ensure **native function calling** is enabled
 5. Save.
 
-### 4. Enable same-origin access (strongly recommended)
+### 4. Enable same-origin access — **required**
 
 > [!IMPORTANT]
-> Streaming mode **requires** iframe same-origin access. The observer needs to read the parent chat's live DOM to find the markers as they stream in.
+> Streaming mode **does not work without this setting.** The observer's entire job is reading the parent chat's DOM to find markers as they stream in — that requires cross-frame access, which the browser blocks unless the iframe is allowed same-origin. With the setting off, every visualization renders a localized "Streaming visualization unavailable" notice instead of content.
 
-1. **Settings → Interface**
-2. Enable **iframe Sandbox Allow Same Origin**
+Steps:
+
+1. **User Settings → Interface**
+2. Scroll down
+3. Enable **Allow iframe same origin**
 
 > [!NOTE]
-> Enabling same-origin means JavaScript inside a visualization can reach the parent Open WebUI page. That's the cost of the streaming architecture. If you need hard isolation, v1 (static mode) is still the right tool. If `allow-same-origin` is off, v2 shows a localized inline notice explaining how to enable it.
+> Enabling same-origin means JavaScript inside a visualization can reach the parent Open WebUI page. That is a platform-level permission the tool cannot narrow — it's the cost of this streaming architecture. If your threat model can't accept that, use the [original v1 inline-visualizer](https://github.com/Classic298/open-webui-extras/tree/main/tools/inline-visualizer) instead (static mode doesn't need same-origin).
 
 ---
 
@@ -363,19 +371,17 @@ Set CSP to **None** AND the remote server must allow cross-origin requests. If i
 <details>
 <summary><b>The done chime is annoying</b></summary>
 
-Run once in the browser console: `localStorage.setItem('iv-sound-off', '1')`. Sound off forever.
+Open **Workspace → Tools → Inline Visualizer (Streaming) → gear icon**, flip the **`chime`** valve to off, save. Chime disabled globally — the function definition is stripped from the iframe entirely (not shipped as a silent no-op), saving ~1 KB per visualization.
 </details>
 
 <details>
 <summary><b>I updated <code>tool.py</code> and nothing changed</b></summary>
 
-Open WebUI doesn't hot-reload tool source from disk. You have to paste the new contents into **Workspace → Tools → Inline Visualizer (Streaming) → Save** again. Existing chats also have the old iframe baked in — trigger a fresh visualization to see updates.
-</details>
+Open WebUI doesn't hot-reload tool source from disk. You have to paste the new contents into **Workspace → Tools → Inline Visualizer (Streaming) → Save** again.
 
-<details>
-<summary><b>"Uncaught ReferenceError: d3 is not defined" (or Chart, vega, etc.)</b></summary>
+Additionally, existing chats keep their old iframe baked into `message.embeds[]` — only newly-triggered tool calls pick up the update.
 
-Your installed tool is older than the current code. Earlier versions of the reconciler inserted scripts synchronously, so external `<script src>` tags (d3, Chart.js, vega-embed) hadn't finished downloading when the inline consumer script ran. Update <code>tool.py</code> in Workspace → Tools (see entry above) — the current reconciler serializes scripts via a promise chain.
+On **multi-worker deployments** (`UVICORN_WORKERS > 1`), each worker process has its own in-memory tool module cache. A save updates the worker that handled the save request; every other worker keeps its old compiled module until the backend restarts. If you're on a multi-worker setup and you see stale behavior even from fresh chats, restart the backend — or use the separate [`claude/cross-worker-plugin-cache`](https://github.com/Classic298/open-webui/tree/claude/cross-worker-plugin-cache) branch which adds Redis pub/sub invalidation across workers.
 </details>
 
 ---
@@ -416,16 +422,7 @@ The idle fallback is deliberately much longer than any realistic inter-chunk sta
 
 ## 🙏 Credits
 
-- Built on top of [**Open WebUI**](https://github.com/open-webui/open-webui) and its tool / skill system
-- Protocol inspiration from the original [**inline-visualizer**](https://github.com/Classic298/open-webui-extras/tree/main/tools/inline-visualizer) by Classic298
-- Color ramp palette derived from the Anthropic documentation design system
-- Done chime is a three-note C-major arpeggio, synthesized on Web Audio sine oscillators with exponential decay envelopes — no audio file bundled
-
----
-
-## 📜 License
-
-Match the project you're integrating into.
+Built on top of [**Open WebUI**](https://github.com/open-webui/open-webui) and its tool / skill system.
 
 ---
 
