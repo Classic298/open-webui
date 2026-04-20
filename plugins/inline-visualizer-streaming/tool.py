@@ -1,12 +1,19 @@
 """
 title: Inline Visualizer (Streaming)
 author: Classic298
-version: 2.0.0
+version: 2.0.1
 description: Renders interactive HTML/SVG visualizations inline in chat. Supports a STREAMING mode — the tool emits an empty wrapper, then parasitically tails the model's streaming text for an @@@VIZ-START … @@@VIZ-END plain-text block and renders it live token-by-token. Requires "iframe Sandbox Allow Same Origin" to be enabled in Open WebUI Settings → Interface. For design instructions, the model should call view_skill("visualize").
 """
 
 import re
 from typing import Literal
+
+# Build marker embedded into the rendered iframe so the running
+# version can be verified at runtime (search DevTools for
+# `data-iv-build` on <html>, or the `iv[version]` console log).
+# Bump on every protocol-level change so stale cached iframes can
+# be spotted immediately.
+_IV_BUILD = "2.0.1+script-end-fix"
 
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
@@ -2027,10 +2034,11 @@ def _build_html(security_level: str = "strict",
     )
 
     return (
-        f'<!DOCTYPE html><html data-iv-lang="{safe_lang}"><head>'
+        f'<!DOCTYPE html><html data-iv-lang="{safe_lang}" data-iv-build="{_IV_BUILD}"><head>'
         f"<title>{safe_title}</title>"
         f"{csp_tag}"
         f"<style>{THEME_CSS}\n{SVG_CLASSES}\n{BASE_STYLES}</style>"
+        f'<script>try{{console.info("iv[build]","{_IV_BUILD}");}}catch(e){{}}</script>'
         f"{THEME_DETECTION_SCRIPT}"
         f"</head><body>\n{body_inner}\n</body></html>"
     )
