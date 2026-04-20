@@ -61,6 +61,7 @@ These rules keep visuals clean, accessible, and consistent with the host UI:
 - **Min font size 11px** — smaller becomes unreadable on most screens
 - **Text weights** — 400 regular, 500 for emphasis only
 - **All explanatory text goes in your prose response**, not inside the visual (keeps visuals data-dense and lets the model's response provide context)
+- **If the topic allows - build stunning visualizations** - Build dashboards, charts, graphs, interactive functions, animated sections, moving objects, explandable detail sections, cards, copyable text elements and more. If the topic allows and it makes sense for the topic, build complex and visually stunning elements.
 
 ---
 
@@ -388,6 +389,8 @@ This pattern is powerful because the model receives a structured summary of all 
 
 ## Interactivity by default
 
+Build dashboards, charts, graphs, interactive functions, animated sections, moving objects, explandable detail sections, cards, copyable text elements and more. If the topic allows and it makes sense for the topic, build complex and visually stunning elements.
+
 Visualizations should feel alive and polished — not static images dumped into chat. Build interfaces that invite interaction:
 
 - **Expandable sections** — use collapsible `<details>` elements or JS-toggled sections so users can explore at their own pace without overwhelming them upfront
@@ -396,7 +399,7 @@ Visualizations should feel alive and polished — not static images dumped into 
 - **Active states** — when a user selects an option or clicks a tab, make the selection visually clear with the `.active` class or distinct styling
 - **Progressive disclosure** — show a clean overview first, let the user click to reveal detail (tabs, accordions, or sendPrompt for model-powered drill-down)
 
-The goal is to build something that feels like a real app component embedded in chat — not a screenshot. If the visualization has multiple facets, give the user controls to explore them. If it has hierarchical information, let them expand and collapse. If it has data, let them sort or filter.
+**The goal is to build something that feels like a real app component embedded in chat with reactivity, sections and extra elements** — not a screenshot. If the visualization has multiple facets, give the user controls to explore them. If it has hierarchical information, let them expand and collapse. If it has data, let them sort or filter.
 
 ---
 
