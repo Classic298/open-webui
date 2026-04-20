@@ -1736,9 +1736,9 @@ window.addEventListener('error', function(ev) {
   // embedded script, which the outer HTML parser sees and flips into
   // double-escape mode (corrupts our enclosing element boundary).
   var _ivOpen = '<' + 'script';
-  var _ivClose = '<' + '\\/script>';
-  var _ivStripPaired = new RegExp(_ivOpen + '[\\s\\S]*?' + _ivClose, 'gi');
-  var _ivStripOpen = new RegExp(_ivOpen + '[\\s\\S]*$', 'i');
+  var _ivClose = '<' + '\\\\/script>';
+  var _ivStripPaired = new RegExp(_ivOpen + '[\\\\s\\\\S]*?' + _ivClose, 'gi');
+  var _ivStripOpen = new RegExp(_ivOpen + '[\\\\s\\\\S]*$', 'i');
   function renderSafeInto(text, withScripts) {
     var html = withScripts
       ? text
