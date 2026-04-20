@@ -616,6 +616,45 @@ function loadState(key, fallback) {
   } catch(e) { return fallback === undefined ? null : fallback; }
 }
 
+// --- Happy chime ---
+// C-major arpeggio (C5 → E5 → G5) played on soft sine oscillators with
+// a bell-like exponential decay envelope. ~300 ms total, gentle volume.
+// Modern browsers require a user gesture before AudioContext plays;
+// since the user kicked off the chat before streaming, the context
+// is usually already unlocked. If not, the call silently no-ops.
+//
+// Mute via: saveState('iv-sound', false) from the visualization code,
+// or set localStorage key "iv-sound-off" = "1" to mute globally.
+var _ivAudioCtx = null;
+function playDoneSound() {
+  try {
+    if (loadState('iv-sound', true) === false) return;
+    try { if (parent.localStorage.getItem('iv-sound-off') === '1') return; }
+    catch(e) {}
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!_ivAudioCtx) _ivAudioCtx = new AC();
+    var ctx = _ivAudioCtx;
+    if (ctx.state === 'suspended') { try { ctx.resume(); } catch(e) {} }
+    var now = ctx.currentTime;
+    var notes = [523.25, 659.25, 783.99]; // C5, E5, G5
+    notes.forEach(function(freq, i) {
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      var start = now + i * 0.09;
+      var dur = 0.35;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.16, start + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + dur + 0.02);
+    });
+  } catch(e) {}
+}
+
 // --- Print fix for Chart.js canvases ---
 // Chart.js sets explicit pixel widths as inline styles on canvas and its
 // container div at render time (e.g. style="width: 1400px"). CSS max-width
@@ -1719,6 +1758,7 @@ STREAMING_OBSERVER_SCRIPT = """
                      (_ivDoneStr[_ivLang] || _ivDoneStr.en)) || 'Visualization ready';
         if (typeof toast === 'function') toast(label, 'success');
       } catch(e) {}
+      try { if (typeof playDoneSound === 'function') playDoneSound(); } catch(e) {}
     }
   }
 
