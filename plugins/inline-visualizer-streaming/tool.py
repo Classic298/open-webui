@@ -509,6 +509,20 @@ function openLink(url) {
   catch(e) { window.open(url, '_blank'); }
 }
 
+// --- navigator.vibrate silencer ---
+// Chrome blocks vibrate() without a prior user gesture and spams the
+// console with `[Intervention] Blocked call to navigator.vibrate…`
+// every time. Models occasionally reach for haptic feedback in their
+// visualizations (celebration on click, bounce feedback, etc.) which
+// fills the console. Silently no-op the API inside the iframe so
+// Chrome's block path never fires. Returning `false` matches what the
+// spec says vibrate returns when the request is rejected.
+try {
+  if (typeof navigator !== 'undefined' && navigator.vibrate) {
+    navigator.vibrate = function() { return false; };
+  }
+} catch(e) {}
+
 // --- Toast bridge ---
 // Floating auto-dismissing banner, anchored top-right inside the iframe
 // so it sits beside (not over) the download button. Uses theme CSS vars
