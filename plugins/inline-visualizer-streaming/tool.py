@@ -1601,13 +1601,38 @@ STREAMING_OBSERVER_SCRIPT = """
   // make them wait for a preceding external src-script is to defer
   // the insertion itself via this chain.
   var _ivScriptChain = Promise.resolve();
+  var _ivEnqueuedScripts = Object.create(null);
+
+  // FNV-1a over the script body — cheap content-hash used as a dedupe
+  // key so the SAME script body is never executed twice, no matter how
+  // many reconciler branches re-encountered the same incoming node.
+  function _ivHashScript(s) {
+    var h = 2166136261;
+    for (var i = 0; i < s.length; i++) {
+      h = (h ^ s.charCodeAt(i)) >>> 0;
+      h = Math.imul(h, 16777619) >>> 0;
+    }
+    return h.toString(36);
+  }
+
   function enqueueScript(incoming) {
     var src = incoming.getAttribute && incoming.getAttribute('src');
+    var code = incoming.textContent || '';
+
+    // Dedupe by (src|body hash). The reconciler can legitimately hit
+    // the same script twice across its branches (`!exist` + position
+    // mismatch + descend paths) when the streaming-era tree shape
+    // differs from the finalize-era one. Running the body twice
+    // redeclares `const` / rebinds classes / double-wires event
+    // listeners — always a bug, so collapse here.
+    var key = src ? ('src:' + src) : ('code:' + code.length + ':' + _ivHashScript(code));
+    if (_ivEnqueuedScripts[key]) return;
+    _ivEnqueuedScripts[key] = true;
+
     var attrs = [];
     for (var a = 0; a < incoming.attributes.length; a++) {
       attrs.push([incoming.attributes[a].name, incoming.attributes[a].value]);
     }
-    var code = incoming.textContent;
     if (src) {
       _ivScriptChain = _ivScriptChain.then(function() {
         return new Promise(function(resolve) {
