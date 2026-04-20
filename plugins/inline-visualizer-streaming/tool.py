@@ -1839,18 +1839,14 @@ STREAMING_OBSERVER_SCRIPT = """
     }
   }
 
-  // ---- Is the enclosing assistant message still streaming? -----------
-  // Open WebUI adds a .shimmer class to containers in "executing" state.
-  // Also: the presence of an END_MARK in the message text is a definitive
-  // signal that THIS block has finished emitting, even if later tokens
-  // are still arriving for prose that follows.
-  function isMessageDone() {
-    var msg = findMyMessage();
-    if (!msg) return false;
-    try { if (msg.querySelector('.shimmer')) return false; } catch(e) {}
-    return true;
-  }
-
+  // NOTE: a previous version used `.shimmer` as a "still streaming"
+  // signal. That class actually decorates tool-execution / reasoning
+  // status badges (StatusItem.svelte, HTMLToken.svelte) — NOT the
+  // assistant message body. Once the tool call returns, .shimmer is
+  // gone even though the model is still streaming the response. So the
+  // check returned "done" on every tick from that moment, the 800 ms
+  // idle timer rubber-stamped the partial content as final, and the
+  // live render got wiped 3-5 seconds in. Signal dropped.
   function isBlockClosed() {
     var msg = findMyMessage();
     if (!msg) return false;
@@ -1946,30 +1942,24 @@ STREAMING_OBSERVER_SCRIPT = """
   }
 
   function scheduleFinalize(raw) {
-    // Finalize ONLY when we have a definitive "done" signal:
-    //   (a) the block's END_MARK has arrived, OR
-    //   (b) Open WebUI removed .shimmer from the assistant message.
+    // Primary signal: @@@VIZ-END arrived in the source. Fires
+    // immediately — no wait, no risk of wiping live content.
     //
-    // A previous version also finalized when the source string was
-    // stable for 800 ms ("latest === raw"). That produced false
-    // positives during mid-stream network hiccups / token pauses:
-    // finalize would fire on a partial SVG, the reconciler would
-    // overwrite the live tree with the partial string, the loader
-    // would die, and every card painted after that chunk vanished.
-    //
-    // The poll still re-runs this every ~400 ms, so missing the END
-    // marker from the model doesn't strand the loader — eventually
-    // the shimmer clears when the stream closes and we finalize then.
+    // Fallback for the rare cases where END never lands (user stops
+    // generation, model forgets to close the block): wait 5 seconds of
+    // completely stable source text before assuming "done". That's
+    // much longer than any realistic mid-stream stall (chunks usually
+    // arrive every 50-500 ms), so normal token pauses can't trip it.
     clearTimeout(finalizeTimer);
     if (isBlockClosed()) { finalize(raw); return; }
     finalizeTimer = setTimeout(function() {
       if (finalized) return;
       var latest = readSource();
       if (latest === null) return;
-      if (isBlockClosed() || isMessageDone()) {
+      if (isBlockClosed() || latest === raw) {
         finalize(latest);
       }
-    }, 800);
+    }, 5000);
   }
 
   // ---- Inject fade-in + loader CSS into our OWN document -------------
