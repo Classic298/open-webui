@@ -2263,18 +2263,7 @@ class Tools:
         The wrapper tails your streaming text and renders the content between the
         markers LIVE, token-by-token, into the iframe. Users see the visualization
         paint progressively as you generate it. The raw markers + SVG source are
-        auto-hidden from the chat, so users see only the rendered iframe. Explanatory
-        prose BEFORE and AFTER the block renders normally.
-
-        Requirements:
-        - "iframe Sandbox Allow Same Origin" must be enabled in Open WebUI
-          Settings → Interface. If disabled, the wrapper shows a notice.
-        - Use the delimiters EXACTLY: ``@@@VIZ-START`` and ``@@@VIZ-END`` —
-          case-sensitive, each on its own line. No other wrapping is detected.
-        - Emit ONE block per tool call. For multiple visualizations, call the
-          tool multiple times (each call claims one block in DOM order).
-
-        === INJECTED HELPERS ===
+        auto-hidden from the chat, so users see only the rendered iframe.
 
         The system automatically injects:
         - Theme CSS variables (auto-detected light/dark mode)
@@ -2284,10 +2273,8 @@ class Tools:
         - Height auto-sizing script
         - sendPrompt(text) function — sends a message to the chat (requires iframe Sandbox Allow Same Origin)
         - openLink(url) function — opens a URL in a new tab
-
-        After calling this tool, do NOT repeat the HTML/SVG source as plain text — the
-        visualization is rendered and visible to the user. Briefly describe what the
-        visualization shows in plain language around (or after) the @@@VIZ-START/END block.
+        - saveState() and loadState() function
+        - copyText() function
 
         :param title: Short descriptive title for the visualization.
         :return: Interactive rich embed rendered in the chat, with LLM context.
