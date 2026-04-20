@@ -12,7 +12,7 @@ from typing import Literal
 # version can be verified at runtime (search DevTools for
 # `data-iv-build` on <html>).  Bump on every protocol-level change
 # so stale cached iframes can be spotted immediately.
-_IV_BUILD = "2.1.0+chime-valve"
+_IV_BUILD = "2.0.0"
 
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
