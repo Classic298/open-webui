@@ -1570,8 +1570,45 @@ STREAMING_OBSERVER_SCRIPT = """
   // re-trigger. Attributes are immutable between cuts (the parser
   // can't cut mid-tag), so we never sync them on existing elements.
 
-  // importNode preserves SVG namespaces. <script> gets a fresh element
-  // so it executes when inserted.
+  // Promise chain that serializes <script> execution across an entire
+  // visualization. Each enqueue returns a fresh link in the chain that
+  // resolves only after the previous script has fully executed (or, for
+  // external scripts, fully loaded). Inline scripts created via
+  // createElement run synchronously on insertion, so the only way to
+  // make them wait for a preceding external <script src> is to defer
+  // the insertion itself via this chain.
+  var _ivScriptChain = Promise.resolve();
+  function enqueueScript(incoming) {
+    var src = incoming.getAttribute && incoming.getAttribute('src');
+    var attrs = [];
+    for (var a = 0; a < incoming.attributes.length; a++) {
+      attrs.push([incoming.attributes[a].name, incoming.attributes[a].value]);
+    }
+    var code = incoming.textContent;
+    if (src) {
+      _ivScriptChain = _ivScriptChain.then(function() {
+        return new Promise(function(resolve) {
+          var el = document.createElement('script');
+          attrs.forEach(function(pair) { el.setAttribute(pair[0], pair[1]); });
+          el.onload = el.onerror = function() { resolve(); };
+          document.head.appendChild(el);
+        });
+      });
+    } else {
+      _ivScriptChain = _ivScriptChain.then(function() {
+        try {
+          var el = document.createElement('script');
+          attrs.forEach(function(pair) { el.setAttribute(pair[0], pair[1]); });
+          el.textContent = code;
+          document.head.appendChild(el);
+        } catch(e) { try { console.error(e); } catch(_){} }
+      });
+    }
+  }
+
+  // importNode preserves SVG namespaces. <script> is specially handled
+  // via enqueueScript so external + inline scripts execute in source
+  // order with proper load-waiting.
   function importAndAppend(parent, incoming) {
     var nt = incoming.nodeType;
     if (nt === 3) {
@@ -1586,20 +1623,13 @@ STREAMING_OBSERVER_SCRIPT = """
     var tag = incoming.nodeName;
     var el;
     if (tag === 'SCRIPT' || tag === 'script') {
-      // Fresh script element so it executes when inserted.
-      el = document.createElement('script');
-      for (var a = 0; a < incoming.attributes.length; a++) {
-        el.setAttribute(incoming.attributes[a].name, incoming.attributes[a].value);
-      }
-      el.textContent = incoming.textContent;
-      // Dynamically-inserted scripts default to async=true, so an inline
-      // <script> following external <script src="…"> tags would run
-      // BEFORE those finished downloading (classic "Chart is not defined"
-      // / "d3 is not defined" at init time). Forcing async=false makes
-      // the insertion order the execution order — matching how the HTML
-      // parser loads scripts in a static page.
-      try { el.async = false; } catch(e) {}
-      parent.appendChild(el);
+      // Script execution needs to be serialized: external <script src>
+      // loads async, but inline <script>code</script> runs synchronously
+      // on insertion — so the inline script that uses `d3` / `Chart`
+      // would fire before the external bundle finished downloading.
+      // Defer to a promise chain so each script (external or inline)
+      // waits for all previously-queued scripts to complete first.
+      enqueueScript(incoming);
       return;
     }
     // Shallow import preserves HTML-vs-SVG namespace.
