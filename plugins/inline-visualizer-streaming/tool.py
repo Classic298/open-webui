@@ -1973,11 +1973,18 @@ STREAMING_OBSERVER_SCRIPT = """
     // Primary signal: @@@VIZ-END arrived in the source. Fires
     // immediately — no wait, no risk of wiping live content.
     //
-    // Fallback for the rare cases where END never lands (user stops
-    // generation, model forgets to close the block): wait 5 seconds of
-    // completely stable source text before assuming "done". That's
-    // much longer than any realistic mid-stream stall (chunks usually
-    // arrive every 50-500 ms), so normal token pauses can't trip it.
+    // Fallback for cases where END never lands (user stops generation,
+    // model forgets to close the block). 5 seconds was too aggressive:
+    //   * Gemini 3.1 Pro streams ~200-token chunks with 3-6s gaps
+    //   * Proxies sometimes buffer chunks for 10-30s in poor network
+    //   * Even Claude occasionally stalls a few seconds between chunks
+    // Any of those tripped the timer mid-stream, finalize() ran on
+    // partial <style>…</style>, the reconciler overwrote the live tree,
+    // and the iframe collapsed to a thin strip.
+    //
+    // 30s is long enough that no realistic stall-between-chunks fires
+    // it, but short enough that a real user-stop still recovers without
+    // needing a page refresh.
     clearTimeout(finalizeTimer);
     if (isBlockClosed()) { finalize(raw); return; }
     finalizeTimer = setTimeout(function() {
@@ -1987,7 +1994,7 @@ STREAMING_OBSERVER_SCRIPT = """
       if (isBlockClosed() || latest === raw) {
         finalize(latest);
       }
-    }, 5000);
+    }, 30000);
   }
 
   // ---- Inject fade-in + loader CSS into our OWN document -------------
