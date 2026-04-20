@@ -1710,10 +1710,10 @@ STREAMING_OBSERVER_SCRIPT = """
       el.textContent = incoming.textContent;
       // Dynamically-inserted scripts default to async=true, so an inline
       // <script> following external <script src="…"> tags would run
-      // BEFORE those finished downloading (classic "THREE is not defined"
-      // / "Chart is not defined" at init time). Forcing async=false
-      // makes the insertion order the execution order — matching how
-      // the HTML parser loads scripts in a static page.
+      // BEFORE those finished downloading (classic "Chart is not defined"
+      // / "d3 is not defined" at init time). Forcing async=false makes
+      // the insertion order the execution order — matching how the HTML
+      // parser loads scripts in a static page.
       try { el.async = false; } catch(e) {}
       parent.appendChild(el);
       return;
