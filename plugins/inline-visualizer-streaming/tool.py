@@ -1303,7 +1303,18 @@ STREAMING_OBSERVER_SCRIPT = """
             var p = n.parentNode;
             while (p && p !== msg) {
               if (p.nodeType === 1 && p.tagName === 'DETAILS') {
-                return NodeFilter.FILTER_REJECT;
+                // Only skip tool-result / reasoning / code_execution
+                // details — those carry our own result_context example
+                // markers. Other <details> (including the bare
+                // __DETAIL_N__ placeholder shims Open WebUI emits
+                // during streaming before it substitutes real tool
+                // markup) DO carry the model's actual response and
+                // must remain visible to the scanner.
+                var t = p.getAttribute && p.getAttribute('type');
+                if (t === 'tool_calls' || t === 'reasoning' ||
+                    t === 'code_execution' || t === 'code_interpreter') {
+                  return NodeFilter.FILTER_REJECT;
+                }
               }
               p = p.parentNode;
             }
@@ -1435,7 +1446,18 @@ STREAMING_OBSERVER_SCRIPT = """
             var p = n.parentNode;
             while (p && p !== msg) {
               if (p.nodeType === 1 && p.tagName === 'DETAILS') {
-                return NodeFilter.FILTER_REJECT;
+                // Only skip tool-result / reasoning / code_execution
+                // details — those carry our own result_context example
+                // markers. Other <details> (including the bare
+                // __DETAIL_N__ placeholder shims Open WebUI emits
+                // during streaming before it substitutes real tool
+                // markup) DO carry the model's actual response and
+                // must remain visible to the scanner.
+                var t = p.getAttribute && p.getAttribute('type');
+                if (t === 'tool_calls' || t === 'reasoning' ||
+                    t === 'code_execution' || t === 'code_interpreter') {
+                  return NodeFilter.FILTER_REJECT;
+                }
               }
               p = p.parentNode;
             }
