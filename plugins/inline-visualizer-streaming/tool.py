@@ -1545,34 +1545,6 @@ DOWNLOAD_BUTTON = (
 )
 
 
-# Only match wrapper tags at document boundaries — not globally — so that
-# legitimate occurrences inside JS strings or template literals survive.
-# Leading pattern: optional whitespace then any mix of DOCTYPE/html/head/
-# body-open/meta tags (models hallucinate full document wrappers).
-# Trailing pattern: </body> and </html> close tags at the end.
-_LEADING_WRAPPER_RE = re.compile(
-    r'^(\s*(?:<!DOCTYPE[^>]*>|</?html[^>]*>|</?head[^>]*>|<body[^>]*>|<meta[^>]*/?>)\s*)+',
-    re.IGNORECASE,
-)
-_TRAILING_WRAPPER_RE = re.compile(
-    r'(\s*(?:</body\s*>|</html\s*>)\s*)+$',
-    re.IGNORECASE,
-)
-
-
-def _sanitize_content(content: str) -> str:
-    """Strip document wrapper tags that models sometimes include.
-
-    Only removes tags at the start and end of the content so that identical
-    tokens appearing inside script strings or template literals are preserved.
-    """
-    content = _LEADING_WRAPPER_RE.sub('', content)
-    content = _TRAILING_WRAPPER_RE.sub('', content)
-    # Collapse runs of 3+ blank lines into a single blank line
-    content = re.sub(r'\n{3,}', '\n\n', content)
-    return content.strip()
-
-
 # ---------------------------------------------------------------------------
 # CSP generation per security level
 # ---------------------------------------------------------------------------
@@ -1622,15 +1594,13 @@ def _build_csp_tag(level: str) -> str:
     )
 
 
-def _build_html(content: str, security_level: str = "strict",
-                title: str = "Visualization", lang: str = "en",
-                streaming: bool = False) -> str:
-    """Wrap a user-provided HTML/SVG fragment in the full Rich UI shell.
+def _build_html(security_level: str = "strict",
+                title: str = "Visualization", lang: str = "en") -> str:
+    """Wrap the streaming visualization shell: empty render area + observer.
 
-    If ``streaming`` is True, ``content`` is ignored and the body contains
-    an empty render area (#iv-render) plus the parasitic-wrapper observer
-    script, which tails the parent chat DOM for an ``@@@VIZ-START`` …
-    ``@@@VIZ-END`` plain-text block and renders its contents live.
+    The observer tails the parent chat DOM for an ``@@@VIZ-START`` …
+    ``@@@VIZ-END`` plain-text block in the assistant message and renders
+    its contents live into #iv-render.
     """
     csp_tag = _build_csp_tag(security_level)
     strict_script = STRICT_SECURITY_SCRIPT if security_level == "strict" else ""
@@ -1640,28 +1610,20 @@ def _build_html(content: str, security_level: str = "strict",
     # Split on '-' first so "zh-CN" → "zh", not "zhcn".
     safe_lang = re.sub(r'[^a-z]', '', lang.split('-')[0].lower()[:5]) or "en"
 
-    if streaming:
-        # Loader sits *below* the render area so content appears to flow
-        # downward toward the pulsing dots — like a cursor following a pen.
-        # The observer removes #iv-loader entirely on finalize().
-        body_inner = (
-            '<div id="iv-render"></div>\n'
-            '<div id="iv-loader" class="iv-loading" aria-live="polite">'
-            '<div class="iv-loading-dots"><span></span><span></span><span></span></div>'
-            '<div class="iv-loading-label">Painting visualization\u2026</div>'
-            '</div>\n'
-            f'{DOWNLOAD_BUTTON}\n'
-            f'{BODY_SCRIPTS}'
-            f'{STREAMING_OBSERVER_SCRIPT}'
-            f'{strict_script}'
-        )
-    else:
-        body_inner = (
-            f'{_sanitize_content(content)}\n'
-            f'{DOWNLOAD_BUTTON}\n'
-            f'{BODY_SCRIPTS}'
-            f'{strict_script}'
-        )
+    # Loader sits *below* the render area so content appears to flow
+    # downward toward the pulsing dots — like a cursor following a pen.
+    # The observer removes #iv-loader entirely on finalize().
+    body_inner = (
+        '<div id="iv-render"></div>\n'
+        '<div id="iv-loader" class="iv-loading" aria-live="polite">'
+        '<div class="iv-loading-dots"><span></span><span></span><span></span></div>'
+        '<div class="iv-loading-label">Rendering visualization\u2026</div>'
+        '</div>\n'
+        f'{DOWNLOAD_BUTTON}\n'
+        f'{BODY_SCRIPTS}'
+        f'{STREAMING_OBSERVER_SCRIPT}'
+        f'{strict_script}'
+    )
 
     return (
         f'<!DOCTYPE html><html data-iv-lang="{safe_lang}"><head>'
@@ -1728,7 +1690,6 @@ class Tools:
     async def render_visualization(
         self,
         title: str = "Visualization",
-        html_code: str | None = None,
         __event_call__=None,
     ) -> tuple:
         """
@@ -1739,43 +1700,30 @@ class Tools:
         instructions first — they contain critical rules for colors, layout, SVG setup,
         chart patterns, and common failure points.
 
-        === STREAMING MODE (DEFAULT, RECOMMENDED) ===
-
-        Call this tool with ONLY ``title`` and omit ``html_code``. The tool will mount
-        an empty visualization wrapper in the chat. Then, in your text response that
-        follows, wrap the HTML/SVG in the TEXT DELIMITERS @@@VIZ-START / @@@VIZ-END
-        (NOT a ``` code fence, NOT HTML tags, NOT a ::: fence — plain text markers):
+        Call this tool with ``title`` only. The tool mounts an empty visualization
+        wrapper in the chat. Then, in your text response that follows, wrap the
+        HTML/SVG in the TEXT DELIMITERS @@@VIZ-START / @@@VIZ-END (NOT a ``` code
+        fence, NOT HTML tags, NOT a ::: fence — plain text markers on their own lines):
 
             @@@VIZ-START
             <svg viewBox="0 0 680 240">...</svg>
             @@@VIZ-END
 
-        The wrapper parasitically tails your streaming text and renders the content
-        between the markers LIVE, token-by-token, into the iframe. Users see the
-        visualization paint progressively as you generate it.
+        The wrapper tails your streaming text and renders the content between the
+        markers LIVE, token-by-token, into the iframe. Users see the visualization
+        paint progressively as you generate it. The raw markers + SVG source are
+        auto-hidden from the chat, so users see only the rendered iframe. Explanatory
+        prose BEFORE and AFTER the block renders normally.
 
-        The raw markers + SVG source are hidden from the chat once they're visible,
-        so the user sees only the rendered visualization. You may write explanatory
-        prose before and after the block — it renders normally in the chat.
-
-        Requirements for streaming mode:
+        Requirements:
         - "iframe Sandbox Allow Same Origin" must be enabled in Open WebUI
-          Settings → Interface. If disabled, the wrapper shows a notice telling
-          the user to enable it.
+          Settings → Interface. If disabled, the wrapper shows a notice.
         - Use the delimiters EXACTLY: ``@@@VIZ-START`` and ``@@@VIZ-END`` —
           case-sensitive, each on its own line. No other wrapping is detected.
-          Do NOT put the content inside a ``` fence or ::: fence.
-        - Emit ONE block per tool call. If you need multiple visualizations, call
-          the tool multiple times (each call claims one block in DOM order).
+        - Emit ONE block per tool call. For multiple visualizations, call the
+          tool multiple times (each call claims one block in DOM order).
 
-        === STATIC MODE (LEGACY, BACKWARD COMPAT) ===
-
-        If you pass ``html_code``, the tool returns a pre-rendered wrapper with your
-        content baked in. Nothing streams — the full visualization appears when the
-        tool returns. Use this only when you already have the complete HTML and
-        don't want streaming.
-
-        === INJECTED HELPERS (both modes) ===
+        === INJECTED HELPERS ===
 
         The system automatically injects:
         - Theme CSS variables (auto-detected light/dark mode)
@@ -1791,17 +1739,8 @@ class Tools:
         visualization shows in plain language around (or after) the @@@VIZ-START/END block.
 
         :param title: Short descriptive title for the visualization.
-        :param html_code: Optional HTML or SVG content fragment. If provided, triggers
-                          STATIC mode. If omitted (default), STREAMING mode is used and
-                          you must emit the content wrapped in @@@VIZ-START / @@@VIZ-END
-                          text markers in your response. Do NOT include DOCTYPE, html,
-                          head, or body tags. Structure: <style> first, visible content
-                          next, <script> last. Load Chart.js via CDN when needed:
-                          <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>.
         :return: Interactive rich embed rendered in the chat, with LLM context.
         """
-        streaming = html_code is None
-
         # Detect UI language via parent page JS (same pattern as PDF/Gamma actions)
         lang = "en"
         if __event_call__:
@@ -1834,37 +1773,22 @@ return (() => {
                 pass
 
         response = HTMLResponse(
-            content=_build_html(
-                html_code or "",
-                self.valves.security_level,
-                title,
-                lang,
-                streaming=streaming,
-            ),
+            content=_build_html(self.valves.security_level, title, lang),
             headers={"Content-Disposition": "inline"},
         )
-        if streaming:
-            result_context = (
-                f'Visualization wrapper "{title}" is mounted and waiting for content. '
-                f"Now emit the HTML/SVG in your NEXT text response wrapped in the "
-                f"TEXT delimiters @@@VIZ-START and @@@VIZ-END, each on their own line. "
-                f"The wrapper will tail your stream and render live. These are PLAIN "
-                f"TEXT markers — NOT a ``` code fence, NOT HTML tags, NOT a ::: fence. "
-                f"Example:\n\n"
-                f"    @@@VIZ-START\n"
-                f"    <svg viewBox=\"0 0 680 240\">…</svg>\n"
-                f"    @@@VIZ-END\n\n"
-                f"Write explanatory prose BEFORE and AFTER the block — do not describe "
-                f"the HTML source itself. Emit exactly ONE @@@VIZ-START/@@@VIZ-END pair "
-                f"for this tool call."
-            )
-        else:
-            result_context = (
-                f'Visualization "{title}" is now rendered and visible to the user as an '
-                f"interactive embed. DO NOT echo back the HTML/SVG source code. Instead, "
-                f"briefly describe what the visualization shows in plain language. If the "
-                f"visualization has interactive elements (clickable nodes, buttons, sliders), "
-                f"mention what the user can interact with. DO NOT OUTPUT THE HTML/SVG source again!"
-            )
+        result_context = (
+            f'Visualization wrapper "{title}" is mounted and waiting for content. '
+            f"Now emit the HTML/SVG in your NEXT text response wrapped in the "
+            f"TEXT delimiters @@@VIZ-START and @@@VIZ-END, each on their own line. "
+            f"The wrapper will tail your stream and render live. These are PLAIN "
+            f"TEXT markers — NOT a ``` code fence, NOT HTML tags, NOT a ::: fence. "
+            f"Example:\n\n"
+            f"    @@@VIZ-START\n"
+            f"    <svg viewBox=\"0 0 680 240\">…</svg>\n"
+            f"    @@@VIZ-END\n\n"
+            f"Write explanatory prose BEFORE and AFTER the block — do not describe "
+            f"the HTML source itself. Emit exactly ONE @@@VIZ-START/@@@VIZ-END pair "
+            f"for this tool call."
+        )
         return response, result_context
 

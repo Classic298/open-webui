@@ -7,11 +7,11 @@ description: Render rich interactive visuals — SVG diagrams, HTML widgets, Cha
 
 Render rich interactive visuals directly inline in chat using `render_visualization`. Supports **live streaming** — the iframe fills in token-by-token as you generate the HTML/SVG.
 
-## How to use — STREAMING mode (default, preferred)
+## How to use
 
 You call the tool with **only a title**, and then emit the HTML/SVG content wrapped in the **plain-text delimiters** `@@@VIZ-START` and `@@@VIZ-END`. The wrapper tails your stream and paints the iframe live.
 
-1. Call `render_visualization(title="…")` — omit `html_code`
+1. Call `render_visualization(title="…")`
 2. In your text response, write explanatory prose
 3. Open with `@@@VIZ-START` on its own line
 4. Emit the HTML/SVG **content fragment** (no `<!DOCTYPE>`, `<html>`, `<head>`, `<body>`)
@@ -45,19 +45,9 @@ As you can see, each query token attends to all key tokens simultaneously.
 - Requires **iframe Sandbox Allow Same Origin** in Open WebUI Settings → Interface. If disabled, the wrapper shows a notice.
 - During streaming, `<script>` tags are deferred; they execute once the block stabilizes (≈800ms after the last chunk, or immediately on `@@@VIZ-END`). This avoids partial/repeat execution as tokens arrive.
 
-## How to use — STATIC mode (legacy)
+## What's auto-injected
 
-Pass `html_code` explicitly to get the old, non-streaming behavior:
-
-```
-render_visualization(title="…", html_code="<svg>…</svg>")
-```
-
-The complete visualization appears when the tool returns. Use this only when you have reason to avoid streaming. Same content-fragment rules apply.
-
-## Both modes share
-
-- The tool auto-injects theme CSS, SVG classes, color ramps, height reporting, `sendPrompt()` bridge, and `openLink()` bridge
+- Theme CSS, SVG classes, color ramps, height reporting, `sendPrompt()` bridge, and `openLink()` bridge
 - Consider making diagrams **conversational** with `sendPrompt()` — see the [sendPrompt bridge](#sendprompt-bridge--conversational-diagrams) section for patterns and examples
 
 ## Output rules
