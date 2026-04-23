@@ -1149,9 +1149,6 @@ STRICT_SECURITY_SCRIPT = """
 
 STREAMING_OBSERVER_SCRIPT = """
 <script>
-window.addEventListener('error', function(ev) {
-  try { console.error('[iv-debug] window.error', { msg: ev.message, src: ev.filename, line: ev.lineno, col: ev.colno, err: ev.error && ev.error.stack }); } catch(_){}
-}, true);
 (function() {
   'use strict';
   // Delimiters — must match SKILL.md exactly. Chosen because:
@@ -1629,7 +1626,6 @@ window.addEventListener('error', function(ev) {
     // redeclares `const` / rebinds classes / double-wires event
     // listeners — always a bug, so collapse here.
     var key = src ? ('src:' + src) : ('code:' + code.length + ':' + _ivHashScript(code));
-    try { console.log('[iv-debug] enqueueScript', { src: src, codeLen: code.length, key: key, duplicate: !!_ivEnqueuedScripts[key] }); } catch(e) {}
     if (_ivEnqueuedScripts[key]) return;
     _ivEnqueuedScripts[key] = true;
 
@@ -1642,21 +1638,18 @@ window.addEventListener('error', function(ev) {
         return new Promise(function(resolve) {
           var el = document.createElement('script');
           attrs.forEach(function(pair) { el.setAttribute(pair[0], pair[1]); });
-          el.onload = function() { try { console.log('[iv-debug] src-script loaded', src); } catch(_){} resolve(); };
-          el.onerror = function() { try { console.error('[iv-debug] src-script FAILED', src); } catch(_){} resolve(); };
+          el.onload = el.onerror = function() { resolve(); };
           document.head.appendChild(el);
         });
       });
     } else {
       _ivScriptChain = _ivScriptChain.then(function() {
         try {
-          try { console.log('[iv-debug] inline-script exec begin', { codeLen: code.length, gridExists: !!document.getElementById('grid') }); } catch(_){}
           var el = document.createElement('script');
           attrs.forEach(function(pair) { el.setAttribute(pair[0], pair[1]); });
           el.textContent = code;
           document.head.appendChild(el);
-          try { console.log('[iv-debug] inline-script exec end (no throw from insertion)'); } catch(_){}
-        } catch(e) { try { console.error('[iv-debug] inline-script THREW', e); } catch(_){} }
+        } catch(e) { try { console.error(e); } catch(_){} }
       });
     }
   }
@@ -1736,13 +1729,17 @@ window.addEventListener('error', function(ev) {
   // embedded script, which the outer HTML parser sees and flips into
   // double-escape mode (corrupts our enclosing element boundary).
   var _ivOpen = '<' + 'script';
-  var _ivClose = '<' + '\\\\/script>';
+  var _ivClose = '<' + '\\/script>';
   var _ivStripPaired = new RegExp(_ivOpen + '[\\\\s\\\\S]*?' + _ivClose, 'gi');
   var _ivStripOpen = new RegExp(_ivOpen + '[\\\\s\\\\S]*$', 'i');
+  // Strip document-level tags that models sometimes wrap VIZ content in.
+  // These are invalid inside a div's innerHTML and mangle the DOM tree.
+  var _ivStripDocTags = new RegExp('<' + '!DOCTYPE[^>]*>|<' + '/?(?:html|head|body)[^>]*>', 'gi');
   function renderSafeInto(text, withScripts) {
     var html = withScripts
       ? text
       : text.replace(_ivStripPaired, '').replace(_ivStripOpen, '');
+    html = html.replace(_ivStripDocTags, '');
     var temp = document.createElement('div');
     try {
       temp.innerHTML = html;
@@ -1788,7 +1785,6 @@ window.addEventListener('error', function(ev) {
   function finalize(fullText) {
     if (finalized) return;
     finalized = true;
-    try { console.log('[iv-debug] finalize', { len: fullText.length, hasScriptTag: fullText.indexOf('<' + 'script') !== -1, tail: fullText.slice(-80) }); } catch(e) {}
     // Reconcile with scripts included — the reconciler materializes
     // fresh script elements which execute on insertion.
     renderSafeInto(fullText, true);
@@ -1841,7 +1837,6 @@ window.addEventListener('error', function(ev) {
     var currentText = getSearchableText(msg);
     var textChanged = currentText !== lastMsgText;
     lastMsgText = currentText;
-    try { console.log('[iv-debug] tick', { textChanged: textChanged, textLen: currentText.length, closed: isBlockClosed() }); } catch(e) {}
 
     // Live-stream detection by GROWTH — the first-seen searchable
     // length never grows on refreshes of completed messages, so
@@ -2265,4 +2260,3 @@ return (() => {
             f"for this tool call."
         )
         return response, result_context
-
