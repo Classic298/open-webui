@@ -1355,6 +1355,28 @@ STREAMING_OBSERVER_SCRIPT = """
     if (!msg) return;
     var myFrame = window.frameElement;
 
+    // Cleanup previous hide state so each tick starts from a clean tree.
+    // Stale [data-iv-chat-wrap] spans can end up adopting unrelated
+    // content after Svelte's streaming patcher inserts new nodes around
+    // them — unwrapping first prevents follow-up prose from inheriting
+    // display:none when it was never in the marker range.
+    try {
+      var wraps = msg.querySelectorAll('[data-iv-chat-wrap="1"]');
+      for (var w = 0; w < wraps.length; w++) {
+        var ws = wraps[w];
+        var wp = ws.parentNode;
+        if (!wp) continue;
+        while (ws.firstChild) wp.insertBefore(ws.firstChild, ws);
+        wp.removeChild(ws);
+      }
+      var hiddens = msg.querySelectorAll('[data-iv-chat-hidden="1"]');
+      for (var h = 0; h < hiddens.length; h++) {
+        var he = hiddens[h];
+        he.removeAttribute('data-iv-chat-hidden');
+        try { he.style.removeProperty('display'); } catch(e) {}
+      }
+    } catch(e) {}
+
     // Find my own embed container so we NEVER hide it — our iframe
     // lives inside it. Everything else in the message body is fair game.
     var myEmbedContainer = null;
@@ -1397,11 +1419,13 @@ STREAMING_OBSERVER_SCRIPT = """
       );
     } catch(e) { return; }
 
+    // Pass 1: categorize every text node as hide (inside marker range)
+    // or not. Keep non-hide nodes too — pass 2 needs them to detect
+    // blocks that mix hide and non-hide content (e.g. post-viz prose
+    // sharing a <p> with @@@VIZ-END).
     var inside = false;
+    var items = [];
     var tn;
-    var toHideEls = [];
-    var toWrapText = [];
-
     while ((tn = walker.nextNode())) {
       // Skip text nodes that live inside our embed container / iframe —
       // those are our own rendered UI, never chat content to hide.
@@ -1409,27 +1433,10 @@ STREAMING_OBSERVER_SCRIPT = """
       if (myEmbedContainer && myEmbedContainer.contains(tn)) continue;
 
       var tv = tn.nodeValue || '';
-      var startIdx = tv.indexOf(START_MARK);
-      var endIdx = tv.indexOf(END_MARK);
-      var hadStartLocal = startIdx !== -1;
-      var hadEndLocal = endIdx !== -1;
+      var hadStartLocal = tv.indexOf(START_MARK) !== -1;
+      var hadEndLocal = tv.indexOf(END_MARK) !== -1;
 
-      var hideThis = inside || hadStartLocal || hadEndLocal;
-
-      if (hideThis) {
-        var block = nearestBlockAncestor(tn.parentNode, msg);
-        if (block && block !== msg) {
-          // Make sure we're not about to hide the message itself, or
-          // any ancestor of our iframe.
-          if (!block.contains(myFrame)) {
-            toHideEls.push(block);
-          } else {
-            toWrapText.push(tn);
-          }
-        } else {
-          toWrapText.push(tn);
-        }
-      }
+      items.push({ tn: tn, hide: inside || hadStartLocal || hadEndLocal });
 
       // State flip AFTER this node is processed (so the node carrying
       // END_MARK is itself hidden).
@@ -1444,8 +1451,39 @@ STREAMING_OBSERVER_SCRIPT = """
       }
     }
 
-    // Apply hides (deduped via the attribute check inside hideEl).
-    for (var i = 0; i < toHideEls.length; i++) hideEl(toHideEls[i]);
+    // Pass 2: mark every element ancestor of a non-hide text node.
+    // A block is only safe to hide wholesale if nothing visible lives
+    // inside it.
+    var hasNonHide = new WeakSet();
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].hide) continue;
+      var cur = items[i].tn.parentNode;
+      while (cur && cur !== msg) {
+        if (cur.nodeType === 1) hasNonHide.add(cur);
+        cur = cur.parentNode;
+      }
+    }
+
+    // Pass 3: hide the nearest clean block ancestor; otherwise wrap the
+    // specific text node. Wrapping leaves an empty span where the text
+    // was but preserves sibling prose that shares the same block.
+    var toHideEls = [];
+    var toWrapText = [];
+    for (var k = 0; k < items.length; k++) {
+      if (!items[k].hide) continue;
+      var tn2 = items[k].tn;
+      var block = nearestBlockAncestor(tn2.parentNode, msg);
+      if (block && block !== msg &&
+          !block.contains(myFrame) &&
+          !hasNonHide.has(block)) {
+        toHideEls.push(block);
+      } else {
+        toWrapText.push(tn2);
+      }
+    }
+
+    // Apply (deduped via the attribute check inside hideEl).
+    for (var i2 = 0; i2 < toHideEls.length; i2++) hideEl(toHideEls[i2]);
     for (var j = 0; j < toWrapText.length; j++) wrapAndHideText(toWrapText[j]);
   }
 
