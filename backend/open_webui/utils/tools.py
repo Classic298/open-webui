@@ -1326,15 +1326,6 @@ async def get_tool_servers_data(servers: list[dict[str, Any]]) -> list[dict[str,
     return results
 
 
-class ToolServerHTTPError(Exception):
-    """Tool server returned a non-2xx HTTP status.
-
-    Expected, model-recoverable condition (e.g. 404 for a path the model
-    guessed wrong) rather than a transport/code failure, so it is logged
-    without a traceback.
-    """
-
-
 async def execute_tool_server(
     url: str,
     headers: dict[str, str],
@@ -1443,7 +1434,7 @@ async def execute_tool_server(
                 ) as response:
                     if response.status >= 400:
                         text = await response.text()
-                        raise ToolServerHTTPError(f'HTTP error {response.status}: {text}')
+                        raise Exception(f'HTTP error {response.status}: {text}')
 
                     try:
                         response_data = await response.json()
@@ -1468,7 +1459,7 @@ async def execute_tool_server(
                 ) as response:
                     if response.status >= 400:
                         text = await response.text()
-                        raise ToolServerHTTPError(f'HTTP error {response.status}: {text}')
+                        raise Exception(f'HTTP error {response.status}: {text}')
 
                     try:
                         response_data = await response.json()
@@ -1484,13 +1475,9 @@ async def execute_tool_server(
                     response_headers = response.headers
                     return (response_data, response_headers)
 
-    except ToolServerHTTPError as err:
-        error = str(err)
-        log.warning(f'API Request Error: {error}')
-        return ({'error': error}, None)
     except Exception as err:
         error = str(err)
-        log.exception(f'API Request Error: {error}')
+        log.warning(f'API Request Error: {error}')
         return ({'error': error}, None)
 
 
