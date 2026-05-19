@@ -272,7 +272,10 @@ async def fetch_url(
 
         return content
     except Exception as e:
-        log.exception(f'fetch_url error: {e}')
+        # Most failures here are expected bad input (invalid URL, YouTube
+        # video with no/age-restricted transcript) already surfaced to the
+        # model via the returned error, so don't log a full traceback.
+        log.warning(f'fetch_url error: {e}')
         return json.dumps({'error': str(e)})
 
 
