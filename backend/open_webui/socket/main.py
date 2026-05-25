@@ -758,8 +758,15 @@ async def yjs_document_update(sid, data):
 async def yjs_document_leave(sid, data):
     """Handle user leaving a document"""
     try:
+        # Auth + prior room join required; force server user_id so a fake "left" can't be broadcast.
+        user = SESSION_POOL.get(sid)
+        if not user:
+            return
+
         document_id = normalize_document_id(data['document_id'])
-        user_id = data.get('user_id', sid)
+        if sid not in get_session_ids_from_room(f'doc_{document_id}'):
+            return
+        user_id = user['id']
 
         log.info(f'User {user_id} leaving document {document_id}')
 
@@ -788,14 +795,19 @@ async def yjs_document_leave(sid, data):
 async def yjs_awareness_update(sid, data):
     """Handle awareness updates (cursors, selections, etc.)"""
     try:
-        document_id = data['document_id']
-        user_id = data.get('user_id', sid)
-        update = data['update']
+        # Auth + prior room join required; force server user_id so presence can't be spoofed.
+        user = SESSION_POOL.get(sid)
+        if not user:
+            return
+
+        document_id = normalize_document_id(data['document_id'])
+        if sid not in get_session_ids_from_room(f'doc_{document_id}'):
+            return
 
         # Broadcast awareness update to all other users in the document
         await sio.emit(
             'ydoc:awareness:update',
-            {'document_id': document_id, 'user_id': user_id, 'update': update},
+            {'document_id': document_id, 'user_id': user['id'], 'update': data['update']},
             room=f'doc_{document_id}',
             skip_sid=sid,
         )
