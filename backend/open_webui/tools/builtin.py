@@ -2512,13 +2512,19 @@ async def query_attached_files(
                 ids = [ids]
 
     try:
+        from open_webui.models.access_grants import AccessGrants
+        from open_webui.models.files import Files
+        from open_webui.models.knowledge import Knowledges
         from open_webui.retrieval.utils import query_collection
 
         embedding_function = __request__.app.state.EMBEDDING_FUNCTION
         if not embedding_function:
             return json.dumps({'error': 'Embedding function not configured'})
 
-        # Honor optional scoping by id; otherwise search everything attached.
+        user_id = __user__.get('id')
+        user_role = __user__.get('role', 'user')
+        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
+
         if ids:
             scoped_items = [item for item in __attached_files__ if item.get('id') in ids]
             if not scoped_items:
@@ -2529,31 +2535,58 @@ async def query_attached_files(
         else:
             scoped_items = list(__attached_files__)
 
-        # file -> file-{id}; collection -> {id} or explicit collection_names.
+        # Resolve each attached item to one or more collection names AFTER
+        # verifying the caller can actually read it. Items the user can't
+        # access are silently skipped (same posture as query_knowledge_files).
         # full-context items are already in the system prompt; skip defensively.
         collection_names: list[str] = []
-        for item in scoped_items:
-            if item.get('context') == 'full':
+        for attached_item in scoped_items:
+            if attached_item.get('context') == 'full':
                 continue
-            item_type = item.get('type')
-            item_id = item.get('id')
+            item_type = attached_item.get('type')
+            item_id = attached_item.get('id')
             if not item_id:
                 continue
+
             if item_type == 'file':
+                file_record = await Files.get_file_by_id(item_id)
+                if not file_record:
+                    continue
+                if not await _has_read_access_to_file(file_record, user_id, user_role):
+                    continue
                 collection_names.append(f'file-{item_id}')
+
             elif item_type == 'collection':
-                explicit_names = item.get('collection_names')
-                if explicit_names:
-                    collection_names.extend(explicit_names)
+                knowledge_record = await Knowledges.get_knowledge_by_id(item_id)
+                user_owns_kb = knowledge_record and (
+                    user_role == 'admin'
+                    or knowledge_record.user_id == user_id
+                    or await AccessGrants.has_access(
+                        user_id=user_id,
+                        resource_type='knowledge',
+                        resource_id=knowledge_record.id,
+                        permission='read',
+                        user_group_ids=set(user_group_ids),
+                    )
+                )
+                if not user_owns_kb:
+                    continue
+                explicit_collection_names = attached_item.get('collection_names')
+                if explicit_collection_names:
+                    collection_names.extend(explicit_collection_names)
                 else:
                     collection_names.append(item_id)
 
         if not collection_names:
-            return json.dumps({'error': 'No retrievable collections resolved from the attached items.'})
+            return json.dumps({
+                'error': 'No accessible retrievable collections resolved from the attached items.'
+            })
 
-        # De-duplicate while preserving order.
-        seen: set = set()
-        collection_names = [n for n in collection_names if not (n in seen or seen.add(n))]
+        seen_collection_names: set = set()
+        collection_names = [
+            name for name in collection_names
+            if not (name in seen_collection_names or seen_collection_names.add(name))
+        ]
 
         chunks: list[dict] = []
         query_results = await query_collection(
@@ -2565,19 +2598,19 @@ async def query_attached_files(
         )
 
         if query_results and 'documents' in query_results:
-            documents = query_results.get('documents', [[]])[0]
-            metadatas = query_results.get('metadatas', [[]])[0]
-            distances = query_results.get('distances', [[]])[0]
+            chunk_documents = query_results.get('documents', [[]])[0]
+            chunk_metadatas = query_results.get('metadatas', [[]])[0]
+            chunk_distances = query_results.get('distances', [[]])[0]
 
-            for idx, doc in enumerate(documents):
-                meta = metadatas[idx] if idx < len(metadatas) else {}
+            for chunk_index, document in enumerate(chunk_documents):
+                chunk_metadata = chunk_metadatas[chunk_index] if chunk_index < len(chunk_metadatas) else {}
                 chunk_info = {
-                    'content': doc,
-                    'source': meta.get('source') or meta.get('name') or 'Unknown',
-                    'file_id': meta.get('file_id', ''),
+                    'content': document,
+                    'source': chunk_metadata.get('source') or chunk_metadata.get('name') or 'Unknown',
+                    'file_id': chunk_metadata.get('file_id', ''),
                 }
-                if idx < len(distances):
-                    chunk_info['distance'] = distances[idx]
+                if chunk_index < len(chunk_distances):
+                    chunk_info['distance'] = chunk_distances[chunk_index]
                 chunks.append(chunk_info)
 
         chunks = chunks[:count]
