@@ -2584,11 +2584,12 @@ async def query_attached_files(
                 )
                 if not user_owns_kb:
                     continue
-                explicit_collection_names = attached_item.get('collection_names')
-                if explicit_collection_names:
-                    collection_names.extend(explicit_collection_names)
-                else:
-                    collection_names.append(item_id)
+                # Use the KB id directly as the collection name. Matches
+                # query_knowledge_files. The previous fallback that trusted
+                # attached_item['collection_names'] was a BOLA — a caller
+                # could legitimately own KB X but supply collection_names
+                # like ['file-<victim_id>'] and read unrelated collections.
+                collection_names.append(item_id)
 
         if not collection_names:
             return json.dumps({
