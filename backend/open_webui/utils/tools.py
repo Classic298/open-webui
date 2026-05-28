@@ -472,10 +472,13 @@ async def get_builtin_tools(
         model_knowledge = list(model_knowledge or []) + list(folder_knowledge)
 
     # Chat-attached items the model can read via query_attached_files.
-    # RAG_FULL_CONTEXT=on injects everything as full content, so nothing is
-    # retrievable in that case.
+    # RAG_FULL_CONTEXT or BYPASS_EMBEDDING_AND_RETRIEVAL force everything to
+    # full content, leaving nothing for chunked retrieval.
     attached_files = extra_params.get('__attached_files__') or []
-    force_full_context = getattr(request.app.state.config, 'RAG_FULL_CONTEXT', False)
+    force_full_context = (
+        request.app.state.config.RAG_FULL_CONTEXT
+        or request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL
+    )
     retrievable_attached_files = (
         []
         if force_full_context

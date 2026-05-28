@@ -2532,22 +2532,23 @@ async def query_attached_files(
         user_role = __user__.get('role', 'user')
         user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
 
-        if ids:
+        if ids is not None:
             scoped_items = [item for item in __attached_files__ if item.get('id') in ids]
             if not scoped_items:
                 return json.dumps({
                     'error': 'None of the requested ids match an attached file. '
-                    'Check the <attached_file id="..."> entries in <available_files>.'
+                    'Check the <attached_file id="..."> entries in <available_files>, '
+                    'or omit `ids` to search every attached item.'
                 })
         else:
             scoped_items = list(__attached_files__)
 
-        # Resolve each attached item to one or more collection names AFTER
-        # verifying the caller can actually read it. Items the user can't
-        # access are silently skipped (same posture as query_knowledge_files).
-        # full-context items are already in the system prompt; skip defensively.
-        collection_names: list[str] = []
+        # Resolve each attached item to collection names AFTER verifying the
+        # caller can read it. Items the user can't access are silently skipped
+        # (same posture as query_knowledge_files).
+        collection_names = []
         for attached_item in scoped_items:
+            # Belt-and-suspenders: callers already filter context == 'full'.
             if attached_item.get('context') == 'full':
                 continue
             item_type = attached_item.get('type')
@@ -2559,6 +2560,8 @@ async def query_attached_files(
                 file_record = await Files.get_file_by_id(item_id)
                 if not file_record:
                     continue
+                # Chat scope: deliberately do not pass __model_knowledge__ —
+                # this tool only reads items the user attached to *this* chat.
                 if not await _has_read_access_to_file(file_record, user_id, user_role):
                     continue
                 collection_names.append(f'file-{item_id}')
@@ -2589,11 +2592,7 @@ async def query_attached_files(
                 'error': 'No accessible retrievable collections resolved from the attached items.'
             })
 
-        seen_collection_names: set = set()
-        collection_names = [
-            name for name in collection_names
-            if not (name in seen_collection_names or seen_collection_names.add(name))
-        ]
+        collection_names = list(dict.fromkeys(collection_names))
 
         chunks: list[dict] = []
         query_results = await query_collection(

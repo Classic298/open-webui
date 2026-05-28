@@ -216,7 +216,7 @@ def get_citation_source_from_tool_result(
 
     Returns a list of sources (usually one, but query_knowledge_files may return multiple).
     """
-    _EXPECTS_LIST = {'search_web', 'query_knowledge_files'}
+    _EXPECTS_LIST = {'search_web', 'query_knowledge_files', 'query_attached_files'}
     _EXPECTS_DICT = {'view_knowledge_file', 'view_file'}
 
     try:
@@ -305,7 +305,7 @@ def get_citation_source_from_tool_result(
                 }
             ]
 
-        elif tool_name == 'query_knowledge_files':
+        elif tool_name in ('query_knowledge_files', 'query_attached_files'):
             chunks = tool_result
 
             # Group chunks by source for better citation display
@@ -928,6 +928,9 @@ def handle_responses_streaming_event(
         return current_output, None
 
 
+_ROSTER_HINT = 'Use query_attached_files with this id to inspect or search this item.'
+
+
 def get_source_context(sources: list, source_ids: dict = None, include_content: bool = True) -> str:
     """
     Render sources for the RAG <context> block.
@@ -943,33 +946,33 @@ def get_source_context(sources: list, source_ids: dict = None, include_content: 
     roster_parts: list[str] = []
 
     for source in sources:
-        src_meta = source.get('source') or {}
-        src_name = src_meta.get('name')
-        src_type = src_meta.get('type')
-        src_rid = src_meta.get('id')
+        source_info = source.get('source') or {}
+        source_name = source_info.get('name')
+        source_type = source_info.get('type')
+        source_resource_id = source_info.get('id')
 
         if source.get('roster_only'):
             roster_parts.append(
                 '<attached_file'
-                + (f' id="{src_rid}"' if src_rid else '')
-                + (f' name="{src_name}"' if src_name else '')
-                + (f' resource-type="{src_type}"' if src_type else '')
+                + (f' id="{source_resource_id}"' if source_resource_id else '')
+                + (f' name="{source_name}"' if source_name else '')
+                + (f' resource-type="{source_type}"' if source_type else '')
                 + ' mode="retrievable">'
-                + 'Use query_attached_files with this id to inspect or search this item.'
+                + _ROSTER_HINT
                 + '</attached_file>\n'
             )
             continue
 
-        for doc, meta in zip(source.get('document', []), source.get('metadata', [])):
-            source_id = (meta or {}).get('source') or src_rid or 'N/A'
+        for document_chunk, chunk_meta in zip(source.get('document', []), source.get('metadata', [])):
+            source_id = (chunk_meta or {}).get('source') or source_resource_id or 'N/A'
             if source_id not in source_ids:
                 source_ids[source_id] = len(source_ids) + 1
-            body = doc if include_content else ''
+            body = document_chunk if include_content else ''
             citeable_parts.append(
                 f'<source id="{source_ids[source_id]}"'
-                + (f' name="{src_name}"' if src_name else '')
-                + (f' resource-type="{src_type}"' if src_type else '')
-                + (f' resource-id="{src_rid}"' if src_rid else '')
+                + (f' name="{source_name}"' if source_name else '')
+                + (f' resource-type="{source_type}"' if source_type else '')
+                + (f' resource-id="{source_resource_id}"' if source_resource_id else '')
                 + f'>{body}</source>\n'
             )
 
@@ -1981,23 +1984,28 @@ async def chat_completion_files_handler(
     sources = []
 
     if files := body.get('metadata', {}).get('files', None):
-        force_full_context = request.app.state.config.RAG_FULL_CONTEXT
+        force_full_context = (
+            request.app.state.config.RAG_FULL_CONTEXT
+            or request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL
+        )
         all_full_context = all(item.get('context') == 'full' for item in files)
 
         if native_function_calling_with_builtins and not force_full_context:
-            # Partition: full-context items + natively-full types -> retrieval;
-            # everything else -> roster-only (model queries via tool on demand).
+            # Partition once: chunked file/collection -> roster (model uses
+            # query_attached_files); everything else (full-context items,
+            # natively-full types, unknown types) -> retrieval pipeline.
             FULL_CONTENT_TYPES = {'text', 'note', 'chat', 'url'}
-            full_context_items = [
-                item
-                for item in files
-                if item.get('context') == 'full' or item.get('type') in FULL_CONTENT_TYPES
-            ]
-            retrievable_items = [
-                item
-                for item in files
-                if item not in full_context_items and item.get('type') in {'file', 'collection'}
-            ]
+            RETRIEVABLE_TYPES = {'file', 'collection'}
+            full_context_items, retrievable_items = [], []
+            for item in files:
+                if item.get('context') == 'full' or item.get('type') in FULL_CONTENT_TYPES:
+                    full_context_items.append(item)
+                elif item.get('type') in RETRIEVABLE_TYPES:
+                    retrievable_items.append(item)
+                else:
+                    # Unknown type: route through retrieval to preserve
+                    # whatever shape get_sources_from_items returns today.
+                    full_context_items.append(item)
         else:
             full_context_items = files
             retrievable_items = []
@@ -4719,6 +4727,7 @@ async def streaming_chat_response_handler(response, ctx):
                                 'view_file',
                                 'view_knowledge_file',
                                 'query_knowledge_files',
+                                'query_attached_files',
                             ]
                             and tool_result
                         ):
@@ -4799,13 +4808,8 @@ async def streaming_chat_response_handler(response, ctx):
                         # Restoring to pre-RAG original prevents duplicating
                         # the RAG template across file and tool sources.
                         all_tool_call_sources.extend(tool_call_sources)
-                        native_fc_with_builtins_loop = metadata.get('native_fc_with_builtins', False)
-                        if native_fc_with_builtins_loop:
-                            # Skip per-iteration RAG re-application: initial system
-                            # stays byte-identical, tool results carry their own
-                            # source metadata for citations.
-                            pass
-                        elif all_tool_call_sources and user_message:
+                        skip_rag_reapply = metadata.get('native_fc_with_builtins', False)
+                        if not skip_rag_reapply and all_tool_call_sources and user_message:
                             # Restore pre-RAG message state before re-applying
                             # to prevent RAG template duplication.
                             original_user_message = metadata.get('user_prompt') or user_message
