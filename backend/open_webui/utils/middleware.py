@@ -930,28 +930,64 @@ def handle_responses_streaming_event(
 
 def get_source_context(sources: list, source_ids: dict = None, include_content: bool = True) -> str:
     """
-    Build <source> tag context string from citation sources.
+    Build context string from citation sources.
+
+    Regular sources (with document bodies) are rendered as <source id="N">body</source>
+    tags. Roster-only sources (sources flagged with roster_only=True, carrying no
+    document body) are rendered as <attached_file ...> entries inside an
+    <available_files> block. When both kinds are present, citeable sources are
+    grouped under <full_context_files> so the model can distinguish "content it
+    can cite" from "inventory it must query via tools first".
+
+    When include_content is False the document body is suppressed (citation
+    markers only), mirroring the pre-existing behavior used by the native tool
+    call loop.
     """
-    context_string = ''
     if source_ids is None:
         source_ids = {}
+
+    citeable_parts: list[str] = []
+    roster_parts: list[str] = []
+
     for source in sources:
+        src_meta = source.get('source') or {}
+        src_name = src_meta.get('name')
+        src_type = src_meta.get('type')
+        src_rid = src_meta.get('id')
+
+        if source.get('roster_only'):
+            roster_parts.append(
+                '<attached_file'
+                + (f' id="{src_rid}"' if src_rid else '')
+                + (f' name="{src_name}"' if src_name else '')
+                + (f' resource-type="{src_type}"' if src_type else '')
+                + ' mode="retrievable">'
+                + 'Use query_attached_files with this id to inspect or search this item.'
+                + '</attached_file>\n'
+            )
+            continue
+
         for doc, meta in zip(source.get('document', []), source.get('metadata', [])):
-            source_id = meta.get('source') or source.get('source', {}).get('id') or 'N/A'
+            source_id = (meta or {}).get('source') or src_rid or 'N/A'
             if source_id not in source_ids:
                 source_ids[source_id] = len(source_ids) + 1
-            src_name = source.get('source', {}).get('name')
-            src_type = source.get('source', {}).get('type')
-            src_rid = source.get('source', {}).get('id')
             body = doc if include_content else ''
-            context_string += (
+            citeable_parts.append(
                 f'<source id="{source_ids[source_id]}"'
                 + (f' name="{src_name}"' if src_name else '')
                 + (f' resource-type="{src_type}"' if src_type else '')
                 + (f' resource-id="{src_rid}"' if src_rid else '')
                 + f'>{body}</source>\n'
             )
-    return context_string
+
+    if not roster_parts:
+        return ''.join(citeable_parts)
+
+    parts: list[str] = []
+    if citeable_parts:
+        parts.append('<full_context_files>\n' + ''.join(citeable_parts) + '</full_context_files>\n')
+    parts.append('<available_files>\n' + ''.join(roster_parts) + '</available_files>\n')
+    return ''.join(parts)
 
 
 async def apply_source_context_to_messages(
@@ -960,6 +996,7 @@ async def apply_source_context_to_messages(
     sources: list,
     user_message: str,
     include_content: bool = True,
+    force_system_message: bool = False,
 ) -> list:
     """
     Build source context from citation sources and apply to messages.
@@ -968,6 +1005,13 @@ async def apply_source_context_to_messages(
     When include_content is False, emit <source> tags with id/name but no
     document body — useful when the content is already present elsewhere
     (e.g. in a tool result message) and only citation markers are needed.
+
+    When force_system_message is True, the rendered RAG template is appended
+    to the system message regardless of the RAG_SYSTEM_CONTEXT env flag. This
+    is used by the native-function-calling file-context path where the
+    <context> block holds a stable inventory (full-context bodies + a roster
+    of retrievable items) that belongs at the start of the prefix so it
+    caches across turns instead of mutating with every new user message.
     """
     if not sources or not user_message:
         return messages
@@ -978,7 +1022,7 @@ async def apply_source_context_to_messages(
     if not context:
         return messages
 
-    if RAG_SYSTEM_CONTEXT:
+    if RAG_SYSTEM_CONTEXT or force_system_message:
         return add_or_update_system_message(
             await rag_template(request.app.state.config.RAG_TEMPLATE, context, user_message),
             messages,
@@ -1933,17 +1977,66 @@ async def chat_image_generation_handler(request: Request, form_data: dict, extra
 
 
 async def chat_completion_files_handler(
-    request: Request, body: dict, extra_params: dict, user: UserModel
+    request: Request,
+    body: dict,
+    extra_params: dict,
+    user: UserModel,
+    native_function_calling_with_builtins: bool = False,
 ) -> tuple[dict, dict[str, list]]:
+    """
+    Build the file-context sources for the chat completion.
+
+    In the default (prompt-based FC) mode the behavior is unchanged: every
+    item in body.metadata.files is processed through get_sources_from_items
+    (chunked retrieval or full-content depending on item.context and the
+    RAG_FULL_CONTEXT admin flag), and the returned sources are later rendered
+    into the {{CONTEXT}} block of the RAG template.
+
+    When native_function_calling_with_builtins is True, items are partitioned
+    so that chunked-retrieval files/collections (item.context != 'full' and
+    type in {'file', 'collection'}) skip retrieval entirely and instead
+    produce a roster-only source entry that get_source_context renders as an
+    <attached_file ...> tag. The model is expected to call the
+    query_attached_files builtin tool on demand for those items. Full-context
+    items (and natively-full types like text/note/chat/url) still go through
+    get_sources_from_items so their bodies land in the stable system-prompt
+    <full_context_files> block.
+    """
     __event_emitter__ = extra_params['__event_emitter__']
     sources = []
 
     if files := body.get('metadata', {}).get('files', None):
-        # Check if all files are in full context mode
+        force_full_context = request.app.state.config.RAG_FULL_CONTEXT
         all_full_context = all(item.get('context') == 'full' for item in files)
 
+        if native_function_calling_with_builtins and not force_full_context:
+            # Partition: full-context items + natively-full types -> retrieval;
+            # everything else -> roster-only (model queries via tool on demand).
+            FULL_CONTENT_TYPES = {'text', 'note', 'chat', 'url'}
+            full_context_items = [
+                item
+                for item in files
+                if item.get('context') == 'full' or item.get('type') in FULL_CONTENT_TYPES
+            ]
+            retrievable_items = [
+                item
+                for item in files
+                if item not in full_context_items and item.get('type') in {'file', 'collection'}
+            ]
+        else:
+            full_context_items = files
+            retrievable_items = []
+
+        retrieval_all_full_context = (
+            all_full_context
+            if not native_function_calling_with_builtins
+            else all(item.get('context') == 'full' for item in full_context_items)
+        )
+
         queries = []
-        if not all_full_context:
+        needs_query_generation = bool(full_context_items) and not retrieval_all_full_context
+
+        if needs_query_generation:
             try:
                 queries_response = await generate_queries(
                     request,
@@ -1987,36 +2080,60 @@ async def chat_completion_files_handler(
         if len(queries) == 0:
             queries = [get_last_user_message(body['messages']) or '']
 
-        try:
-            # Directly await async get_sources_from_items (no thread needed - fully async now)
-            sources = await get_sources_from_items(
-                request=request,
-                items=files,
-                queries=queries,
-                embedding_function=lambda query, prefix: request.app.state.EMBEDDING_FUNCTION(
-                    query, prefix=prefix, user=user
-                ),
-                k=request.app.state.config.TOP_K,
-                reranking_function=(
-                    (lambda query, documents: request.app.state.RERANKING_FUNCTION(query, documents, user=user))
-                    if request.app.state.RERANKING_FUNCTION
-                    else None
-                ),
-                k_reranker=request.app.state.config.TOP_K_RERANKER,
-                r=request.app.state.config.RELEVANCE_THRESHOLD,
-                hybrid_bm25_weight=request.app.state.config.HYBRID_BM25_WEIGHT,
-                hybrid_search=request.app.state.config.ENABLE_RAG_HYBRID_SEARCH,
-                full_context=all_full_context or request.app.state.config.RAG_FULL_CONTEXT,
-                user=user,
+        if full_context_items:
+            try:
+                # Directly await async get_sources_from_items (no thread needed - fully async now)
+                sources = await get_sources_from_items(
+                    request=request,
+                    items=full_context_items,
+                    queries=queries,
+                    embedding_function=lambda query, prefix: request.app.state.EMBEDDING_FUNCTION(
+                        query, prefix=prefix, user=user
+                    ),
+                    k=request.app.state.config.TOP_K,
+                    reranking_function=(
+                        (lambda query, documents: request.app.state.RERANKING_FUNCTION(query, documents, user=user))
+                        if request.app.state.RERANKING_FUNCTION
+                        else None
+                    ),
+                    k_reranker=request.app.state.config.TOP_K_RERANKER,
+                    r=request.app.state.config.RELEVANCE_THRESHOLD,
+                    hybrid_bm25_weight=request.app.state.config.HYBRID_BM25_WEIGHT,
+                    hybrid_search=request.app.state.config.ENABLE_RAG_HYBRID_SEARCH,
+                    full_context=retrieval_all_full_context or force_full_context,
+                    user=user,
+                )
+            except Exception as e:
+                log.exception(e)
+
+        # Append roster-only entries for retrievable items so they appear in
+        # the system-prompt <available_files> block without triggering
+        # retrieval. The model resolves them through query_attached_files.
+        for item in retrievable_items:
+            sources.append(
+                {
+                    'source': {
+                        'type': item.get('type'),
+                        'id': item.get('id'),
+                        'name': item.get('name'),
+                    },
+                    'document': [],
+                    'metadata': [],
+                    'roster_only': True,
+                }
             )
-        except Exception as e:
-            log.exception(e)
 
         log.debug(f'rag_contexts:sources: {sources}')
 
         unique_ids = set()
         for source in sources or []:
             if not source or len(source.keys()) == 0:
+                continue
+
+            if source.get('roster_only'):
+                _id = (source.get('source') or {}).get('id')
+                if _id:
+                    unique_ids.add(_id)
                 continue
 
             documents = source.get('document') or []
@@ -2817,6 +2934,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                     **extra_params,
                     '__event_emitter__': event_emitter,
                     '__skill_ids__': [s.id for s in available_skills if s.id not in user_skill_ids],
+                    '__attached_files__': form_data.get('metadata', {}).get('files', []) or [],
                 },
                 features,
                 model,
@@ -2850,9 +2968,36 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # Check if file context extraction is enabled for this model (default True)
     file_context_enabled = (model.get('info', {}).get('meta', {}).get('capabilities') or {}).get('file_context', True)
 
+    # In native function calling mode with builtin tools enabled, we route
+    # chunked-retrieval items through the query_attached_files tool so each
+    # retrieval becomes an immutable tool_call/tool_result pair in chat
+    # history (cache-stable across turns). The file-context handler emits
+    # roster-only entries for those items and the RAG template is forced into
+    # the system message so the stable inventory stays in the prefix.
+    # Requires the not-payload_tools branch to have run (otherwise builtin
+    # tools — including query_attached_files — were never registered and
+    # the roster would point at a tool the model cannot call).
+    model_capabilities = (model.get('info', {}).get('meta', {}).get('capabilities') or {})
+    native_fc_with_builtins = (
+        not payload_tools
+        and metadata.get('params', {}).get('function_calling') == 'native'
+        and model_capabilities.get('builtin_tools', True)
+        and file_context_enabled
+    )
+    # Stash for the tool-call loop in streaming_chat_response_handler so it
+    # can skip the per-iteration RAG re-application that would otherwise
+    # mutate the system prompt every time a tool result is appended.
+    metadata['native_fc_with_builtins'] = native_fc_with_builtins
+
     if file_context_enabled:
         try:
-            form_data, flags = await chat_completion_files_handler(request, form_data, extra_params, user)
+            form_data, flags = await chat_completion_files_handler(
+                request,
+                form_data,
+                extra_params,
+                user,
+                native_function_calling_with_builtins=native_fc_with_builtins,
+            )
             sources.extend(flags.get('sources', []))
         except Exception as e:
             log.exception(e)
@@ -2867,7 +3012,13 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     # If context is not empty, insert it into the messages
     if sources and prompt:
-        form_data['messages'] = await apply_source_context_to_messages(request, form_data['messages'], sources, prompt)
+        form_data['messages'] = await apply_source_context_to_messages(
+            request,
+            form_data['messages'],
+            sources,
+            prompt,
+            force_system_message=native_fc_with_builtins,
+        )
 
     # If there are citations, add them to the data_items
     sources = [
@@ -4681,7 +4832,24 @@ async def streaming_chat_response_handler(response, ctx):
                         # Restoring to pre-RAG original prevents duplicating
                         # the RAG template across file and tool sources.
                         all_tool_call_sources.extend(tool_call_sources)
-                        if all_tool_call_sources and user_message:
+                        native_fc_with_builtins_loop = metadata.get('native_fc_with_builtins', False)
+                        if native_fc_with_builtins_loop:
+                            # Native FC + builtin tools path. The initial RAG
+                            # template (with <full_context_files> bodies and
+                            # the <available_files> roster) was placed in the
+                            # system prompt at process_chat_payload time and
+                            # must stay there byte-identical for the rest of
+                            # the turn so subsequent tool-loop iterations
+                            # cache-hit the entire prefix. Tool results carry
+                            # their own source/filename metadata in their
+                            # content, so the model can cite from them
+                            # directly without us appending empty
+                            # <source id="N"/> citation markers per
+                            # iteration. Skip restoration + re-application
+                            # entirely; the user-facing source list is still
+                            # streamed via events.
+                            pass
+                        elif all_tool_call_sources and user_message:
                             # Restore pre-RAG message state before re-applying
                             # to prevent RAG template duplication.
                             original_user_message = metadata.get('user_prompt') or user_message

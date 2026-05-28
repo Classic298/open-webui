@@ -65,6 +65,7 @@ from open_webui.tools.builtin import (
     list_knowledge,
     list_knowledge_bases,
     list_memories,
+    query_attached_files,
     query_knowledge_bases,
     query_knowledge_files,
     replace_memory_content,
@@ -469,6 +470,24 @@ async def get_builtin_tools(
     folder_knowledge = extra_params.get('__metadata__', {}).get('folder_knowledge')
     if folder_knowledge:
         model_knowledge = list(model_knowledge or []) + list(folder_knowledge)
+
+    # User-attached files/KBs for the current chat. In native FC mode with
+    # file_context enabled the middleware skips chunked retrieval for these
+    # items and instead emits a roster of <attached_file> entries into the
+    # system prompt; query_attached_files is the model's only path to read
+    # their content, so it must be registered whenever such items exist.
+    # When RAG_FULL_CONTEXT is on globally, every item is force-injected as
+    # full content already, so the retrievable list is empty by definition.
+    attached_files = extra_params.get('__attached_files__') or []
+    force_full_context = getattr(request.app.state.config, 'RAG_FULL_CONTEXT', False)
+    retrievable_attached_files = (
+        []
+        if force_full_context
+        else [
+            item for item in attached_files
+            if item.get('context') != 'full' and item.get('type') in ('file', 'collection')
+        ]
+    )
     if is_builtin_tool_enabled('knowledge'):
         from open_webui.env import ENABLE_KB_EXEC
 
@@ -497,6 +516,13 @@ async def get_builtin_tools(
                 grep_knowledge_files, search_knowledge_files, query_knowledge_files,
                 view_knowledge_file,
             ])
+
+        # Register query_attached_files whenever the chat carries retrievable
+        # user-attached files/KBs. This is independent of model_knowledge —
+        # model-attached knowledge is served by query_knowledge_files, while
+        # user-attached items are scoped to the current chat only.
+        if retrievable_attached_files:
+            builtin_functions.append(query_attached_files)
 
     # Chats tools - search and fetch user's chat history
     if is_builtin_tool_enabled('chats'):
@@ -619,6 +645,7 @@ async def get_builtin_tools(
                 '__chat_id__': extra_params.get('__chat_id__'),
                 '__message_id__': extra_params.get('__message_id__'),
                 '__model_knowledge__': model_knowledge,
+                '__attached_files__': retrievable_attached_files,
             },
         )
 

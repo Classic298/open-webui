@@ -1413,6 +1413,7 @@ Respond to the user query using the provided context, incorporating inline citat
 - If the answer isn't present in the context but you possess the knowledge, explain this to the user and provide the answer using your own understanding.
 - **Only include inline citations using [id] (e.g., [1], [2]) when the <source> tag includes an id attribute.**
 - Do not cite if the <source> tag does not contain an id attribute.
+- **Do not cite `<attached_file>` entries** — they are inventory listings of retrievable items, not evidence. To use an attached file as evidence, first call `query_attached_files` to retrieve its content, then cite from the returned `<source id="...">` tags.
 - Do not use XML tags in your response.
 - Ensure citations are concise and directly related to the information provided.
 

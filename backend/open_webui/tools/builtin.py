@@ -2467,6 +2467,138 @@ async def query_knowledge_files(
         return json.dumps({'error': str(e)})
 
 
+async def query_attached_files(
+    query: str,
+    ids: Optional[list[str]] = None,
+    count: int = 5,
+    __request__: Request = None,
+    __user__: dict = None,
+    __attached_files__: list[dict] = None,
+) -> str:
+    """
+    Search the files and knowledge bases the user attached to THIS chat.
+
+    Use this when the user references a document they uploaded or a knowledge
+    base they attached to the conversation and you need its content to answer.
+    Items appear in the system context inside <available_files> as
+    <attached_file id="..."> entries — pass those ids in `ids` to scope the
+    search, or omit `ids` to search all attached items.
+
+    This is distinct from query_knowledge_files, which searches knowledge
+    attached to the model itself.
+
+    :param query: The search query to find semantically relevant content within the user's attached files
+    :param ids: Optional list of attached_file ids (from <attached_file id="...">) to limit the search to. Omit to search all attached items.
+    :param count: Maximum number of chunks to return (default: 5)
+    :return: JSON list of chunks with content, source filename, file id, and relevance score
+    """
+    if __request__ is None:
+        return json.dumps({'error': 'Request context not available'})
+
+    if not __user__:
+        return json.dumps({'error': 'User context not available'})
+
+    if not __attached_files__:
+        return json.dumps({'error': 'No retrievable files are attached to this chat.'})
+
+    if isinstance(count, str):
+        try:
+            count = int(count)
+        except ValueError:
+            count = 5
+
+    if isinstance(ids, str):
+        if ids.lower() in ('none', 'null', ''):
+            ids = None
+        else:
+            try:
+                ids = json.loads(ids)
+            except json.JSONDecodeError:
+                ids = [ids]
+
+    try:
+        from open_webui.retrieval.utils import query_collection
+
+        embedding_function = __request__.app.state.EMBEDDING_FUNCTION
+        if not embedding_function:
+            return json.dumps({'error': 'Embedding function not configured'})
+
+        # Honor optional scoping by id; otherwise search everything attached.
+        if ids:
+            scoped_items = [item for item in __attached_files__ if item.get('id') in ids]
+            if not scoped_items:
+                return json.dumps({
+                    'error': 'None of the requested ids match an attached file. '
+                    'Check the <attached_file id="..."> entries in <available_files>.'
+                })
+        else:
+            scoped_items = list(__attached_files__)
+
+        # Build collection_names per item:
+        #  - type 'file'       -> file-{id}
+        #  - type 'collection' -> {id} (knowledge base id is the collection name)
+        # Items with context='full' are already injected into the system
+        # prompt and should not have been registered here, but we filter
+        # defensively in case middleware policy changes.
+        collection_names: list[str] = []
+        for item in scoped_items:
+            if item.get('context') == 'full':
+                continue
+            item_type = item.get('type')
+            item_id = item.get('id')
+            if not item_id:
+                continue
+            if item_type == 'file':
+                collection_names.append(f'file-{item_id}')
+            elif item_type == 'collection':
+                # Knowledge bases may carry an explicit list of collection_names
+                # (legacy / multi-collection KBs); use them when present,
+                # otherwise fall back to the KB id.
+                explicit_names = item.get('collection_names')
+                if explicit_names:
+                    collection_names.extend(explicit_names)
+                else:
+                    collection_names.append(item_id)
+
+        if not collection_names:
+            return json.dumps({'error': 'No retrievable collections resolved from the attached items.'})
+
+        # De-duplicate while preserving order.
+        seen: set = set()
+        collection_names = [n for n in collection_names if not (n in seen or seen.add(n))]
+
+        chunks: list[dict] = []
+        query_results = await query_collection(
+            __request__,
+            collection_names=collection_names,
+            queries=[query],
+            embedding_function=embedding_function,
+            k=count,
+        )
+
+        if query_results and 'documents' in query_results:
+            documents = query_results.get('documents', [[]])[0]
+            metadatas = query_results.get('metadatas', [[]])[0]
+            distances = query_results.get('distances', [[]])[0]
+
+            for idx, doc in enumerate(documents):
+                meta = metadatas[idx] if idx < len(metadatas) else {}
+                chunk_info = {
+                    'content': doc,
+                    'source': meta.get('source') or meta.get('name') or 'Unknown',
+                    'file_id': meta.get('file_id', ''),
+                }
+                if idx < len(distances):
+                    chunk_info['distance'] = distances[idx]
+                chunks.append(chunk_info)
+
+        chunks = chunks[:count]
+        return json.dumps(chunks, ensure_ascii=False)
+    except Exception as e:
+        log.exception(f'query_attached_files error: {e}')
+        return json.dumps({'error': str(e)})
+
+
 async def query_knowledge_bases(
     query: str,
     count: int = 5,
