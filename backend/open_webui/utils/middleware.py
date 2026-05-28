@@ -930,18 +930,11 @@ def handle_responses_streaming_event(
 
 def get_source_context(sources: list, source_ids: dict = None, include_content: bool = True) -> str:
     """
-    Build context string from citation sources.
+    Render sources for the RAG <context> block.
 
-    Regular sources (with document bodies) are rendered as <source id="N">body</source>
-    tags. Roster-only sources (sources flagged with roster_only=True, carrying no
-    document body) are rendered as <attached_file ...> entries inside an
-    <available_files> block. When both kinds are present, citeable sources are
-    grouped under <full_context_files> so the model can distinguish "content it
-    can cite" from "inventory it must query via tools first".
-
-    When include_content is False the document body is suppressed (citation
-    markers only), mirroring the pre-existing behavior used by the native tool
-    call loop.
+    Regular sources -> <source id="N">body</source>. Roster-only sources
+    (roster_only=True, no body) -> <attached_file ...> inside <available_files>.
+    Mixed input groups citeable sources under <full_context_files>.
     """
     if source_ids is None:
         source_ids = {}
@@ -999,19 +992,12 @@ async def apply_source_context_to_messages(
     force_system_message: bool = False,
 ) -> list:
     """
-    Build source context from citation sources and apply to messages.
-    Uses RAG template to format context for model consumption.
+    Render sources via RAG template and inject into messages.
 
-    When include_content is False, emit <source> tags with id/name but no
-    document body — useful when the content is already present elsewhere
-    (e.g. in a tool result message) and only citation markers are needed.
-
-    When force_system_message is True, the rendered RAG template is appended
-    to the system message regardless of the RAG_SYSTEM_CONTEXT env flag. This
-    is used by the native-function-calling file-context path where the
-    <context> block holds a stable inventory (full-context bodies + a roster
-    of retrievable items) that belongs at the start of the prefix so it
-    caches across turns instead of mutating with every new user message.
+    include_content=False emits citation-only <source> tags (content lives
+    elsewhere, e.g. tool results). force_system_message=True overrides
+    RAG_SYSTEM_CONTEXT and pins the template to the system prompt — used by
+    native FC mode to keep file context in a cache-stable prefix.
     """
     if not sources or not user_message:
         return messages
@@ -1984,23 +1970,12 @@ async def chat_completion_files_handler(
     native_function_calling_with_builtins: bool = False,
 ) -> tuple[dict, dict[str, list]]:
     """
-    Build the file-context sources for the chat completion.
+    Resolve body.metadata.files into sources for the RAG template.
 
-    In the default (prompt-based FC) mode the behavior is unchanged: every
-    item in body.metadata.files is processed through get_sources_from_items
-    (chunked retrieval or full-content depending on item.context and the
-    RAG_FULL_CONTEXT admin flag), and the returned sources are later rendered
-    into the {{CONTEXT}} block of the RAG template.
-
-    When native_function_calling_with_builtins is True, items are partitioned
-    so that chunked-retrieval files/collections (item.context != 'full' and
-    type in {'file', 'collection'}) skip retrieval entirely and instead
-    produce a roster-only source entry that get_source_context renders as an
-    <attached_file ...> tag. The model is expected to call the
-    query_attached_files builtin tool on demand for those items. Full-context
-    items (and natively-full types like text/note/chat/url) still go through
-    get_sources_from_items so their bodies land in the stable system-prompt
-    <full_context_files> block.
+    Default mode: every item runs through get_sources_from_items (unchanged).
+    Native FC mode: chunked file/collection items skip retrieval and become
+    roster-only entries; the model fetches them via query_attached_files.
+    Full-context items still retrieve normally.
     """
     __event_emitter__ = extra_params['__event_emitter__']
     sources = []
@@ -2106,9 +2081,7 @@ async def chat_completion_files_handler(
             except Exception as e:
                 log.exception(e)
 
-        # Append roster-only entries for retrievable items so they appear in
-        # the system-prompt <available_files> block without triggering
-        # retrieval. The model resolves them through query_attached_files.
+        # Roster entries for the <available_files> block (no retrieval).
         for item in retrievable_items:
             sources.append(
                 {
@@ -2968,15 +2941,11 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # Check if file context extraction is enabled for this model (default True)
     file_context_enabled = (model.get('info', {}).get('meta', {}).get('capabilities') or {}).get('file_context', True)
 
-    # In native function calling mode with builtin tools enabled, we route
-    # chunked-retrieval items through the query_attached_files tool so each
-    # retrieval becomes an immutable tool_call/tool_result pair in chat
-    # history (cache-stable across turns). The file-context handler emits
-    # roster-only entries for those items and the RAG template is forced into
-    # the system message so the stable inventory stays in the prefix.
-    # Requires the not-payload_tools branch to have run (otherwise builtin
-    # tools — including query_attached_files — were never registered and
-    # the roster would point at a tool the model cannot call).
+    # Native FC + builtin tools: route chunked retrieval through
+    # query_attached_files (immutable tool results = cache-stable). Gated on
+    # `not payload_tools` because that branch is where builtin tools get
+    # registered — without it the roster would point at a tool that doesn't
+    # exist in the model's tool list.
     model_capabilities = (model.get('info', {}).get('meta', {}).get('capabilities') or {})
     native_fc_with_builtins = (
         not payload_tools
@@ -2984,9 +2953,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         and model_capabilities.get('builtin_tools', True)
         and file_context_enabled
     )
-    # Stash for the tool-call loop in streaming_chat_response_handler so it
-    # can skip the per-iteration RAG re-application that would otherwise
-    # mutate the system prompt every time a tool result is appended.
+    # Read by the tool-call loop to skip per-iteration RAG re-application.
     metadata['native_fc_with_builtins'] = native_fc_with_builtins
 
     if file_context_enabled:
@@ -4834,20 +4801,9 @@ async def streaming_chat_response_handler(response, ctx):
                         all_tool_call_sources.extend(tool_call_sources)
                         native_fc_with_builtins_loop = metadata.get('native_fc_with_builtins', False)
                         if native_fc_with_builtins_loop:
-                            # Native FC + builtin tools path. The initial RAG
-                            # template (with <full_context_files> bodies and
-                            # the <available_files> roster) was placed in the
-                            # system prompt at process_chat_payload time and
-                            # must stay there byte-identical for the rest of
-                            # the turn so subsequent tool-loop iterations
-                            # cache-hit the entire prefix. Tool results carry
-                            # their own source/filename metadata in their
-                            # content, so the model can cite from them
-                            # directly without us appending empty
-                            # <source id="N"/> citation markers per
-                            # iteration. Skip restoration + re-application
-                            # entirely; the user-facing source list is still
-                            # streamed via events.
+                            # Skip per-iteration RAG re-application: initial system
+                            # stays byte-identical, tool results carry their own
+                            # source metadata for citations.
                             pass
                         elif all_tool_call_sources and user_message:
                             # Restore pre-RAG message state before re-applying

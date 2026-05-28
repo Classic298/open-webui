@@ -2476,21 +2476,16 @@ async def query_attached_files(
     __attached_files__: list[dict] = None,
 ) -> str:
     """
-    Search the files and knowledge bases the user attached to THIS chat.
+    Search files and knowledge bases the user attached to this chat.
 
-    Use this when the user references a document they uploaded or a knowledge
-    base they attached to the conversation and you need its content to answer.
-    Items appear in the system context inside <available_files> as
-    <attached_file id="..."> entries — pass those ids in `ids` to scope the
-    search, or omit `ids` to search all attached items.
+    Items appear in the system context as <attached_file id="..."> entries
+    inside <available_files>. Pass those ids to scope, or omit to search all.
+    Distinct from query_knowledge_files (which searches model-attached knowledge).
 
-    This is distinct from query_knowledge_files, which searches knowledge
-    attached to the model itself.
-
-    :param query: The search query to find semantically relevant content within the user's attached files
-    :param ids: Optional list of attached_file ids (from <attached_file id="...">) to limit the search to. Omit to search all attached items.
-    :param count: Maximum number of chunks to return (default: 5)
-    :return: JSON list of chunks with content, source filename, file id, and relevance score
+    :param query: Search query for semantically relevant content
+    :param ids: Optional list of <attached_file id="..."> ids to limit the search
+    :param count: Maximum number of chunks (default: 5)
+    :return: JSON list of chunks with content, source, file_id, distance
     """
     if __request__ is None:
         return json.dumps({'error': 'Request context not available'})
@@ -2534,12 +2529,8 @@ async def query_attached_files(
         else:
             scoped_items = list(__attached_files__)
 
-        # Build collection_names per item:
-        #  - type 'file'       -> file-{id}
-        #  - type 'collection' -> {id} (knowledge base id is the collection name)
-        # Items with context='full' are already injected into the system
-        # prompt and should not have been registered here, but we filter
-        # defensively in case middleware policy changes.
+        # file -> file-{id}; collection -> {id} or explicit collection_names.
+        # full-context items are already in the system prompt; skip defensively.
         collection_names: list[str] = []
         for item in scoped_items:
             if item.get('context') == 'full':
@@ -2551,9 +2542,6 @@ async def query_attached_files(
             if item_type == 'file':
                 collection_names.append(f'file-{item_id}')
             elif item_type == 'collection':
-                # Knowledge bases may carry an explicit list of collection_names
-                # (legacy / multi-collection KBs); use them when present,
-                # otherwise fall back to the KB id.
                 explicit_names = item.get('collection_names')
                 if explicit_names:
                     collection_names.extend(explicit_names)

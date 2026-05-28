@@ -471,13 +471,9 @@ async def get_builtin_tools(
     if folder_knowledge:
         model_knowledge = list(model_knowledge or []) + list(folder_knowledge)
 
-    # User-attached files/KBs for the current chat. In native FC mode with
-    # file_context enabled the middleware skips chunked retrieval for these
-    # items and instead emits a roster of <attached_file> entries into the
-    # system prompt; query_attached_files is the model's only path to read
-    # their content, so it must be registered whenever such items exist.
-    # When RAG_FULL_CONTEXT is on globally, every item is force-injected as
-    # full content already, so the retrievable list is empty by definition.
+    # Chat-attached items the model can read via query_attached_files.
+    # RAG_FULL_CONTEXT=on injects everything as full content, so nothing is
+    # retrievable in that case.
     attached_files = extra_params.get('__attached_files__') or []
     force_full_context = getattr(request.app.state.config, 'RAG_FULL_CONTEXT', False)
     retrievable_attached_files = (
@@ -517,10 +513,8 @@ async def get_builtin_tools(
                 view_knowledge_file,
             ])
 
-        # Register query_attached_files whenever the chat carries retrievable
-        # user-attached files/KBs. This is independent of model_knowledge —
-        # model-attached knowledge is served by query_knowledge_files, while
-        # user-attached items are scoped to the current chat only.
+        # Chat-scoped retrieval (distinct from query_knowledge_files which
+        # searches model-attached knowledge).
         if retrievable_attached_files:
             builtin_functions.append(query_attached_files)
 
