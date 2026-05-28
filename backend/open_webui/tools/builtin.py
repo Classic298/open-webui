@@ -2483,7 +2483,7 @@ async def query_attached_files(
     (which searches model-attached knowledge).
 
     :param query: Required. Natural-language search query used for semantic / hybrid retrieval over the attached items' content.
-    :param ids: Optional. List of plain attached-item id strings to scope the search to a subset of items. Each id is the literal value of the `id` attribute on an `<attached_file id="...">` entry in the system context (for example "abc123" for `<attached_file id="abc123" ...>`, not the whole tag). Omit to search every attached item.
+    :param ids: Optional. When omitted, the search runs against every file and knowledge base attached to this chat (the default). To narrow the search to a subset, supply a list of plain attached-item id strings — each id is the literal value of the `id` attribute on an `<attached_file id="...">` entry in the system context (for example "abc123" for `<attached_file id="abc123" ...>`, not the whole tag).
     :param count: Optional. Maximum number of result chunks to return. When omitted, defaults to the admin-configured retrieval TOP_K. When supplied, values above that limit are clamped down.
     :return: JSON list of chunks with content, source, file_id, distance
     """
