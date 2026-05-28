@@ -64,10 +64,8 @@ async def _has_read_access_to_file(
     from open_webui.models.users import Users
     from open_webui.utils.access_control.files import has_access_to_file
 
-    # has_access_to_file needs a real UserModel (it reads user.id and resolves
-    # the user's groups). Fetch by PK — a cheap identity-map lookup — instead
-    # of synthesizing a partial UserModel, which fails validation on the
-    # required email/name/timestamp fields.
+    # Fetch the real user (cheap PK lookup); a synthesized partial UserModel
+    # fails validation on the required email/name/timestamp fields.
     user = await Users.get_user_by_id(user_id)
     if not user:
         return False
@@ -2328,10 +2326,8 @@ async def query_knowledge_files(
         if knowledge_ids.lower() in ('none', 'null', ''):
             knowledge_ids = None
         else:
-            # Try to parse as JSON array if it looks like one. Wrap scalar
-            # parse results (e.g. '"abc"' → 'abc') in a list so downstream
-            # membership checks stay list-shaped instead of degenerating
-            # into substring or dict-key matching.
+            # Wrap scalar parse results (e.g. '"abc"' -> 'abc') in a list so
+            # membership checks stay list-shaped, not substring/dict-key matching.
             try:
                 parsed = json.loads(knowledge_ids)
                 knowledge_ids = parsed if isinstance(parsed, list) else [parsed]
@@ -2528,10 +2524,8 @@ async def query_attached_files(
         else:
             try:
                 parsed = json.loads(ids)
-                # JSON can deserialize to dict / scalar / list — only a list
-                # is valid for membership scoping. Wrap scalars in a list so
-                # `item.get('id') in ids` stays a list membership check
-                # (not a string substring check or dict-key lookup).
+                # Wrap non-list parses in a list so `id in ids` stays a list
+                # membership check (not substring/dict-key matching).
                 ids = parsed if isinstance(parsed, list) else [parsed]
             except json.JSONDecodeError:
                 ids = [ids]

@@ -2015,10 +2015,8 @@ async def chat_completion_files_handler(
             )
 
         if should_partition:
-            # Sort by id so the rendered <retrievable_files> / <full_context_files>
-            # blocks are byte-identical across turns regardless of how the
-            # frontend ordered metadata.files. Also stabilizes the source_ids
-            # numbering in get_source_context so [N] citations don't drift.
+            # Sort by id so the rendered blocks (and source_ids numbering) stay
+            # byte-stable across turns regardless of frontend file ordering.
             retrievable_items = sorted(
                 (item for item in files if is_retrievable(item)),
                 key=lambda item: item.get('id') or '',
@@ -2109,9 +2107,7 @@ async def chat_completion_files_handler(
                 log.exception(e)
 
         # Roster entries for the <retrievable_files> block (no retrieval).
-        # Both downstream consumers (get_source_context, the unique_ids
-        # counter below) short-circuit on roster_only before touching
-        # document/metadata, and the frontend uses `source.document ?? []`.
+        # Consumers short-circuit on roster_only before touching document/metadata.
         for item in retrievable_items:
             sources.append(
                 {
@@ -2798,10 +2794,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     builtin_tools_enabled = capabilities.get('builtin_tools', True)
     file_context_enabled = capabilities.get('file_context', True)
     is_native_fc = metadata.get('params', {}).get('function_calling') == 'native'
-    # Per-category builtin toggle. query_attached_files lives in the knowledge
-    # category (mirroring query_knowledge_files); if the admin disables that
-    # category, the tool isn't registered, so the new native-FC path must
-    # also revert — otherwise the roster would point at a missing tool.
+    # query_attached_files lives in the knowledge builtin category; if it's
+    # disabled the tool isn't registered, so the native-FC path must revert too.
     knowledge_builtins_enabled = (
         model.get('info', {}).get('meta', {}).get('builtinTools', {}).get('knowledge', True)
     )
