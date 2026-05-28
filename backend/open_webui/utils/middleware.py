@@ -2949,6 +2949,15 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # Check if file context extraction is enabled for this model (default True)
     file_context_enabled = (model.get('info', {}).get('meta', {}).get('capabilities') or {}).get('file_context', True)
 
+    # When the admin globally forces full content (RAG_FULL_CONTEXT or
+    # BYPASS_EMBEDDING_AND_RETRIEVAL), there's no chunked retrieval and no
+    # partition to do — preserve pre-PR behavior across the board (placement,
+    # tool-loop re-application).
+    force_full_context_outer = (
+        request.app.state.config.RAG_FULL_CONTEXT
+        or request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL
+    )
+
     # Native FC + builtin tools: route chunked retrieval through
     # query_attached_files (immutable tool results = cache-stable). Gated on
     # `not payload_tools` because that branch is where builtin tools get
@@ -2960,6 +2969,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         and metadata.get('params', {}).get('function_calling') == 'native'
         and model_capabilities.get('builtin_tools', True)
         and file_context_enabled
+        and not force_full_context_outer
     )
     # Read by the tool-call loop to skip per-iteration RAG re-application.
     metadata['native_fc_with_builtins'] = native_fc_with_builtins
