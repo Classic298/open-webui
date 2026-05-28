@@ -2926,16 +2926,22 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             # add_file_context injects <attached_files> URL refs into user
             # messages — should only run when the file_context capability is
             # on, to match the rest of the file-context pipeline.
+            # __attached_files__ powers query_attached_files registration in
+            # get_builtin_tools; same gate so a model with file_context=False
+            # can't reach attached file content through the new tool either.
             if file_context_enabled:
                 chat_id = metadata.get('chat_id')
                 form_data['messages'] = await add_file_context(form_data.get('messages', []), chat_id, user)
+                attached_files_for_tools = form_data.get('metadata', {}).get('files', []) or []
+            else:
+                attached_files_for_tools = []
             builtin_tools = await get_builtin_tools(
                 request,
                 {
                     **extra_params,
                     '__event_emitter__': event_emitter,
                     '__skill_ids__': [s.id for s in available_skills if s.id not in user_skill_ids],
-                    '__attached_files__': form_data.get('metadata', {}).get('files', []) or [],
+                    '__attached_files__': attached_files_for_tools,
                 },
                 features,
                 model,
@@ -2975,6 +2981,19 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         or request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL
     )
 
+    # The new path is only meaningful when there's at least one chunked
+    # file/collection to route through query_attached_files. Without it,
+    # forcing system-prompt placement and skipping the tool-loop RAG
+    # re-application would regress citation handling for unrelated native
+    # tool calls (search_web, query_knowledge_files, view_file, etc.) in
+    # no-file or full-context-only chats.
+    attached_files_list = (form_data.get('metadata') or {}).get('files') or []
+    has_retrievable_attached_files = any(
+        item.get('context') != 'full'
+        and item.get('type') in ('file', 'collection')
+        for item in attached_files_list
+    )
+
     # Native FC + builtin tools: route chunked retrieval through
     # query_attached_files (immutable tool results = cache-stable). Gated on
     # `not payload_tools` because that branch is where builtin tools get
@@ -2987,6 +3006,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         and knowledge_builtins_enabled
         and file_context_enabled
         and not force_full_context
+        and has_retrievable_attached_files
     )
     # Read by the tool-call loop to skip per-iteration RAG re-application.
     metadata['native_fc_with_builtins'] = native_fc_with_builtins
