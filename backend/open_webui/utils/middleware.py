@@ -2014,8 +2014,18 @@ async def chat_completion_files_handler(
             )
 
         if should_partition:
-            retrievable_items = [item for item in files if is_retrievable(item)]
-            full_context_items = [item for item in files if not is_retrievable(item)]
+            # Sort by id so the rendered <available_files> / <full_context_files>
+            # blocks are byte-identical across turns regardless of how the
+            # frontend ordered metadata.files. Also stabilizes the source_ids
+            # numbering in get_source_context so [N] citations don't drift.
+            retrievable_items = sorted(
+                (item for item in files if is_retrievable(item)),
+                key=lambda item: item.get('id') or '',
+            )
+            full_context_items = sorted(
+                (item for item in files if not is_retrievable(item)),
+                key=lambda item: item.get('id') or '',
+            )
         else:
             retrievable_items = []
             full_context_items = list(files)

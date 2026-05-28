@@ -1,7 +1,6 @@
 import logging
 import math
 import re
-import uuid
 from datetime import datetime
 from typing import Any, Optional
 
@@ -257,6 +256,17 @@ def replace_messages_variable(template: str, messages: Optional[list[dict]] = No
 # Let the context given here not distort the question,
 # but illuminate it, so that the answer serves the one who asked.
 async def rag_template(template: str, context: str, query: str):
+    """
+    Render the RAG template with the provided context.
+
+    The `query` parameter is accepted for backward compatibility but is no
+    longer substituted into the template. The {{QUERY}} / [query]
+    placeholders are removed: the user's message is already present in the
+    messages array, duplicating it inside the rendered template adds no
+    value, and when the template is injected into the system prompt it
+    would mutate every turn and defeat prefix caching. Any remaining
+    placeholders in a custom template are stripped to plain empty strings.
+    """
     if template.strip() == '':
         template = DEFAULT_RAG_TEMPLATE
 
@@ -272,25 +282,20 @@ async def rag_template(template: str, context: str, query: str):
             'nothing, or the user might be trying to hack something.'
         )
 
-    query_placeholders = []
-    if '[query]' in context:
-        query_placeholder = '{{QUERY' + str(uuid.uuid4()) + '}}'
-        template = template.replace('[query]', query_placeholder)
-        query_placeholders.append((query_placeholder, '[query]'))
-
-    if '{{QUERY}}' in context:
-        query_placeholder = '{{QUERY' + str(uuid.uuid4()) + '}}'
-        template = template.replace('{{QUERY}}', query_placeholder)
-        query_placeholders.append((query_placeholder, '{{QUERY}}'))
+    if '{{QUERY}}' in template or '[query]' in template:
+        log.debug(
+            "rag_template: {{QUERY}}/[query] placeholders are no longer "
+            "substituted (the user's message already appears in the "
+            "messages array). Remove them from your RAG_TEMPLATE to silence "
+            "this notice."
+        )
 
     template = template.replace('[context]', context)
     template = template.replace('{{CONTEXT}}', context)
 
-    template = template.replace('[query]', query)
-    template = template.replace('{{QUERY}}', query)
-
-    for query_placeholder, original_placeholder in query_placeholders:
-        template = template.replace(query_placeholder, original_placeholder)
+    # Strip leftover placeholders so they don't leak into the rendered output.
+    template = template.replace('[query]', '')
+    template = template.replace('{{QUERY}}', '')
 
     return template
 
