@@ -259,13 +259,10 @@ async def rag_template(template: str, context: str, query: str):
     """
     Render the RAG template with the provided context.
 
-    The `query` parameter is accepted for backward compatibility but is no
-    longer substituted into the template. The {{QUERY}} / [query]
-    placeholders are removed: the user's message is already present in the
-    messages array, duplicating it inside the rendered template adds no
-    value, and when the template is injected into the system prompt it
-    would mutate every turn and defeat prefix caching. Any remaining
-    placeholders in a custom template are stripped to plain empty strings.
+    `query` is kept for backward compatibility but no longer substituted:
+    the user's message is already in the messages array, and substituting it
+    here would mutate a system-pinned template every turn and defeat prefix
+    caching. {{QUERY}} / [query] placeholders are stripped to empty.
     """
     if template.strip() == '':
         template = DEFAULT_RAG_TEMPLATE

@@ -949,9 +949,10 @@ def get_source_context(sources: list, source_ids: dict = None, include_content: 
     """
     Render sources for the RAG <context> block.
 
-    Regular sources -> <source id="N">body</source>. Roster-only sources
-    (roster_only=True, no body) -> <attached_file ...> inside <available_files>.
-    Mixed input groups citeable sources under <full_context_files>.
+    Citeable sources -> <source id="N">body</source>. Roster-only sources
+    (roster_only=True, no body) -> <retrievable_file ...> inside <retrievable_files>.
+    Citeable-only input stays bare (no wrapper, backward compatible); mixed
+    input wraps citeable sources under <full_context_files>.
     """
     if source_ids is None:
         source_ids = {}
@@ -2014,7 +2015,7 @@ async def chat_completion_files_handler(
             )
 
         if should_partition:
-            # Sort by id so the rendered <available_files> / <full_context_files>
+            # Sort by id so the rendered <retrievable_files> / <full_context_files>
             # blocks are byte-identical across turns regardless of how the
             # frontend ordered metadata.files. Also stabilizes the source_ids
             # numbering in get_source_context so [N] citations don't drift.
@@ -2107,7 +2108,7 @@ async def chat_completion_files_handler(
             except Exception as e:
                 log.exception(e)
 
-        # Roster entries for the <available_files> block (no retrieval).
+        # Roster entries for the <retrievable_files> block (no retrieval).
         # Both downstream consumers (get_source_context, the unique_ids
         # counter below) short-circuit on roster_only before touching
         # document/metadata, and the frontend uses `source.document ?? []`.
@@ -2933,17 +2934,12 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
         # Inject builtin tools for native function calling based on enabled features and model capability
         if is_native_fc and builtin_tools_enabled:
-            # add_file_context injects <attached_files> URL refs (multimodal
-            # viewing / download pointers) into user messages. These don't
-            # carry file content — they're URL pointers — so they run
-            # regardless of the file_context capability (which gates textual
-            # file-content injection). Pre-PR behavior preserved.
+            # add_file_context injects URL pointers (not content), so it runs
+            # regardless of the file_context capability — pre-PR behavior.
             chat_id = metadata.get('chat_id')
             form_data['messages'] = await add_file_context(form_data.get('messages', []), chat_id, user)
-            # __attached_files__ powers query_attached_files registration,
-            # which DOES expose file content — gate on file_context_enabled
-            # so a model with the capability off can't reach attached file
-            # content through the new tool.
+            # query_attached_files exposes content, so gate its input list on
+            # the file_context capability.
             attached_files_for_tools = (
                 form_data.get('metadata', {}).get('files', []) or []
                 if file_context_enabled
@@ -2986,21 +2982,16 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 except Exception as e:
                     log.exception(e)
 
-    # When the admin globally forces full content (RAG_FULL_CONTEXT or
-    # BYPASS_EMBEDDING_AND_RETRIEVAL), there's no chunked retrieval and no
-    # partition to do — preserve pre-PR behavior across the board (placement,
-    # tool-loop re-application).
+    # Admin-forced full content (either flag) means no chunked retrieval to
+    # partition — keep pre-PR behavior.
     force_full_context = (
         request.app.state.config.RAG_FULL_CONTEXT
         or request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL
     )
 
-    # The new path is only meaningful when there's at least one chunked
-    # file/collection to route through query_attached_files. Without it,
-    # forcing system-prompt placement and skipping the tool-loop RAG
-    # re-application would regress citation handling for unrelated native
-    # tool calls (search_web, query_knowledge_files, view_file, etc.) in
-    # no-file or full-context-only chats.
+    # Only activate when there's a chunked file/collection to route through
+    # the tool; otherwise the gate would needlessly regress citation handling
+    # for unrelated native tool calls in no-file / full-context-only chats.
     attached_files_list = (form_data.get('metadata') or {}).get('files') or []
     has_retrievable_attached_files = any(
         item.get('context') != 'full'
@@ -3008,11 +2999,9 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         for item in attached_files_list
     )
 
-    # Native FC + builtin tools: route chunked retrieval through
-    # query_attached_files (immutable tool results = cache-stable). Gated on
-    # `not payload_tools` because that branch is where builtin tools get
-    # registered — without it the roster would point at a tool that doesn't
-    # exist in the model's tool list.
+    # `not payload_tools` because builtin tools (incl. query_attached_files)
+    # only get registered in that branch — otherwise the roster would point
+    # at a tool the model doesn't have.
     native_fc_with_builtins = (
         not payload_tools
         and is_native_fc

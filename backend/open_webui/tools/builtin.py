@@ -2453,10 +2453,11 @@ async def query_knowledge_files(
                 distances = query_results.get('distances', [[]])[0]
 
                 for idx, doc in enumerate(documents):
+                    meta = (metadatas[idx] if idx < len(metadatas) else None) or {}
                     chunk_info = {
                         'content': doc,
-                        'source': metadatas[idx].get('source', metadatas[idx].get('name', 'Unknown')),
-                        'file_id': metadatas[idx].get('file_id', ''),
+                        'source': meta.get('source') or meta.get('name') or 'Unknown',
+                        'file_id': meta.get('file_id', ''),
                     }
                     if idx < len(distances):
                         chunk_info['distance'] = distances[idx]
@@ -2595,11 +2596,9 @@ async def query_attached_files(
                 )
                 if not user_owns_kb:
                     continue
-                # Use the KB id directly as the collection name. Matches
-                # query_knowledge_files. The previous fallback that trusted
-                # attached_item['collection_names'] was a BOLA — a caller
-                # could legitimately own KB X but supply collection_names
-                # like ['file-<victim_id>'] and read unrelated collections.
+                # Use the access-checked KB id directly (matches
+                # query_knowledge_files). Trusting client-supplied
+                # collection_names here would be a BOLA.
                 collection_names.append(item_id)
 
         if not collection_names:
