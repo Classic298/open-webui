@@ -931,6 +931,11 @@ def handle_responses_streaming_event(
 _ROSTER_HINT = 'Use query_attached_files with this id to inspect or search this item.'
 
 
+def _format_tag_attrs(pairs: list[tuple[str, str | None]]) -> str:
+    """Render space-prefixed XML attributes, skipping any with falsy values."""
+    return ''.join(f' {key}="{value}"' for key, value in pairs if value)
+
+
 def get_source_context(sources: list, source_ids: dict = None, include_content: bool = True) -> str:
     """
     Render sources for the RAG <context> block.
@@ -952,14 +957,13 @@ def get_source_context(sources: list, source_ids: dict = None, include_content: 
         source_resource_id = source_info.get('id')
 
         if source.get('roster_only'):
+            attrs = _format_tag_attrs([
+                ('id', source_resource_id),
+                ('name', source_name),
+                ('resource-type', source_type),
+            ])
             roster_parts.append(
-                '<attached_file'
-                + (f' id="{source_resource_id}"' if source_resource_id else '')
-                + (f' name="{source_name}"' if source_name else '')
-                + (f' resource-type="{source_type}"' if source_type else '')
-                + ' mode="retrievable">'
-                + _ROSTER_HINT
-                + '</attached_file>\n'
+                f'<attached_file{attrs} mode="retrievable">{_ROSTER_HINT}</attached_file>\n'
             )
             continue
 
@@ -967,14 +971,14 @@ def get_source_context(sources: list, source_ids: dict = None, include_content: 
             source_id = (chunk_meta or {}).get('source') or source_resource_id or 'N/A'
             if source_id not in source_ids:
                 source_ids[source_id] = len(source_ids) + 1
+            attrs = _format_tag_attrs([
+                ('id', str(source_ids[source_id])),
+                ('name', source_name),
+                ('resource-type', source_type),
+                ('resource-id', source_resource_id),
+            ])
             body = document_chunk if include_content else ''
-            citeable_parts.append(
-                f'<source id="{source_ids[source_id]}"'
-                + (f' name="{source_name}"' if source_name else '')
-                + (f' resource-type="{source_type}"' if source_type else '')
-                + (f' resource-id="{source_resource_id}"' if source_resource_id else '')
-                + f'>{body}</source>\n'
-            )
+            citeable_parts.append(f'<source{attrs}>{body}</source>\n')
 
     if not roster_parts:
         return ''.join(citeable_parts)
@@ -1988,32 +1992,27 @@ async def chat_completion_files_handler(
             request.app.state.config.RAG_FULL_CONTEXT
             or request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL
         )
-        all_full_context = all(item.get('context') == 'full' for item in files)
+        # Only chunked file / collection items get diverted to the roster;
+        # everything else (full-context items, natively-full types, unknown
+        # types) stays in the retrieval pipeline.
+        RETRIEVABLE_TYPES = {'file', 'collection'}
+        should_partition = native_function_calling_with_builtins and not force_full_context
 
-        if native_function_calling_with_builtins and not force_full_context:
-            # Partition once: chunked file/collection -> roster (model uses
-            # query_attached_files); everything else (full-context items,
-            # natively-full types, unknown types) -> retrieval pipeline.
-            FULL_CONTENT_TYPES = {'text', 'note', 'chat', 'url'}
-            RETRIEVABLE_TYPES = {'file', 'collection'}
-            full_context_items, retrievable_items = [], []
-            for item in files:
-                if item.get('context') == 'full' or item.get('type') in FULL_CONTENT_TYPES:
-                    full_context_items.append(item)
-                elif item.get('type') in RETRIEVABLE_TYPES:
-                    retrievable_items.append(item)
-                else:
-                    # Unknown type: route through retrieval to preserve
-                    # whatever shape get_sources_from_items returns today.
-                    full_context_items.append(item)
+        def is_retrievable(item):
+            return (
+                item.get('context') != 'full'
+                and item.get('type') in RETRIEVABLE_TYPES
+            )
+
+        if should_partition:
+            retrievable_items = [item for item in files if is_retrievable(item)]
+            full_context_items = [item for item in files if not is_retrievable(item)]
         else:
-            full_context_items = files
             retrievable_items = []
+            full_context_items = list(files)
 
-        retrieval_all_full_context = (
-            all_full_context
-            if not native_function_calling_with_builtins
-            else all(item.get('context') == 'full' for item in full_context_items)
+        retrieval_all_full_context = all(
+            item.get('context') == 'full' for item in full_context_items
         )
 
         queries = []
@@ -2090,6 +2089,9 @@ async def chat_completion_files_handler(
                 log.exception(e)
 
         # Roster entries for the <available_files> block (no retrieval).
+        # Both downstream consumers (get_source_context, the unique_ids
+        # counter below) short-circuit on roster_only before touching
+        # document/metadata, and the frontend uses `source.document ?? []`.
         for item in retrievable_items:
             sources.append(
                 {
@@ -2098,8 +2100,6 @@ async def chat_completion_files_handler(
                         'id': item.get('id'),
                         'name': item.get('name'),
                     },
-                    'document': [],
-                    'metadata': [],
                     'roster_only': True,
                 }
             )
@@ -2774,6 +2774,11 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # When the caller provides an explicit OpenAI-style `tools` array in the
     # request body, skip all server-side tool resolution and pass the caller's
     # tools through to the model unchanged.
+    capabilities = (model.get('info', {}).get('meta', {}).get('capabilities') or {})
+    builtin_tools_enabled = capabilities.get('builtin_tools', True)
+    file_context_enabled = capabilities.get('file_context', True)
+    is_native_fc = metadata.get('params', {}).get('function_calling') == 'native'
+
     if not payload_tools:
         # Server side tools
         tool_ids = metadata.get('tool_ids', None)
@@ -2901,11 +2906,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             metadata['mcp_clients'] = mcp_clients
 
         # Inject builtin tools for native function calling based on enabled features and model capability
-        # Check if builtin_tools capability is enabled for this model (defaults to True if not specified)
-        builtin_tools_enabled = (model.get('info', {}).get('meta', {}).get('capabilities') or {}).get(
-            'builtin_tools', True
-        )
-        if metadata.get('params', {}).get('function_calling') == 'native' and builtin_tools_enabled:
+        if is_native_fc and builtin_tools_enabled:
             # Add file context to user messages
             chat_id = metadata.get('chat_id')
             form_data['messages'] = await add_file_context(form_data.get('messages', []), chat_id, user)
@@ -2929,7 +2930,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             # (e.g. pipe functions) can access all tools including MCP and builtins.
             metadata['tools'] = tools_dict
 
-            if metadata.get('params', {}).get('function_calling') == 'native':
+            if is_native_fc:
                 # If the function calling is native, then call the tools function calling handler
                 form_data['tools'] = [
                     {'type': 'function', 'function': tool.get('spec', {})} for tool in tools_dict.values()
@@ -2946,14 +2947,11 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 except Exception as e:
                     log.exception(e)
 
-    # Check if file context extraction is enabled for this model (default True)
-    file_context_enabled = (model.get('info', {}).get('meta', {}).get('capabilities') or {}).get('file_context', True)
-
     # When the admin globally forces full content (RAG_FULL_CONTEXT or
     # BYPASS_EMBEDDING_AND_RETRIEVAL), there's no chunked retrieval and no
     # partition to do — preserve pre-PR behavior across the board (placement,
     # tool-loop re-application).
-    force_full_context_outer = (
+    force_full_context = (
         request.app.state.config.RAG_FULL_CONTEXT
         or request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL
     )
@@ -2963,13 +2961,12 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # `not payload_tools` because that branch is where builtin tools get
     # registered — without it the roster would point at a tool that doesn't
     # exist in the model's tool list.
-    model_capabilities = (model.get('info', {}).get('meta', {}).get('capabilities') or {})
     native_fc_with_builtins = (
         not payload_tools
-        and metadata.get('params', {}).get('function_calling') == 'native'
-        and model_capabilities.get('builtin_tools', True)
+        and is_native_fc
+        and builtin_tools_enabled
         and file_context_enabled
-        and not force_full_context_outer
+        and not force_full_context
     )
     # Read by the tool-call loop to skip per-iteration RAG re-application.
     metadata['native_fc_with_builtins'] = native_fc_with_builtins
