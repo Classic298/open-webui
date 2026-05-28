@@ -2470,7 +2470,7 @@ async def query_knowledge_files(
 async def query_attached_files(
     query: str,
     ids: Optional[list[str]] = None,
-    count: int = 5,
+    count: Optional[int] = None,
     __request__: Request = None,
     __user__: dict = None,
     __attached_files__: list[dict] = None,
@@ -2484,7 +2484,7 @@ async def query_attached_files(
 
     :param query: Search query for semantically relevant content
     :param ids: Optional list of <attached_file id="..."> ids to limit the search
-    :param count: Maximum number of chunks (default: 5)
+    :param count: Optional max chunks; defaults to the admin-configured retrieval TOP_K, and any value above that cap is clamped down
     :return: JSON list of chunks with content, source, file_id, distance
     """
     if __request__ is None:
@@ -2496,11 +2496,18 @@ async def query_attached_files(
     if not __attached_files__:
         return json.dumps({'error': 'No retrievable files are attached to this chat.'})
 
+    admin_top_k = getattr(__request__.app.state.config, 'TOP_K', 5) or 5
+
     if isinstance(count, str):
         try:
             count = int(count)
         except ValueError:
-            count = 5
+            count = None
+
+    if not isinstance(count, int) or count <= 0:
+        count = admin_top_k
+    else:
+        count = min(count, admin_top_k)
 
     if isinstance(ids, str):
         if ids.lower() in ('none', 'null', ''):
