@@ -2478,13 +2478,13 @@ async def query_attached_files(
     """
     Search files and knowledge bases the user attached to this chat.
 
-    Items appear in the system context as <attached_file id="..."> entries
-    inside <available_files>. Pass those ids to scope, or omit to search all.
-    Distinct from query_knowledge_files (which searches model-attached knowledge).
+    Items appear in the system context inside <available_files> as
+    <attached_file id="..."> entries. Distinct from query_knowledge_files
+    (which searches model-attached knowledge).
 
-    :param query: Search query for semantically relevant content
-    :param ids: Optional list of <attached_file id="..."> ids to limit the search
-    :param count: Optional max chunks; defaults to the admin-configured retrieval TOP_K, and any value above that cap is clamped down
+    :param query: Required. Natural-language search query used for semantic / hybrid retrieval over the attached items' content.
+    :param ids: Optional. List of plain attached-item id strings to scope the search to a subset of items. Each id is the literal value of the `id` attribute on an `<attached_file id="...">` entry in the system context (for example "abc123" for `<attached_file id="abc123" ...>`, not the whole tag). Omit to search every attached item.
+    :param count: Optional. Maximum number of result chunks to return. When omitted, defaults to the admin-configured retrieval TOP_K. When supplied, values above that limit are clamped down.
     :return: JSON list of chunks with content, source, file_id, distance
     """
     if __request__ is None:
