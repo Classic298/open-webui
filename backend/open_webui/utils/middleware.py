@@ -932,8 +932,17 @@ _ROSTER_HINT = 'Use query_attached_files with this id to inspect or search this 
 
 
 def _format_tag_attrs(pairs: list[tuple[str, str | None]]) -> str:
-    """Render space-prefixed XML attributes, skipping any with falsy values."""
-    return ''.join(f' {key}="{value}"' for key, value in pairs if value)
+    """Render space-prefixed XML attributes, skipping any with falsy values.
+
+    Values are HTML-escaped so user-controlled fields (filenames, KB names,
+    arbitrary metadata) can't break out of the attribute and inject sibling
+    tags into the rendered context.
+    """
+    return ''.join(
+        f' {key}="{html.escape(str(value), quote=True)}"'
+        for key, value in pairs
+        if value
+    )
 
 
 def get_source_context(sources: list, source_ids: dict = None, include_content: bool = True) -> str:
@@ -2778,6 +2787,13 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     builtin_tools_enabled = capabilities.get('builtin_tools', True)
     file_context_enabled = capabilities.get('file_context', True)
     is_native_fc = metadata.get('params', {}).get('function_calling') == 'native'
+    # Per-category builtin toggle. query_attached_files lives in the knowledge
+    # category (mirroring query_knowledge_files); if the admin disables that
+    # category, the tool isn't registered, so the new native-FC path must
+    # also revert — otherwise the roster would point at a missing tool.
+    knowledge_builtins_enabled = (
+        model.get('info', {}).get('meta', {}).get('builtinTools', {}).get('knowledge', True)
+    )
 
     if not payload_tools:
         # Server side tools
@@ -2907,9 +2923,12 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
         # Inject builtin tools for native function calling based on enabled features and model capability
         if is_native_fc and builtin_tools_enabled:
-            # Add file context to user messages
-            chat_id = metadata.get('chat_id')
-            form_data['messages'] = await add_file_context(form_data.get('messages', []), chat_id, user)
+            # add_file_context injects <attached_files> URL refs into user
+            # messages — should only run when the file_context capability is
+            # on, to match the rest of the file-context pipeline.
+            if file_context_enabled:
+                chat_id = metadata.get('chat_id')
+                form_data['messages'] = await add_file_context(form_data.get('messages', []), chat_id, user)
             builtin_tools = await get_builtin_tools(
                 request,
                 {
@@ -2965,6 +2984,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         not payload_tools
         and is_native_fc
         and builtin_tools_enabled
+        and knowledge_builtins_enabled
         and file_context_enabled
         and not force_full_context
     )
@@ -3002,11 +3022,14 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             force_system_message=native_fc_with_builtins,
         )
 
-    # If there are citations, add them to the data_items
+    # If there are citations, add them to the data_items. Roster-only entries
+    # are chat-level inventory, not evidence the model cited — exclude them so
+    # the frontend citation panel doesn't display empty-content pseudo-sources.
     sources = [
         source
         for source in sources
-        if source.get('source', {}).get('name', '') or source.get('source', {}).get('id', '')
+        if not source.get('roster_only')
+        and (source.get('source', {}).get('name', '') or source.get('source', {}).get('id', ''))
     ]
 
     if len(sources) > 0:
