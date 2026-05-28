@@ -61,11 +61,17 @@ async def _has_read_access_to_file(
         for item in model_knowledge
     ):
         return True
+    from open_webui.models.users import Users
     from open_webui.utils.access_control.files import has_access_to_file
-    return await has_access_to_file(
-        file_id=file.id, access_type='read',
-        user=UserModel(**{'id': user_id, 'role': user_role}),
-    )
+
+    # has_access_to_file needs a real UserModel (it reads user.id and resolves
+    # the user's groups). Fetch by PK — a cheap identity-map lookup — instead
+    # of synthesizing a partial UserModel, which fails validation on the
+    # required email/name/timestamp fields.
+    user = await Users.get_user_by_id(user_id)
+    if not user:
+        return False
+    return await has_access_to_file(file_id=file.id, access_type='read', user=user)
 
 # =============================================================================
 # TIME UTILITIES
@@ -2503,7 +2509,7 @@ async def query_attached_files(
     if not __attached_files__:
         return json.dumps({'error': 'No retrievable files are attached to this chat.'})
 
-    admin_top_k = getattr(__request__.app.state.config, 'TOP_K', 5) or 5
+    admin_top_k = __request__.app.state.config.TOP_K
 
     if isinstance(count, str):
         try:
