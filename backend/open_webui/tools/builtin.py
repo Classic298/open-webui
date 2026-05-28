@@ -2322,9 +2322,13 @@ async def query_knowledge_files(
         if knowledge_ids.lower() in ('none', 'null', ''):
             knowledge_ids = None
         else:
-            # Try to parse as JSON array if it looks like one
+            # Try to parse as JSON array if it looks like one. Wrap scalar
+            # parse results (e.g. '"abc"' → 'abc') in a list so downstream
+            # membership checks stay list-shaped instead of degenerating
+            # into substring or dict-key matching.
             try:
-                knowledge_ids = json.loads(knowledge_ids)
+                parsed = json.loads(knowledge_ids)
+                knowledge_ids = parsed if isinstance(parsed, list) else [parsed]
             except json.JSONDecodeError:
                 # Treat as single ID
                 knowledge_ids = [knowledge_ids]
@@ -2478,12 +2482,14 @@ async def query_attached_files(
     """
     Search files and knowledge bases the user attached to this chat.
 
-    Items appear in the system context inside <available_files> as
-    <attached_file id="..."> entries. Distinct from query_knowledge_files
+    The system context lists each retrievable item inside <retrievable_files>
+    as a <retrievable_file id="..."> entry. Call this tool to fetch
+    semantically relevant chunks; cite from the returned chunks rather than
+    the inventory entries themselves. Distinct from query_knowledge_files
     (which searches model-attached knowledge).
 
     :param query: Required. Natural-language search query used for semantic / hybrid retrieval over the attached items' content.
-    :param ids: Optional. When omitted, the search runs against every file and knowledge base attached to this chat (the default). To narrow the search to a subset, supply a list of plain attached-item id strings — each id is the literal value of the `id` attribute on an `<attached_file id="...">` entry in the system context (for example "abc123" for `<attached_file id="abc123" ...>`, not the whole tag).
+    :param ids: Optional. When omitted, the search runs against every file and knowledge base attached to this chat (the default). To narrow the search to a subset, supply a list of plain attached-item id strings — each id is the literal value of the `id` attribute on a `<retrievable_file id="...">` entry in the system context (for example "abc123" for `<retrievable_file id="abc123" ...>`, not the whole tag).
     :param count: Optional. Maximum number of result chunks to return. When omitted, defaults to the admin-configured retrieval TOP_K. When supplied, values above that limit are clamped down.
     :return: JSON list of chunks with content, source, file_id, distance
     """
@@ -2514,7 +2520,12 @@ async def query_attached_files(
             ids = None
         else:
             try:
-                ids = json.loads(ids)
+                parsed = json.loads(ids)
+                # JSON can deserialize to dict / scalar / list — only a list
+                # is valid for membership scoping. Wrap scalars in a list so
+                # `item.get('id') in ids` stays a list membership check
+                # (not a string substring check or dict-key lookup).
+                ids = parsed if isinstance(parsed, list) else [parsed]
             except json.JSONDecodeError:
                 ids = [ids]
 
@@ -2540,7 +2551,7 @@ async def query_attached_files(
             if not scoped_items:
                 return json.dumps({
                     'error': 'None of the requested ids match an attached file. '
-                    'Check the <attached_file id="..."> entries in <available_files>, '
+                    'Check the <retrievable_file id="..."> entries in <retrievable_files>, '
                     'or omit `ids` to search every attached item.'
                 })
         else:
@@ -2613,7 +2624,13 @@ async def query_attached_files(
             chunk_distances = query_results.get('distances', [[]])[0]
 
             for chunk_index, document in enumerate(chunk_documents):
-                chunk_metadata = chunk_metadatas[chunk_index] if chunk_index < len(chunk_metadatas) else {}
+                # Some query_collection paths can return None in the
+                # metadatas list (e.g. partial hybrid-search failures).
+                chunk_metadata = (
+                    chunk_metadatas[chunk_index]
+                    if chunk_index < len(chunk_metadatas)
+                    else None
+                ) or {}
                 chunk_info = {
                     'content': document,
                     'source': chunk_metadata.get('source') or chunk_metadata.get('name') or 'Unknown',

@@ -972,7 +972,7 @@ def get_source_context(sources: list, source_ids: dict = None, include_content: 
                 ('resource-type', source_type),
             ])
             roster_parts.append(
-                f'<attached_file{attrs} mode="retrievable">{_ROSTER_HINT}</attached_file>\n'
+                f'<retrievable_file{attrs}>{_ROSTER_HINT}</retrievable_file>\n'
             )
             continue
 
@@ -995,7 +995,7 @@ def get_source_context(sources: list, source_ids: dict = None, include_content: 
     parts: list[str] = []
     if citeable_parts:
         parts.append('<full_context_files>\n' + ''.join(citeable_parts) + '</full_context_files>\n')
-    parts.append('<available_files>\n' + ''.join(roster_parts) + '</available_files>\n')
+    parts.append('<retrievable_files>\n' + ''.join(roster_parts) + '</retrievable_files>\n')
     return ''.join(parts)
 
 
@@ -2933,18 +2933,22 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
         # Inject builtin tools for native function calling based on enabled features and model capability
         if is_native_fc and builtin_tools_enabled:
-            # add_file_context injects <attached_files> URL refs into user
-            # messages — should only run when the file_context capability is
-            # on, to match the rest of the file-context pipeline.
-            # __attached_files__ powers query_attached_files registration in
-            # get_builtin_tools; same gate so a model with file_context=False
-            # can't reach attached file content through the new tool either.
-            if file_context_enabled:
-                chat_id = metadata.get('chat_id')
-                form_data['messages'] = await add_file_context(form_data.get('messages', []), chat_id, user)
-                attached_files_for_tools = form_data.get('metadata', {}).get('files', []) or []
-            else:
-                attached_files_for_tools = []
+            # add_file_context injects <attached_files> URL refs (multimodal
+            # viewing / download pointers) into user messages. These don't
+            # carry file content — they're URL pointers — so they run
+            # regardless of the file_context capability (which gates textual
+            # file-content injection). Pre-PR behavior preserved.
+            chat_id = metadata.get('chat_id')
+            form_data['messages'] = await add_file_context(form_data.get('messages', []), chat_id, user)
+            # __attached_files__ powers query_attached_files registration,
+            # which DOES expose file content — gate on file_context_enabled
+            # so a model with the capability off can't reach attached file
+            # content through the new tool.
+            attached_files_for_tools = (
+                form_data.get('metadata', {}).get('files', []) or []
+                if file_context_enabled
+                else []
+            )
             builtin_tools = await get_builtin_tools(
                 request,
                 {
@@ -3040,7 +3044,10 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     system_message = get_system_message(form_data['messages'])
     metadata['system_prompt'] = get_content_from_message(system_message) if system_message else None
     metadata['user_prompt'] = get_last_user_message(form_data['messages'])
-    metadata['sources'] = sources[:] if sources else []
+    # Roster-only entries are chat-level inventory, not evidence — exclude
+    # them from metadata['sources'] so pipe functions / outlet filters don't
+    # have to special-case the missing document/metadata fields.
+    metadata['sources'] = [s for s in sources if not s.get('roster_only')] if sources else []
 
     # If context is not empty, insert it into the messages
     if sources and prompt:

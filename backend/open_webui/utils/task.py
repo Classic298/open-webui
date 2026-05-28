@@ -283,19 +283,21 @@ async def rag_template(template: str, context: str, query: str):
         )
 
     if '{{QUERY}}' in template or '[query]' in template:
-        log.debug(
+        log.warning(
             "rag_template: {{QUERY}}/[query] placeholders are no longer "
             "substituted (the user's message already appears in the "
             "messages array). Remove them from your RAG_TEMPLATE to silence "
             "this notice."
         )
 
-    template = template.replace('[context]', context)
-    template = template.replace('{{CONTEXT}}', context)
-
-    # Strip leftover placeholders so they don't leak into the rendered output.
+    # Strip placeholders from the TEMPLATE first, then substitute context.
+    # Order matters: if context were substituted first, any literal [query]
+    # / {{QUERY}} inside a retrieved chunk would also get erased.
     template = template.replace('[query]', '')
     template = template.replace('{{QUERY}}', '')
+
+    template = template.replace('[context]', context)
+    template = template.replace('{{CONTEXT}}', context)
 
     return template
 
