@@ -2532,7 +2532,10 @@ async def query_attached_files(
         user_role = __user__.get('role', 'user')
         user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
 
-        if ids is not None:
+        # Empty list and missing field both mean "no scoping" — search every
+        # attached item. Only an explicit non-empty list that resolves to
+        # nothing is treated as a model error.
+        if ids:
             scoped_items = [item for item in __attached_files__ if item.get('id') in ids]
             if not scoped_items:
                 return json.dumps({
