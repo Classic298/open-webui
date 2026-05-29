@@ -1412,7 +1412,7 @@ Respond to the user query using the provided context, citing sources inline by n
 - If the context is unreadable or of poor quality, inform the user and provide the best possible answer.
 - If the answer isn't present in the context but you possess the knowledge, explain this to the user and provide the answer using your own understanding.
 - **Cite each `<source>` tag in the context by the value of its `name` attribute**, in square brackets — e.g. `<source name="contract.pdf">` → `[contract.pdf]`, `<source name="https://wikipedia.org">` → `[https://wikipedia.org]` or `[wikipedia.org]` (URL protocol is optional in the citation).
-- **For tool result content** (chunks returned by tools like web search, file fetch, or attached-file search): cite by the source identifier that appears in the result — typically the chunk's `source`, `url`, or `name` field — in the same `[identifier]` format.
+- **For content returned by tool calls** (web search, page fetch, attached-file or knowledge search): cite by the source's primary name as it appears in the result — a web result's title, a file chunk's source filename, or, for a directly fetched page, its URL. Prefer the title/name when one is present. Use the same `[identifier]` format.
 - If the context lists items as available for retrieval but does not include their content (for example, `<retrievable_file>` entries inside `<retrievable_files>`), do not cite them directly — call the appropriate tool to fetch their content first, then cite the returned sources by name.
 - Do not use XML tags in your response.
 - Ensure citations are concise and directly related to the information provided.
