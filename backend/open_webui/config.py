@@ -1421,6 +1421,9 @@ Respond to the user query using the provided context, citing sources inline by n
 * "According to the study, the proposed method increases efficiency by 20% [research_paper.pdf]."
 * "The official documentation confirms this behavior [docs.python.org]."
 
+Or in the example of you retrieving the information through a tool call in a tool result, you can cite like so:
+* "The emergency server room access code is stored in the key box [emergency_handbook.pdf]."
+
 ### Output:
 Provide a clear and direct response to the user's query, including inline `[source-name]` citations matched to the `name` attribute of `<source>` tags in the context, or to the source identifier of chunks returned by tool calls.
 
