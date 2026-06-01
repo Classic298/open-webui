@@ -2027,6 +2027,7 @@
 	"The maximum number of files that can be used at once in chat. If the number of files exceeds this limit, the files will not be uploaded.": "",
 	"The output format for the text. Can be 'json', 'markdown', or 'html'. Defaults to 'markdown'.": "",
 	"The passwords you entered don't quite match. Please double-check and try again.": "",
+	"The response was interrupted before it could finish. Please try again.": "",
 	"The score should be a value between 0.0 (0%) and 1.0 (100%).": "",
 	"The stream delta chunk size for the model. Increasing the chunk size will make the model respond with larger pieces of text at once.": "",
 	"The temperature of the model. Increasing the temperature will make the model answer more creatively.": "",

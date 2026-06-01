@@ -5048,31 +5048,39 @@ async def streaming_chat_response_handler(response, ctx):
                     **({'usage': usage} if usage else {}),
                 }
 
-                if not metadata.get('chat_id', '').startswith('channel:'):
-                    if not ENABLE_REALTIME_CHAT_SAVE:
-                        # Save message in the database
-                        await Chats.upsert_message_to_chat_by_id_and_message_id(
-                            metadata['chat_id'],
-                            metadata['message_id'],
-                            {
-                                'done': True,
-                                'content': serialize_output(output),
-                                'output': output,
-                                **({'usage': usage} if usage else {}),
-                            },
-                        )
-                    elif usage:
-                        await Chats.upsert_message_to_chat_by_id_and_message_id(
-                            metadata['chat_id'],
-                            metadata['message_id'],
-                            {'done': True, 'usage': usage},
-                        )
-                    else:
-                        await Chats.upsert_message_to_chat_by_id_and_message_id(
-                            metadata['chat_id'],
-                            metadata['message_id'],
-                            {'done': True},
-                        )
+                # Persist the final message. Wrapped so a transient DB failure
+                # at finalize cannot skip the terminal chat:completion emit
+                # below (which would otherwise strand the UI on a loading dot).
+                # CancelledError is not an Exception and still propagates to the
+                # cancellation handler.
+                try:
+                    if not metadata.get('chat_id', '').startswith('channel:'):
+                        if not ENABLE_REALTIME_CHAT_SAVE:
+                            # Save message in the database
+                            await Chats.upsert_message_to_chat_by_id_and_message_id(
+                                metadata['chat_id'],
+                                metadata['message_id'],
+                                {
+                                    'done': True,
+                                    'content': serialize_output(output),
+                                    'output': output,
+                                    **({'usage': usage} if usage else {}),
+                                },
+                            )
+                        elif usage:
+                            await Chats.upsert_message_to_chat_by_id_and_message_id(
+                                metadata['chat_id'],
+                                metadata['message_id'],
+                                {'done': True, 'usage': usage},
+                            )
+                        else:
+                            await Chats.upsert_message_to_chat_by_id_and_message_id(
+                                metadata['chat_id'],
+                                metadata['message_id'],
+                                {'done': True},
+                            )
+                except Exception as e:
+                    log.exception('Failed to persist final assistant message: %s', e)
 
                 # Send a webhook notification if the user is not active
                 if request.app.state.config.ENABLE_USER_WEBHOOKS and not await Users.is_user_active(user.id):

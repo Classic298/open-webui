@@ -312,6 +312,11 @@ type Config = {
 		pending_user_overlay_title?: string;
 		pending_user_overlay_content?: string;
 		iframe_csp?: string;
+		chat_response_watchdog?: {
+			enabled?: boolean;
+			inactivity_timeout?: number;
+			max_timeout?: number;
+		};
 	};
 };
 

@@ -710,6 +710,22 @@ ENABLE_OAUTH_TOKEN_EXCHANGE = os.getenv('ENABLE_OAUTH_TOKEN_EXCHANGE', 'False').
 ENABLE_OAUTH_BACKCHANNEL_LOGOUT = os.getenv('ENABLE_OAUTH_BACKCHANNEL_LOGOUT', 'False').lower() == 'true'
 
 ####################################
+# Chat Response Watchdog (frontend stuck-response reconciliation)
+####################################
+
+# Frontend safety net for the "stuck loading dot" failure mode. Socket.IO
+# room emits are fire-and-forget, so a lost terminal event can leave an
+# assistant message spinning forever even though the answer is already
+# persisted server-side. When enabled, the UI reconciles a pending response
+# against the stored chat after CHAT_RESPONSE_WATCHDOG_TIMEOUT seconds of
+# inactivity (recovering a completed-but-unrendered answer), and after
+# CHAT_RESPONSE_WATCHDOG_MAX_TIMEOUT seconds it stops waiting and surfaces the
+# response as interrupted. Exposed to the frontend via /api/config.
+ENABLE_CHAT_RESPONSE_WATCHDOG = os.getenv('ENABLE_CHAT_RESPONSE_WATCHDOG', 'True').lower() == 'true'
+CHAT_RESPONSE_WATCHDOG_TIMEOUT = int(os.getenv('CHAT_RESPONSE_WATCHDOG_TIMEOUT', '45'))
+CHAT_RESPONSE_WATCHDOG_MAX_TIMEOUT = int(os.getenv('CHAT_RESPONSE_WATCHDOG_MAX_TIMEOUT', '180'))
+
+####################################
 # SCIM Configuration
 ####################################
 

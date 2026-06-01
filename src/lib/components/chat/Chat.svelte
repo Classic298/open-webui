@@ -28,6 +28,7 @@
 		banners,
 		user,
 		socket,
+		socketConnected,
 		audioQueue,
 		showControls,
 		showCallOverlay,
@@ -464,6 +465,141 @@
 		}
 	};
 
+	//////////////////////////
+	// Stuck-response watchdog
+	//
+	// Socket.IO room emits are fire-and-forget: the backend guarantees it
+	// *sent + persisted* a response, never that THIS tab *rendered* it. If
+	// the terminal event is lost (Redis fanout blip, half-open socket, a
+	// backgrounded tab), the assistant message can hang on a permanent
+	// loading dot even though the answer is already saved server-side.
+	//
+	// This reconciles the visible message against the persisted chat (the
+	// source of truth): it silently recovers a completed answer whose live
+	// event was lost, and — only when generation is genuinely stuck — stops
+	// the spinner and surfaces an interrupted state. Thresholds come from
+	// the backend (CHAT_RESPONSE_WATCHDOG_* env vars).
+	//////////////////////////
+
+	const responseActivity = new Map(); // messageId -> { lastActivityAt, lastReconcileAt }
+	const missingMessageReconcileAt = new Map(); // dedupe key -> timestamp
+	let responseWatchdogInterval: ReturnType<typeof setInterval> | null = null;
+	let lastSocketConnected = true;
+
+	const markResponseActivity = (messageId: string) => {
+		if (!messageId) return;
+		const entry = responseActivity.get(messageId) ?? {};
+		entry.lastActivityAt = Date.now();
+		responseActivity.set(messageId, entry);
+	};
+
+	const reconcileMessageFromDB = async (cId: string, messageId: string) => {
+		// The persisted chat is the source of truth; temp/local chats have none.
+		if (!cId || `${cId}`.startsWith('local:') || !messageId) return null;
+
+		const latest = await getChatById(localStorage.token, cId).catch(() => null);
+		const dbMessage = latest?.chat?.history?.messages?.[messageId];
+
+		if (dbMessage && history.messages[messageId]) {
+			history.messages[messageId] = { ...history.messages[messageId], ...dbMessage };
+			history = history;
+			if (dbMessage.done) {
+				taskIds = null;
+			}
+		}
+		return dbMessage ?? null;
+	};
+
+	const runResponseWatchdog = async ({ force = false } = {}) => {
+		const cfg = $config?.ui?.chat_response_watchdog ?? {};
+		if (!(cfg.enabled ?? true)) return;
+
+		const cId = $chatId;
+		if (!cId || `${cId}`.startsWith('local:')) return;
+
+		const inactivitySec = cfg.inactivity_timeout ?? 45;
+		const inactivityMs = Math.max(5, inactivitySec) * 1000;
+		const maxMs = Math.max(inactivitySec, cfg.max_timeout ?? 180) * 1000;
+		const now = Date.now();
+
+		// Track any pending assistant message in the active chat — including
+		// responses that never emitted a single event (so none can slip by).
+		for (const [mid, msg] of Object.entries(history.messages ?? {})) {
+			if (msg?.role === 'assistant' && msg?.done === false && !responseActivity.has(mid)) {
+				responseActivity.set(mid, { lastActivityAt: now });
+			}
+		}
+
+		for (const [messageId, entry] of [...responseActivity.entries()]) {
+			const message = history.messages[messageId];
+
+			// Gone from local state or already finished — stop tracking.
+			if (!message || message.role !== 'assistant' || message.done) {
+				responseActivity.delete(messageId);
+				continue;
+			}
+
+			const idleFor = now - (entry.lastActivityAt ?? now);
+			if (!force) {
+				if (idleFor < inactivityMs) continue;
+				// Throttle DB re-checks to ~once per inactivity window.
+				if (entry.lastReconcileAt && now - entry.lastReconcileAt < inactivityMs) continue;
+			}
+
+			entry.lastReconcileAt = now;
+			responseActivity.set(messageId, entry);
+
+			const dbMessage = await reconcileMessageFromDB(cId, messageId);
+
+			if (dbMessage?.done || history.messages[messageId]?.done) {
+				// Mode A: the server finished but the live update was lost — recovered.
+				console.warn('[response-watchdog] recovered completed response from server', {
+					chatId: cId,
+					messageId
+				});
+				responseActivity.delete(messageId);
+			} else if (idleFor >= maxMs) {
+				// Mode B: genuinely stuck/orphaned — stop waiting and surface it.
+				console.error('[response-watchdog] response stuck, no server-side completion', {
+					chatId: cId,
+					messageId,
+					idleFor
+				});
+
+				const stuck = history.messages[messageId];
+				if (stuck && !stuck.done) {
+					if (!stuck.error) {
+						stuck.error = {
+							content: $i18n.t(
+								'The response was interrupted before it could finish. Please try again.'
+							)
+						};
+					}
+					stuck.done = true;
+					history.messages[messageId] = stuck;
+					history = history;
+				}
+
+				responseActivity.delete(messageId);
+				taskIds = null;
+				toast.error(
+					$i18n.t('The response was interrupted before it could finish. Please try again.')
+				);
+				await processNextInQueue(cId);
+			}
+			// else: not done yet but under the hard cap — keep waiting.
+		}
+	};
+
+	// Socket just reconnected — reconverge to the server's truth immediately.
+	$: {
+		const connected = $socketConnected;
+		if (connected && !lastSocketConnected) {
+			runResponseWatchdog({ force: true });
+		}
+		lastSocketConnected = connected;
+	}
+
 	const chatEventHandler = async (event, cb) => {
 		console.log(event);
 
@@ -472,6 +608,11 @@
 			let message = history.messages[event.message_id];
 
 			if (message) {
+				// Any event = liveness; resets this response's inactivity timer.
+				if (message.role === 'assistant' && !message.done) {
+					markResponseActivity(event.message_id);
+				}
+
 				const type = event?.data?.type ?? null;
 				const data = event?.data?.data ?? null;
 
@@ -627,6 +768,19 @@
 				}
 
 				history.messages[event.message_id] = message;
+			} else if (event.message_id) {
+				// Event for a message we don't have locally (state desync):
+				// reconcile from the persisted chat instead of dropping it.
+				const key = `${event.chat_id}:${event.message_id}`;
+				if (Date.now() - (missingMessageReconcileAt.get(key) ?? 0) > 5000) {
+					missingMessageReconcileAt.set(key, Date.now());
+					console.warn('[response-watchdog] event for unknown local message — reconciling', {
+						chat_id: event.chat_id,
+						message_id: event.message_id,
+						type: event?.data?.type ?? null
+					});
+					await reconcileMessageFromDB(event.chat_id, event.message_id);
+				}
 			}
 		} else {
 			// Non-active chat completion: queue stays in the global store.
@@ -745,6 +899,10 @@
 		console.log('mounted');
 		window.addEventListener('message', onMessageHandler);
 		$socket?.on('events', chatEventHandler);
+
+		responseWatchdogInterval = setInterval(() => {
+			runResponseWatchdog();
+		}, 7000);
 
 		$audioQueue?.destroy();
 
@@ -866,6 +1024,11 @@
 				selectedFolderSubscribe();
 				window.removeEventListener('message', onMessageHandler);
 				$socket?.off('events', chatEventHandler);
+
+				if (responseWatchdogInterval) {
+					clearInterval(responseWatchdogInterval);
+					responseWatchdogInterval = null;
+				}
 				audioQueueInstance?.destroy();
 				audioQueue.set(null);
 			} catch (e) {
@@ -1837,6 +2000,7 @@
 
 		if (done) {
 			message.done = true;
+			responseActivity.delete(message.id);
 
 			if ($settings.responseAutoCopy) {
 				copyToClipboard(message.content);

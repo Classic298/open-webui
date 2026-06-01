@@ -434,6 +434,9 @@ from open_webui.env import (
     ENABLE_EASTER_EGGS,
     # OAuth Back-Channel Logout
     ENABLE_OAUTH_BACKCHANNEL_LOGOUT,
+    ENABLE_CHAT_RESPONSE_WATCHDOG,
+    CHAT_RESPONSE_WATCHDOG_TIMEOUT,
+    CHAT_RESPONSE_WATCHDOG_MAX_TIMEOUT,
     ENABLE_OTEL,
     ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
     # SCIM
@@ -2011,18 +2014,11 @@ async def chat_completion(
             error_detail = e.detail if isinstance(e, HTTPException) else str(e)
             log.error('Error processing chat payload: %s', error_detail)
             if metadata.get('chat_id') and metadata.get('message_id'):
-                # Update the chat message with the error
+                # Unblock the frontend FIRST, in its own try, so a failing DB
+                # write (e.g. the very DB outage that caused this error) cannot
+                # skip the terminal events and strand the UI on an endless
+                # loading spinner. These socket emits do not touch the DB.
                 try:
-                    if not metadata.get('chat_id', '').startswith('local:') and not metadata.get('chat_id', '').startswith('channel:'):
-                        await Chats.upsert_message_to_chat_by_id_and_message_id(
-                            metadata['chat_id'],
-                            metadata['message_id'],
-                            {
-                                'parentId': metadata.get('user_message_id', None),
-                                'error': {'content': error_detail},
-                            },
-                        )
-
                     event_emitter = await get_event_emitter(metadata)
                     if event_emitter:
                         await event_emitter(
@@ -2034,7 +2030,20 @@ async def chat_completion(
                         await event_emitter(
                             {'type': 'chat:tasks:cancel'},
                         )
+                except Exception:
+                    pass
 
+                # Then best-effort persist the error onto the chat message.
+                try:
+                    if not metadata.get('chat_id', '').startswith('local:') and not metadata.get('chat_id', '').startswith('channel:'):
+                        await Chats.upsert_message_to_chat_by_id_and_message_id(
+                            metadata['chat_id'],
+                            metadata['message_id'],
+                            {
+                                'parentId': metadata.get('user_message_id', None),
+                                'error': {'content': error_detail},
+                            },
+                        )
                 except Exception:
                     pass
             else:
@@ -2449,6 +2458,11 @@ async def get_app_config(request: Request):
                     'pending_user_overlay_content': app.state.config.PENDING_USER_OVERLAY_CONTENT,
                     'response_watermark': app.state.config.RESPONSE_WATERMARK,
                     'iframe_csp': IFRAME_CSP,
+                    'chat_response_watchdog': {
+                        'enabled': ENABLE_CHAT_RESPONSE_WATCHDOG,
+                        'inactivity_timeout': CHAT_RESPONSE_WATCHDOG_TIMEOUT,
+                        'max_timeout': CHAT_RESPONSE_WATCHDOG_MAX_TIMEOUT,
+                    },
                 },
                 'license_metadata': app.state.LICENSE_METADATA,
                 **(
