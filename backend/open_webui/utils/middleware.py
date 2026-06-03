@@ -3292,17 +3292,31 @@ async def outlet_filter_handler(ctx):
     chat_id = metadata.get('chat_id', '')
     message_id = metadata.get('message_id')
 
-    if not chat_id or not message_id:
-        return
-
     is_temp_chat = chat_id.startswith('local:') or chat_id.startswith('channel:')
+
+    # A persisted chat reads its message list from the DB (and writes outlet
+    # modifications back). That requires a real, non-temp chat_id plus a
+    # message_id to anchor on. Temp chats AND direct API callers have neither a
+    # usable DB record nor (for API) an event channel — for them the message
+    # list is built from the in-memory form_data plus the assistant response,
+    # so outlet filters still fire (e.g. for request tracking) without
+    # persistence or event emission.
+    is_db_chat = bool(chat_id) and not is_temp_chat and bool(message_id)
 
     try:
         messages_map = None
 
-        if is_temp_chat:
-            # Temp chats have no DB record — build message list from
-            # the in-memory form_data plus the assistant response.
+        if is_db_chat:
+            messages_map = await Chats.get_messages_map_by_chat_id(chat_id)
+            if not messages_map:
+                return
+
+            message_list = get_message_list(messages_map, message_id)
+            if not message_list:
+                return
+        else:
+            # Temp chat / direct API caller — build the message list from the
+            # in-memory form_data plus the assistant response.
             form_messages = ctx.get('form_data', {}).get('messages', [])
             assistant_message = ctx.get('assistant_message', {})
 
@@ -3323,14 +3337,6 @@ async def outlet_filter_handler(ctx):
                         **assistant_message,
                     }
                 )
-        else:
-            messages_map = await Chats.get_messages_map_by_chat_id(chat_id)
-            if not messages_map:
-                return
-
-            message_list = get_message_list(messages_map, message_id)
-            if not message_list:
-                return
 
         model_id = model.get('id') if isinstance(model, dict) else model
 
@@ -3384,9 +3390,10 @@ async def outlet_filter_handler(ctx):
         )
 
         # Persist outlet-modified content and notify frontend
-        # (skip DB persistence for temp chats — they have no DB record)
+        # (only persisted chats have a DB record; temp chats and direct API
+        # callers do not, so their outlet results are not written back)
         if outlet_result and outlet_result.get('messages'):
-            if not is_temp_chat and messages_map:
+            if is_db_chat and messages_map:
                 for message in outlet_result['messages']:
                     outlet_message_id = message.get('id')
                     if outlet_message_id and outlet_message_id in messages_map:
@@ -3561,6 +3568,26 @@ async def non_streaming_chat_response_handler(response, ctx):
             pass
 
         return response
+
+    # Direct API caller — no event channel and (usually) no persisted chat.
+    # Run outlet filters anyway so they still fire (e.g. for request tracking).
+    # The response is returned as-is; event emission and DB persistence are
+    # skipped, and outlet modifications are not folded back into the response
+    # (mirroring the streaming path, which cannot mutate an in-flight stream).
+    try:
+        choices = response_data.get('choices', [])
+        if choices and choices[0].get('message', {}).get('content'):
+            content = response_data['choices'][0]['message']['content']
+            usage = normalize_usage(response_data.get('usage', {}) or {})
+
+            ctx['assistant_message'] = {
+                'content': content,
+                **({'output': response_data['output']} if response_data.get('output') else {}),
+                **({'usage': usage} if usage else {}),
+            }
+            await outlet_filter_handler(ctx)
+    except Exception as e:
+        log.debug(f'Error running outlet filters for API caller: {e}')
 
     if isinstance(response, dict):
         response = merge_events_into_response(response_data, events)
@@ -5220,10 +5247,62 @@ async def streaming_chat_response_handler(response, ctx):
         return await response_handler(response, events)
 
     else:
-        # Fallback to the original response
+        # Direct API caller — no event channel. The response is streamed
+        # through unchanged, but when outlet filters apply we accumulate the
+        # assistant response so they can still fire once the stream completes
+        # (e.g. for request tracking). Event emission and DB persistence are
+        # skipped. Accumulation is gated on filter_functions so filter-less
+        # callers pay no per-chunk parsing cost.
+        run_outlet = bool(filter_functions)
+
         async def stream_wrapper(original_generator, events):
             def wrap_item(item):
                 return f'data: {item}\n\n'
+
+            # Accumulated assistant response, built incrementally for the
+            # outlet filter once the upstream stream is exhausted.
+            outlet_output = []
+            outlet_content = ''
+            outlet_usage = None
+
+            def accumulate(raw):
+                """Best-effort parse of a streamed chunk to capture the final
+                assistant content + usage. The call site guards against
+                exceptions so tracking can never break the passthrough stream."""
+                nonlocal outlet_output, outlet_content, outlet_usage
+                line = raw.decode('utf-8', 'replace') if isinstance(raw, bytes) else raw
+                if not isinstance(line, str):
+                    return
+                for part in line.split('\n'):
+                    part = part.strip()
+                    if not part.startswith('data:'):
+                        continue
+                    part = part[len('data:') :].strip()
+                    if not part or part == '[DONE]':
+                        continue
+                    try:
+                        chunk = json.loads(part)
+                    except Exception:
+                        continue
+                    if not isinstance(chunk, dict):
+                        continue
+
+                    # Responses API events
+                    if chunk.get('type', '').startswith('response.'):
+                        outlet_output, meta = handle_responses_streaming_event(chunk, outlet_output)
+                        if meta and meta.get('usage'):
+                            outlet_usage = normalize_usage(meta['usage'])
+                        continue
+
+                    # Chat Completions deltas
+                    raw_usage = chunk.get('usage', {}) or {}
+                    raw_usage.update(chunk.get('timings', {}))  # llama.cpp
+                    if raw_usage:
+                        outlet_usage = normalize_usage(raw_usage)
+                    for choice in chunk.get('choices', []):
+                        piece = (choice.get('delta', {}) or {}).get('content')
+                        if piece:
+                            outlet_content += piece
 
             for event in events:
                 event, _ = await process_filter_functions(
@@ -5238,6 +5317,12 @@ async def streaming_chat_response_handler(response, ctx):
                     yield wrap_item(json.dumps(event))
 
             async for data in original_generator:
+                if run_outlet:
+                    try:
+                        accumulate(data)
+                    except Exception:
+                        pass
+
                 data, _ = await process_filter_functions(
                     request=request,
                     filter_functions=filter_functions,
@@ -5248,6 +5333,17 @@ async def streaming_chat_response_handler(response, ctx):
 
                 if data:
                     yield data
+
+            if run_outlet:
+                ctx['assistant_message'] = {
+                    'content': outlet_content or serialize_output(outlet_output),
+                    **({'output': outlet_output} if outlet_output else {}),
+                    **({'usage': outlet_usage} if outlet_usage else {}),
+                }
+                try:
+                    await outlet_filter_handler(ctx)
+                except Exception as e:
+                    log.debug(f'Error running outlet filters for API caller: {e}')
 
         return StreamingResponse(
             stream_wrapper(response.body_iterator, events),
