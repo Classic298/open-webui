@@ -3294,13 +3294,9 @@ async def outlet_filter_handler(ctx):
 
     is_temp_chat = chat_id.startswith('local:') or chat_id.startswith('channel:')
 
-    # A persisted chat reads its message list from the DB (and writes outlet
-    # modifications back). That requires a real, non-temp chat_id plus a
-    # message_id to anchor on. Temp chats AND direct API callers have neither a
-    # usable DB record nor (for API) an event channel — for them the message
-    # list is built from the in-memory form_data plus the assistant response,
-    # so outlet filters still fire (e.g. for request tracking) without
-    # persistence or event emission.
+    # Persisted chats read from the DB and get outlet edits written back; temp
+    # chats and direct API callers have no DB record, so build the message list
+    # from form_data instead (lets outlet fire for API callers, e.g. tracking).
     is_db_chat = bool(chat_id) and not is_temp_chat and bool(message_id)
 
     try:
@@ -3315,8 +3311,7 @@ async def outlet_filter_handler(ctx):
             if not message_list:
                 return
         else:
-            # Temp chat / direct API caller — build the message list from the
-            # in-memory form_data plus the assistant response.
+            # Temp chat / API caller — build from form_data + assistant response.
             form_messages = ctx.get('form_data', {}).get('messages', [])
             assistant_message = ctx.get('assistant_message', {})
 
@@ -3389,9 +3384,7 @@ async def outlet_filter_handler(ctx):
             extra_params=extra_params,
         )
 
-        # Persist outlet-modified content and notify frontend
-        # (only persisted chats have a DB record; temp chats and direct API
-        # callers do not, so their outlet results are not written back)
+        # Persist outlet edits + notify frontend (only persisted chats have a DB record)
         if outlet_result and outlet_result.get('messages'):
             if is_db_chat and messages_map:
                 for message in outlet_result['messages']:
@@ -3569,11 +3562,8 @@ async def non_streaming_chat_response_handler(response, ctx):
 
         return response
 
-    # Direct API caller — no event channel and (usually) no persisted chat.
-    # Run outlet filters anyway so they still fire (e.g. for request tracking).
-    # The response is returned as-is; event emission and DB persistence are
-    # skipped, and outlet modifications are not folded back into the response
-    # (mirroring the streaming path, which cannot mutate an in-flight stream).
+    # Direct API caller (no event channel): still run outlet filters (e.g. for
+    # tracking). Response returned as-is — no event emission, DB write, or edit-back.
     try:
         choices = response_data.get('choices', [])
         if choices and choices[0].get('message', {}).get('content'):
@@ -5247,28 +5237,22 @@ async def streaming_chat_response_handler(response, ctx):
         return await response_handler(response, events)
 
     else:
-        # Direct API caller — no event channel. The response is streamed
-        # through unchanged, but when outlet filters apply we accumulate the
-        # assistant response so they can still fire once the stream completes
-        # (e.g. for request tracking). Event emission and DB persistence are
-        # skipped. Accumulation is gated on filter_functions so filter-less
-        # callers pay no per-chunk parsing cost.
+        # Direct API caller (no event channel): stream through unchanged, but
+        # accumulate the response so outlet filters can fire at the end (e.g. for
+        # tracking). Gated on filter_functions to skip per-chunk parsing when none.
         run_outlet = bool(filter_functions)
 
         async def stream_wrapper(original_generator, events):
             def wrap_item(item):
                 return f'data: {item}\n\n'
 
-            # Accumulated assistant response, built incrementally for the
-            # outlet filter once the upstream stream is exhausted.
+            # Accumulated assistant response for the outlet filter.
             outlet_output = []
             outlet_content = ''
             outlet_usage = None
 
             def accumulate(raw):
-                """Best-effort parse of a streamed chunk to capture the final
-                assistant content + usage. The call site guards against
-                exceptions so tracking can never break the passthrough stream."""
+                """Best-effort parse of a chunk to capture final content + usage."""
                 nonlocal outlet_output, outlet_content, outlet_usage
                 line = raw.decode('utf-8', 'replace') if isinstance(raw, bytes) else raw
                 if not isinstance(line, str):
