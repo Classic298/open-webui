@@ -1264,7 +1264,7 @@ async def get_tool_server_data(url: str, headers: dict | None) -> dict[str, Any]
                         res = yaml.safe_load(text_content)
 
     except Exception as err:
-        log.exception(f'Could not fetch tool server spec from {url}')
+        log.warning(f'Could not fetch tool server spec from {url}: {err}')
         if isinstance(err, dict) and 'detail' in err:
             error = err['detail']
         else:
