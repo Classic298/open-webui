@@ -957,19 +957,6 @@ def convert_to_responses_payload(payload: dict) -> dict:
                     url_data = part.get('image_url', {})
                     url = url_data.get('url', '') if isinstance(url_data, dict) else url_data
                     content_parts.append({'type': 'input_image', 'image_url': url})
-                elif part.get('type') == 'file':
-                    # Chat Completions `file` part -> Responses API `input_file`.
-                    # Carries an uploaded document (e.g. a PDF) as a base64 data
-                    # URL (`file_data`) or a previously uploaded `file_id`.
-                    file_data = part.get('file', {}) or {}
-                    input_file = {'type': 'input_file'}
-                    if file_data.get('filename'):
-                        input_file['filename'] = file_data['filename']
-                    if file_data.get('file_data'):
-                        input_file['file_data'] = file_data['file_data']
-                    if file_data.get('file_id'):
-                        input_file['file_id'] = file_data['file_id']
-                    content_parts.append(input_file)
         else:
             content_parts = [{'type': text_type, 'text': str(content)}]
 

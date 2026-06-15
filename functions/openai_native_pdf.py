@@ -33,16 +33,12 @@ OpenAI, and compatible gateways).
 
 Notes / limitations
 -------------------
-- Works with both the OpenAI Chat Completions and Responses APIs. The filter
-  always emits a Chat Completions `file` part; for Responses endpoints the
-  router's `convert_to_responses_payload` translates it into an `input_file`
-  part (requires Open WebUI built with that translation present).
+- Targets the Chat Completions API shape. Endpoints converted to the OpenAI
+  *Responses* API expect a different file part and are not handled here.
 - Large PDFs are skipped (see the `max_pdf_mb` valve) to stay under provider
   request-size limits.
-- A PDF is only sent natively when the requester actually has access to it
-  (direct ownership, admin, or a knowledge-base/shared grant). This blocks a
-  forged API request from inlining an arbitrary file id off disk; legitimate
-  but unverifiable files simply fall back to the default RAG pipeline.
+- PDFs the current user cannot prove access to fall back to the default RAG
+  pipeline rather than being sent natively.
 """
 
 import base64
