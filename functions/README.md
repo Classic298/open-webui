@@ -42,9 +42,13 @@ gateways).
 | `attach_to_last_message` | `true` | Attach to the last user message (off = first). |
 | `debug` | `false` | Verbose logging. |
 
+**Works with** both the OpenAI Chat Completions and Responses APIs. The filter
+emits a Chat Completions `file` part; for Responses endpoints the router's
+`convert_to_responses_payload` translates it to an `input_file` part.
+
 **Limitations**
 
-- Targets the Chat Completions API shape; endpoints converted to the OpenAI
-  *Responses* API use a different file part and are not handled.
-- PDFs the current user cannot prove access to fall back to default RAG instead
-  of being sent natively.
+- Large PDFs are skipped (`max_pdf_mb`) to stay under provider request limits.
+- A PDF is sent natively only when the requester has access to it (ownership,
+  admin, or a knowledge-base/shared grant); otherwise it falls back to default
+  RAG. This blocks a forged API request from inlining an arbitrary file id.
