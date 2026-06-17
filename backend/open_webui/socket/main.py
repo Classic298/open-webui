@@ -13,6 +13,7 @@ from open_webui.config import (
     CORS_ALLOW_ORIGIN,
 )
 from open_webui.env import (
+    ENABLE_REDIS_STREAM_CACHE,
     ENABLE_WEBSOCKET_SUPPORT,
     GLOBAL_LOG_LEVEL,
     REDIS_KEY_PREFIX,
@@ -43,6 +44,10 @@ from open_webui.utils.redis import (
     build_sentinel_url,
     get_redis_connection,
     get_sentinels_from_env,
+)
+from open_webui.utils.stream_cache import (
+    read_stream_snapshot,
+    write_stream_snapshot,
 )
 from redis import asyncio as aioredis
 
@@ -408,6 +413,50 @@ async def heartbeat(sid, data):
     if user:
         SESSION_POOL[sid] = {**user, 'last_seen_at': int(time.time())}
         await Users.update_last_active_by_id(user['id'])
+
+
+@sio.on('chat:stream:resume')
+async def chat_stream_resume(sid, data):
+    """Replay the latest cached snapshot of an in-progress streaming response.
+
+    When ENABLE_REDIS_STREAM_CACHE is on, the client emits this on (re)connecting
+    to a chat whose response is still generating (detected via the Redis task
+    registry). We look up the cached cumulative snapshot — written by whichever
+    worker is generating — and emit it back to *this* socket through the normal
+    'events' pipeline, so the existing handler repaints the message immediately.
+    Subsequent live snapshots, fanned out via the Redis pub/sub backplane,
+    continue to arrive and keep it current.
+    """
+    if not ENABLE_REDIS_STREAM_CACHE:
+        return
+
+    user = SESSION_POOL.get(sid)
+    if not user:
+        return
+
+    chat_id = data.get('chat_id')
+    message_id = data.get('message_id')
+    if not chat_id or not message_id:
+        return
+
+    # Authorization: only the chat owner receives live events for this chat
+    # (the emitter targets the user:{id} room), so resume is owner-only too.
+    if not await Chats.is_chat_owner(chat_id, user['id']):
+        return
+
+    snapshot = await read_stream_snapshot(chat_id, message_id)
+    if not snapshot:
+        return
+
+    await sio.emit(
+        'events',
+        {
+            'chat_id': chat_id,
+            'message_id': message_id,
+            'data': {'type': 'chat:completion', 'data': snapshot},
+        },
+        room=sid,
+    )
 
 
 @sio.on('join-channels')
@@ -917,6 +966,23 @@ async def get_event_emitter(request_info, update_db=True):
             },
             room=f'user:{user_id}',
         )
+
+        # Mirror cumulative streaming snapshots to Redis so a client that
+        # reconnects or refreshes mid-generation can replay the current state
+        # (see utils/stream_cache.py). Only snapshots that carry content — or
+        # the terminal 'done' snapshot — are useful for resume; usage/error-only
+        # events would otherwise clobber the cached content. Temporary 'local:'
+        # chats live only in the client and never need a server-side replay.
+        if (
+            ENABLE_REDIS_STREAM_CACHE
+            and message_id
+            and not (request_info.get('chat_id') or '').startswith('local:')
+            and event_data.get('type') == 'chat:completion'
+        ):
+            completion_data = event_data.get('data', {}) or {}
+            is_done = bool(completion_data.get('done'))
+            if 'content' in completion_data or is_done:
+                await write_stream_snapshot(chat_id, message_id, completion_data, force=is_done)
 
         if update_db and message_id and not (request_info.get('chat_id') or '').startswith('local:'):
             event_type = event_data.get('type')

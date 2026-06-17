@@ -1469,6 +1469,17 @@
 
 				if (pendingTaskIds.length > 0 && !responseComplete) {
 					taskIds = pendingTaskIds;
+
+					// The response is still generating on the server. Ask the backend to
+					// replay the latest cached stream snapshot so the in-progress message
+					// repaints immediately instead of showing an empty bubble until done.
+					// Harmless no-op when the server has ENABLE_REDIS_STREAM_CACHE off.
+					if (currentMessage?.id) {
+						$socket?.emit('chat:stream:resume', {
+							chat_id: $chatId,
+							message_id: currentMessage.id
+						});
+					}
 				} else {
 					taskIds = null;
 					// No active tasks and message incomplete → generation was interrupted

@@ -357,6 +357,33 @@ DATABASE_ENABLE_SESSION_SHARING = os.getenv('DATABASE_ENABLE_SESSION_SHARING', '
 ENABLE_PUBLIC_ACTIVE_USERS_COUNT = os.getenv('ENABLE_PUBLIC_ACTIVE_USERS_COUNT', 'True').lower() == 'true'
 RESET_CONFIG_ON_START = os.getenv('RESET_CONFIG_ON_START', 'False').lower() == 'true'
 ENABLE_REALTIME_CHAT_SAVE = os.getenv('ENABLE_REALTIME_CHAT_SAVE', 'False').lower() == 'true'
+
+# When enabled, the cumulative snapshot of an in-progress assistant response is
+# mirrored to Redis while it streams. A client that reconnects or refreshes
+# mid-generation — landing on any worker — can then replay the latest snapshot
+# and resume rendering immediately, instead of seeing an empty message until the
+# response completes and is persisted to the database. Requires Redis (REDIS_URL);
+# it is a no-op otherwise. This is the ephemeral, opt-in alternative to
+# ENABLE_REALTIME_CHAT_SAVE — far cheaper than per-token database writes.
+ENABLE_REDIS_STREAM_CACHE = os.getenv('ENABLE_REDIS_STREAM_CACHE', 'False').lower() == 'true'
+
+# TTL (seconds) for cached in-progress streaming snapshots in Redis. The final
+# snapshot is also retained for this duration so a client whose generation
+# completes during the reconnect window can still recover it.
+try:
+    REDIS_STREAM_CACHE_TTL = int(os.getenv('REDIS_STREAM_CACHE_TTL', '600') or '600')
+except ValueError:
+    REDIS_STREAM_CACHE_TTL = 600
+
+# Minimum interval (milliseconds) between Redis writes for a single streaming
+# message. Snapshots are cumulative, so coalescing writes bounds the bandwidth
+# cost without losing the ability to resume; the terminal (done) snapshot always
+# bypasses this throttle. Set to 0 to write on every emitted snapshot.
+try:
+    REDIS_STREAM_CACHE_WRITE_INTERVAL_MS = int(os.getenv('REDIS_STREAM_CACHE_WRITE_INTERVAL_MS', '250') or '250')
+except ValueError:
+    REDIS_STREAM_CACHE_WRITE_INTERVAL_MS = 250
+
 ENABLE_QUERIES_CACHE = os.getenv('ENABLE_QUERIES_CACHE', 'False').lower() == 'true'
 RAG_SYSTEM_CONTEXT = os.getenv('RAG_SYSTEM_CONTEXT', 'False').lower() == 'true'
 
