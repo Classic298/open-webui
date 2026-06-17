@@ -1471,13 +1471,24 @@
 					taskIds = pendingTaskIds;
 
 					// The response is still generating on the server. Ask the backend to
-					// replay the latest cached stream snapshot so the in-progress message
-					// repaints immediately instead of showing an empty bubble until done.
-					// Harmless no-op when the server has ENABLE_REDIS_STREAM_CACHE off.
+					// replay the latest cached stream snapshot(s) so the in-progress
+					// message(s) repaint immediately instead of showing an empty bubble
+					// until done. We resume every still-generating assistant message —
+					// not just history.currentId — so multi-model / arena branches (which
+					// loadChat preserves as done === false above) all recover. Harmless
+					// no-op when the server has ENABLE_REDIS_STREAM_CACHE off.
+					const resumeMessageIds = new Set(
+						Object.values(history.messages)
+							.filter((m) => m?.role === 'assistant' && m.done === false && m.id)
+							.map((m) => m.id)
+					);
 					if (currentMessage?.id) {
+						resumeMessageIds.add(currentMessage.id);
+					}
+					for (const messageId of resumeMessageIds) {
 						$socket?.emit('chat:stream:resume', {
 							chat_id: $chatId,
-							message_id: currentMessage.id
+							message_id: messageId
 						});
 					}
 				} else {
