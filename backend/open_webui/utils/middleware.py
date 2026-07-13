@@ -1975,8 +1975,10 @@ async def load_messages_from_db(chat_id: str, message_id: str) -> Optional[list[
     if not db_messages:
         return None
 
+    # 'id' is kept as an internal handle so context compaction can anchor its
+    # summary checkpoint to a specific message; it is stripped before the LLM.
     return [
-        {k: v for k, v in msg.items() if k in ('role', 'content', 'output', 'files', 'contextSummary')}
+        {k: v for k, v in msg.items() if k in ('id', 'role', 'content', 'output', 'files', 'contextSummary')}
         for msg in db_messages
     ]
 
@@ -2035,6 +2037,9 @@ def strip_compaction_fields(messages: list[dict]) -> list[dict]:
         clean = dict(message)
         clean.pop('contextSummary', None)
         clean.pop('context_summary', None)
+        # Internal reconstruction handle from load_messages_from_db; providers
+        # must never see it.
+        clean.pop('id', None)
         stripped.append(clean)
     return stripped
 
@@ -2223,7 +2228,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                         {
                             k: v
                             for k, v in assistant_message.items()
-                            if k in ('role', 'content', 'output', 'files', 'contextSummary')
+                            if k in ('id', 'role', 'content', 'output', 'files', 'contextSummary')
                         }
                     )
 
