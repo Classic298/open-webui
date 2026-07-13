@@ -5026,7 +5026,28 @@ async def streaming_chat_response_handler(response, ctx):
                         else:
                             break
                     except Exception as e:
-                        log.debug(e)
+                        # A failed/stalled continuation call (e.g. sock_read/stream
+                        # timeout after a tool result) must NOT be swallowed — a bare
+                        # break leaves the turn ending on tool calls with no visible
+                        # output (empty chat on refresh). Surface it like the
+                        # tool-iteration-limit path so the user sees a failure.
+                        log.exception('Tool-call continuation failed: %s', e)
+                        error_content = f'Generation failed after tool execution: {e}'
+                        if not metadata.get('chat_id', '').startswith('channel:'):
+                            try:
+                                await Chats.upsert_message_to_chat_by_id_and_message_id(
+                                    metadata['chat_id'],
+                                    metadata['message_id'],
+                                    {'error': {'content': error_content}},
+                                )
+                            except Exception:
+                                pass
+                        await event_emitter(
+                            {
+                                'type': 'chat:message:error',
+                                'data': {'error': {'content': error_content}},
+                            }
+                        )
                         break
 
                 if (
