@@ -244,11 +244,8 @@ async def convert_streaming_response_ollama_to_openai(ollama_streaming_response)
         if done:
             usage = convert_ollama_usage_to_openai(data)
 
-        # Passing message_id skips the per-chunk uuid4 the template would
-        # otherwise generate and immediately have overwritten.
-        data = openai_chat_chunk_message_template(
-            model, message_content, reasoning_content, openai_tool_calls, usage, message_id=completion_id
-        )
+        data = openai_chat_chunk_message_template(model, message_content, reasoning_content, openai_tool_calls, usage)
+        data['id'] = completion_id
 
         # First chunk must carry delta.role (OpenAI spec).
         if first:

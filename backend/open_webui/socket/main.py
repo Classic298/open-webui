@@ -903,7 +903,7 @@ async def _make_channel_emitter(request_info):
             if not content and not done:
                 return
 
-            now = time.time()
+            now = __import__('time').time()
             if done or (now - state['last_emit_at']) >= THROTTLE_INTERVAL:
                 state['last_emit_at'] = now
                 await _emit_channel_update(content, done)

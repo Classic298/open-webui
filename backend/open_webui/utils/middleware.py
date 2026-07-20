@@ -12,7 +12,6 @@ import sys
 import textwrap
 import time
 from concurrent.futures import ThreadPoolExecutor
-from functools import lru_cache
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -112,7 +111,7 @@ from open_webui.utils.misc import (
     set_last_user_message_content,
     strip_empty_content_blocks,
 )
-from open_webui.utils.payload import OPEN_WEBUI_PARAMS, apply_system_prompt_to_body, resolve_system_prompt
+from open_webui.utils.payload import apply_system_prompt_to_body, resolve_system_prompt
 from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.utils.response import merge_usage, normalize_usage
 from open_webui.utils.sanitize import sanitize_code
@@ -133,29 +132,6 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
-
-
-# Map content_type to output item type (tag_output_handler, per content delta).
-OUTPUT_TYPE_MAP = {
-    'reasoning': 'reasoning',
-    'solution': 'message',  # solution tags just produce text
-    'code_interpreter': 'open_webui:code_interpreter',
-}
-
-# Strips <details> blocks and inline images from message content.
-DETAILS_AND_IMAGES_RE = re.compile(r'<details\b[^>]*>.*?<\/details>|!\[.*?\]\(.*?\)', flags=re.S | re.I)
-
-# Tool-result shape expectations for citation extraction.
-_EXPECTS_LIST = {'search_web', 'query_knowledge_files'}
-_EXPECTS_DICT = {'view_knowledge_file', 'view_file'}
-
-
-@lru_cache(maxsize=256)
-def _start_tag_pattern(start_tag: str) -> re.Pattern:
-    """Compiled start-tag pattern — cached; rebuilt per content delta before."""
-    if start_tag.startswith('<') and start_tag.endswith('>'):
-        return re.compile(rf'<{re.escape(start_tag[1:-1])}(\s.*?)?>')
-    return re.compile(rf'{re.escape(start_tag)}')
 
 
 # We believe in one maker of all models, seen and unseen,
@@ -267,6 +243,9 @@ def get_citation_source_from_tool_result(
 
     Returns a list of sources (usually one, but query_knowledge_files may return multiple).
     """
+    _EXPECTS_LIST = {'search_web', 'query_knowledge_files'}
+    _EXPECTS_DICT = {'view_knowledge_file', 'view_file'}
+
     try:
         try:
             tool_result = json.loads(tool_result)
@@ -1911,8 +1890,17 @@ def apply_params_to_form_data(form_data, model):
     params = form_data.pop('params', {})
     custom_params = params.pop('custom_params', {})
 
+    open_webui_params = {
+        'stream_response': bool,
+        'stream_delta_chunk_size': int,
+        'function_calling': str,
+        'reasoning_tags': list,
+        'compact_token_threshold': int,
+        'system': str,
+    }
+
     for key in list(params.keys()):
-        if key in OPEN_WEBUI_PARAMS:
+        if key in open_webui_params:
             del params[key]
 
     if custom_params:
@@ -2124,12 +2112,9 @@ def extract_skill_ids_from_messages(messages: list[dict]) -> set[str]:
     return ids
 
 
-SKILL_STRIP_RE = re.compile(r'<\$[^|>]+(?:\|([^>]*))?>')
-
-
 def strip_skill_mentions(messages: list[dict]) -> None:
     """Replace <$skillId|label> mention tags with the label in message content in-place."""
-    strip_re = SKILL_STRIP_RE
+    strip_re = re.compile(r'<\$[^|>]+(?:\|([^>]*))?>')
     for message in messages:
         content = message.get('content')
         if isinstance(content, str) and strip_re.search(content):
@@ -3108,7 +3093,12 @@ async def background_tasks_handler(ctx):
                         break
 
             if isinstance(content, str):
-                content = DETAILS_AND_IMAGES_RE.sub('', content).strip()
+                content = re.sub(
+                    r'<details\b[^>]*>.*?<\/details>|!\[.*?\]\(.*?\)',
+                    '',
+                    content,
+                    flags=re.S | re.I,
+                ).strip()
 
             messages.append(
                 {
@@ -3704,7 +3694,12 @@ async def streaming_chat_response_handler(response, ctx):
                             parts[-1]['text'] = text
 
                 # Map content_type to output item type
-                output_item_type = OUTPUT_TYPE_MAP.get(content_type, content_type)
+                output_type_map = {
+                    'reasoning': 'reasoning',
+                    'solution': 'message',  # solution tags just produce text
+                    'code_interpreter': 'open_webui:code_interpreter',
+                }
+                output_item_type = output_type_map.get(content_type, content_type)
 
                 last_type = output[-1].get('type', '') if output else ''
 
@@ -3712,7 +3707,11 @@ async def streaming_chat_response_handler(response, ctx):
                     # Use the output item's own text for tag detection
                     item_text = get_last_text(output)
                     for start_tag, end_tag in tags:
-                        match = _start_tag_pattern(start_tag).search(item_text)
+                        start_tag_pattern = rf'{re.escape(start_tag)}'
+                        if start_tag.startswith('<') and start_tag.endswith('>'):
+                            start_tag_pattern = rf'<{re.escape(start_tag[1:-1])}(\s.*?)?>'
+
+                        match = re.search(start_tag_pattern, item_text)
                         if match:
                             try:
                                 attr_content = match.group(1) if match.group(1) else ''
@@ -3820,7 +3819,10 @@ async def streaming_chat_response_handler(response, ctx):
                         end_flag = True
 
                         # Strip start and end tags from content
-                        block_content = _start_tag_pattern(start_tag).sub('', block_content).strip()
+                        start_tag_pattern = rf'{re.escape(start_tag)}'
+                        if start_tag.startswith('<') and start_tag.endswith('>'):
+                            start_tag_pattern = rf'<{re.escape(start_tag[1:-1])}(\s.*?)?>'
+                        block_content = re.sub(start_tag_pattern, '', block_content).strip()
 
                         end_tag_regex = re.compile(end_tag_pattern, re.DOTALL)
                         split_content = end_tag_regex.split(block_content, maxsplit=1)
@@ -4015,9 +4017,6 @@ async def streaming_chat_response_handler(response, ctx):
                         if delta_count >= delta_chunk_size:
                             await flush_pending_delta_data(delta_chunk_size)
 
-                    # Invariant across the stream — build once, not per SSE line.
-                    stream_extra_params = {'__body__': form_data, **extra_params}
-
                     async for line in response.body_iterator:
                         line = line.decode('utf-8', 'replace') if isinstance(line, bytes) else line
                         data = line
@@ -4061,7 +4060,7 @@ async def streaming_chat_response_handler(response, ctx):
                                 filter_functions=filter_functions,
                                 filter_type='stream',
                                 form_data=data,
-                                extra_params=stream_extra_params,
+                                extra_params={'__body__': form_data, **extra_params},
                             )
 
                             if data:
@@ -4302,12 +4301,7 @@ async def streaming_chat_response_handler(response, ctx):
                                             }
                                             delta_type = 'tool_call'
 
-                                    delta_images = delta.get('images') or []
-                                    image_urls = (
-                                        await get_image_urls(delta_images, request, metadata, user)
-                                        if delta_images
-                                        else []
-                                    )
+                                    image_urls = await get_image_urls(delta.get('images', []), request, metadata, user)
                                     if image_urls:
                                         image_file_list = [{'type': 'image', 'url': url} for url in image_urls]
                                         message_files = await Chats.add_message_files_by_id_and_message_id(

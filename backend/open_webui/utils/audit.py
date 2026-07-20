@@ -33,14 +33,6 @@ if TYPE_CHECKING:
     from loguru import Logger
 
 
-# Auth endpoints are always audited, authenticated or not.
-ALWAYS_LOG_ENDPOINTS = (
-    '/api/v1/auths/signin',
-    '/api/v1/auths/signout',
-    '/api/v1/auths/signup',
-)
-
-
 @dataclass(frozen=True)
 class AuditLogEntry:
     # `Metadata` audit level properties
@@ -148,13 +140,6 @@ class AuditLoggingMiddleware:
             self.audited_methods.add('GET')
         self.audit_level = audit_level
 
-        # Path filters are static for the middleware's lifetime — compile once
-        # instead of per request.
-        self._included_pattern = (
-            re.compile(r'^/api(?:/v1)?/(' + '|'.join(self.included_paths) + r')\b') if self.included_paths else None
-        )
-        self._excluded_pattern = re.compile(r'^/api(?:/v1)?/(' + '|'.join(self.excluded_paths) + r')\b')
-
         if self.included_paths and self.excluded_paths:
             logger.warning(
                 'Both AUDIT_INCLUDED_PATHS and AUDIT_EXCLUDED_PATHS are set. '
@@ -228,6 +213,11 @@ class AuditLoggingMiddleware:
         if request.method not in self.audited_methods:
             return True
 
+        ALWAYS_LOG_ENDPOINTS = {
+            '/api/v1/auths/signin',
+            '/api/v1/auths/signout',
+            '/api/v1/auths/signup',
+        }
         path = request.url.path.lower()
         for endpoint in ALWAYS_LOG_ENDPOINTS:
             if path.startswith(endpoint):
@@ -239,13 +229,15 @@ class AuditLoggingMiddleware:
             return True
 
         # Whitelist mode: only log paths that match included_paths
-        if self._included_pattern is not None:
-            if not self._included_pattern.match(request.url.path):
+        if self.included_paths:
+            pattern = re.compile(r'^/api(?:/v1)?/(' + '|'.join(self.included_paths) + r')\b')
+            if not pattern.match(request.url.path):
                 return True  # Skip: path not in whitelist
             return False  # Do NOT skip: path is in whitelist
 
         # Blacklist mode: skip paths that match excluded_paths
-        if self._excluded_pattern.match(request.url.path):
+        pattern = re.compile(r'^/api(?:/v1)?/(' + '|'.join(self.excluded_paths) + r')\b')
+        if pattern.match(request.url.path):
             return True
 
         return False
