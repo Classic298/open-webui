@@ -851,9 +851,10 @@ async def get_models(request: Request, refresh: bool = False, user=Depends(get_v
 
     models = await get_filtered_models(models, user)
 
-    log.debug(
-        f'/api/models returned filtered models accessible to the user: {json.dumps([model.get("id") for model in models])}'
-    )
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug(
+            f'/api/models returned filtered models accessible to the user: {json.dumps([model.get("id") for model in models])}'
+        )
     return {'data': models}
 
 
@@ -2640,6 +2641,11 @@ async def check_db_health():
 app.mount('/static', StaticFiles(directory=STATIC_DIR), name='static')
 
 
+# trailing os.sep is required: without it, a path resolving to a sibling
+# whose name starts with the cache-dir basename (e.g. cache_backup) passes
+CACHE_ROOT = os.path.abspath(CACHE_DIR) + os.sep
+
+
 @app.get('/cache/{path:path}')
 async def serve_cache_file(
     path: str,
@@ -2652,10 +2658,7 @@ async def serve_cache_file(
     XSS from user-generated HTML stored in the cache directory.
     """
     file_path = os.path.abspath(os.path.join(CACHE_DIR, path))
-    # trailing os.sep is required: without it, a path resolving to a sibling
-    # whose name starts with the cache-dir basename (e.g. cache_backup) passes
-    cache_root = os.path.abspath(CACHE_DIR) + os.sep
-    if not file_path.startswith(cache_root):
+    if not file_path.startswith(CACHE_ROOT):
         raise HTTPException(status_code=404, detail='File not found')
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail='File not found')

@@ -3,6 +3,7 @@ import math
 import re
 import uuid
 from datetime import datetime
+from functools import cache
 from typing import Any, Optional
 
 from open_webui.config import DEFAULT_RAG_TEMPLATE
@@ -242,19 +243,22 @@ def replace_messages_variable(
 
         return get_messages_content(selected)
 
+    template = _messages_variable_pattern(variable_name).sub(replacement_function, template)
+
+    return template
+
+
+@cache
+def _messages_variable_pattern(variable_name: str) -> re.Pattern:
     variable_pattern = re.escape(variable_name)
-    template = re.sub(
+    return re.compile(
         r'(?:'
         rf'\{{\{{{variable_pattern}(?:\|(\w+:\d+))?\}}\}}'
         rf'|\{{\{{{variable_pattern}:START:(\d+)(?:\|(\w+:\d+))?\}}\}}'
         rf'|\{{\{{{variable_pattern}:END:(\d+)(?:\|(\w+:\d+))?\}}\}}'
         rf'|\{{\{{{variable_pattern}:MIDDLETRUNCATE:(\d+)(?:\|(\w+:\d+))?\}}\}}'
-        r')',
-        replacement_function,
-        template,
+        r')'
     )
-
-    return template
 
 
 # {{prompt:middletruncate:8000}}

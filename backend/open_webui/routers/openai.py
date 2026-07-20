@@ -888,8 +888,8 @@ async def verify_connection(
             raise HTTPException(status_code=500, detail=ERROR_MESSAGES.SERVER_CONNECTION_ERROR)
 
 
-def get_azure_allowed_params(api_version: str) -> set[str]:
-    allowed_params = {
+AZURE_ALLOWED_PARAMS = frozenset(
+    {
         'messages',
         'temperature',
         'role',
@@ -918,6 +918,11 @@ def get_azure_allowed_params(api_version: str) -> set[str]:
         'max_completion_tokens',
         'reasoning_effort',
     }
+)
+
+
+def get_azure_allowed_params(api_version: str) -> set[str]:
+    allowed_params = set(AZURE_ALLOWED_PARAMS)
 
     try:
         if api_version >= '2024-09-01-preview':
@@ -928,13 +933,17 @@ def get_azure_allowed_params(api_version: str) -> set[str]:
     return allowed_params
 
 
+_O_SERIES_MODEL_RE = re.compile(r'^o\d+')
+_GPT_N_MODEL_RE = re.compile(r'^gpt-(\d+)')
+
+
 def is_openai_new_model(model: str) -> bool:
     model_lower = model.lower()
     # o-series models (o1, o3, o4, o5, ...)
-    if re.match(r'^o\d+', model_lower):
+    if _O_SERIES_MODEL_RE.match(model_lower):
         return True
     # gpt-N where N >= 5 (gpt-5, gpt-5.2, gpt-6, ...)
-    m = re.match(r'^gpt-(\d+)', model_lower)
+    m = _GPT_N_MODEL_RE.match(model_lower)
     if m and int(m.group(1)) >= 5:
         return True
     return False

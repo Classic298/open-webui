@@ -10,6 +10,75 @@ from open_webui.utils.misc import (
 from open_webui.utils.task import prompt_template, prompt_variables_template
 
 
+def _parse_json(value: str) -> dict:
+    """Parse a JSON string, returning the original value on failure."""
+    try:
+        return json.loads(value)
+    except Exception:
+        return value
+
+
+# Module-level constants — previously rebuilt on every request.
+OPEN_WEBUI_PARAMS = {
+    'stream_response': bool,
+    'stream_delta_chunk_size': int,
+    'function_calling': str,
+    'reasoning_tags': list,
+    'compact_token_threshold': int,
+    'system': str,
+}
+
+OPENAI_PARAM_MAPPINGS = {
+    'temperature': float,
+    'top_p': float,
+    'min_p': float,
+    'max_tokens': int,
+    'frequency_penalty': float,
+    'presence_penalty': float,
+    'reasoning_effort': str,
+    'seed': lambda x: x,
+    'stop': lambda x: [bytes(s, 'utf-8').decode('unicode_escape') for s in x],
+    'logit_bias': lambda x: x,
+    'response_format': dict,
+}
+
+OLLAMA_NAME_DIFFERENCES = {
+    'max_tokens': 'num_predict',
+}
+
+# See https://github.com/ollama/ollama/blob/main/docs/api.md#request-8
+OLLAMA_PARAM_MAPPINGS = {
+    'temperature': float,
+    'top_p': float,
+    'seed': lambda x: x,
+    'mirostat': int,
+    'mirostat_eta': float,
+    'mirostat_tau': float,
+    'num_ctx': int,
+    'num_batch': int,
+    'num_keep': int,
+    'num_predict': int,
+    'repeat_last_n': int,
+    'top_k': int,
+    'min_p': float,
+    'repeat_penalty': float,
+    'presence_penalty': float,
+    'frequency_penalty': float,
+    'stop': lambda x: [bytes(s, 'utf-8').decode('unicode_escape') for s in x],
+    'num_gpu': int,
+    'use_mmap': bool,
+    'use_mlock': bool,
+    'num_thread': int,
+}
+
+# Ollama parameters that live at the payload root rather than in `options`.
+OLLAMA_ROOT_PARAMS = {
+    'format': _parse_json,
+    'keep_alive': _parse_json,
+    'think': lambda x: x,
+}
+
+
 async def resolve_system_prompt(
     system: Optional[str],
     metadata: Optional[dict] = None,
@@ -79,17 +148,8 @@ def remove_open_webui_params(params: dict) -> dict:
     Returns:
         dict: The modified dictionary with OpenWebUI parameters removed.
     """
-    open_webui_params = {
-        'stream_response': bool,
-        'stream_delta_chunk_size': int,
-        'function_calling': str,
-        'reasoning_tags': list,
-        'compact_token_threshold': int,
-        'system': str,
-    }
-
     for key in list(params.keys()):
-        if key in open_webui_params:
+        if key in OPEN_WEBUI_PARAMS:
             del params[key]
 
     return params
@@ -114,20 +174,7 @@ def apply_model_params_to_body_openai(params: dict, form_data: dict) -> dict:
         # If there are custom parameters, we need to apply them first
         params = deep_update(params, custom_params)
 
-    mappings = {
-        'temperature': float,
-        'top_p': float,
-        'min_p': float,
-        'max_tokens': int,
-        'frequency_penalty': float,
-        'presence_penalty': float,
-        'reasoning_effort': str,
-        'seed': lambda x: x,
-        'stop': lambda x: [bytes(s, 'utf-8').decode('unicode_escape') for s in x],
-        'logit_bias': lambda x: x,
-        'response_format': dict,
-    }
-    return apply_model_params_to_body(params, form_data, mappings)
+    return apply_model_params_to_body(params, form_data, OPENAI_PARAM_MAPPINGS)
 
 
 def apply_model_params_to_body_ollama(params: dict, form_data: dict) -> dict:
@@ -149,64 +196,22 @@ def apply_model_params_to_body_ollama(params: dict, form_data: dict) -> dict:
         params = deep_update(params, custom_params)
 
     # Convert OpenAI parameter names to Ollama parameter names if needed.
-    name_differences = {
-        'max_tokens': 'num_predict',
-    }
-
-    for key, value in name_differences.items():
+    for key, value in OLLAMA_NAME_DIFFERENCES.items():
         if (param := params.get(key, None)) is not None:
             # Copy the parameter to new name then delete it, to prevent Ollama warning of invalid option provided
             params[value] = params[key]
             del params[key]
 
-    # See https://github.com/ollama/ollama/blob/main/docs/api.md#request-8
-    mappings = {
-        'temperature': float,
-        'top_p': float,
-        'seed': lambda x: x,
-        'mirostat': int,
-        'mirostat_eta': float,
-        'mirostat_tau': float,
-        'num_ctx': int,
-        'num_batch': int,
-        'num_keep': int,
-        'num_predict': int,
-        'repeat_last_n': int,
-        'top_k': int,
-        'min_p': float,
-        'repeat_penalty': float,
-        'presence_penalty': float,
-        'frequency_penalty': float,
-        'stop': lambda x: [bytes(s, 'utf-8').decode('unicode_escape') for s in x],
-        'num_gpu': int,
-        'use_mmap': bool,
-        'use_mlock': bool,
-        'num_thread': int,
-    }
-
-    def parse_json(value: str) -> dict:
-        """
-        Parses a JSON string into a dictionary, handling potential JSONDecodeError.
-        """
-        try:
-            return json.loads(value)
-        except Exception as e:
-            return value
-
-    ollama_root_params = {
-        'format': lambda x: parse_json(x),
-        'keep_alive': lambda x: parse_json(x),
-        'think': lambda x: x,
-    }
-
-    for key, value in ollama_root_params.items():
+    for key, value in OLLAMA_ROOT_PARAMS.items():
         if (param := params.get(key, None)) is not None:
             # Copy the parameter to new name then delete it, to prevent Ollama warning of invalid option provided
             form_data[key] = value(param)
             del params[key]
 
     # Unlike OpenAI, Ollama does not support params directly in the body
-    form_data['options'] = apply_model_params_to_body(params, (form_data.get('options', {}) or {}), mappings)
+    form_data['options'] = apply_model_params_to_body(
+        params, (form_data.get('options', {}) or {}), OLLAMA_PARAM_MAPPINGS
+    )
     return form_data
 
 
@@ -320,23 +325,8 @@ def convert_payload_openai_to_ollama(openai_payload: dict) -> dict:
         ollama_payload['options'] = openai_payload['options']
         ollama_options = openai_payload['options']
 
-        def parse_json(value: str) -> dict:
-            """
-            Parses a JSON string into a dictionary, handling potential JSONDecodeError.
-            """
-            try:
-                return json.loads(value)
-            except Exception as e:
-                return value
-
-        ollama_root_params = {
-            'format': lambda x: parse_json(x),
-            'keep_alive': lambda x: parse_json(x),
-            'think': lambda x: x,
-        }
-
         # Ollama's options field can contain parameters that should be at the root level.
-        for key, value in ollama_root_params.items():
+        for key, value in OLLAMA_ROOT_PARAMS.items():
             if (param := ollama_options.get(key, None)) is not None:
                 # Copy the parameter to new name then delete it, to prevent Ollama warning of invalid option provided
                 ollama_payload[key] = value(param)

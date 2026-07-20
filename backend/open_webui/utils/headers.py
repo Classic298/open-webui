@@ -100,8 +100,11 @@ def get_custom_headers(custom_headers: dict, user=None, metadata: dict = None, r
     for key, value in custom_headers.items():
         if not isinstance(value, str):
             value = str(value)
-        for token, val in template_vars.items():
-            value = value.replace(token, val)
+        # All template tokens start with '{{' — skip the replace passes for
+        # plain values (the common case).
+        if '{{' in value:
+            for token, val in template_vars.items():
+                value = value.replace(token, val)
         parsed_headers[key] = value
 
     return parsed_headers

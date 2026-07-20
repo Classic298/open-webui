@@ -1,7 +1,7 @@
 import json
 from typing import Any
 
-from open_webui.config import DEFAULT_USER_PERMISSIONS
+from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL, DEFAULT_USER_PERMISSIONS
 from open_webui.models.access_grants import (
     has_public_read_access_grant,
     has_public_write_access_grant,
@@ -156,8 +156,6 @@ async def has_connection_access(
     - Missing, None, or empty access_grants → private, admin-only
     - access_grants has entries → delegates to ``has_access``
     """
-    from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
-
     if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
         return True
 
