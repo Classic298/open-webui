@@ -2606,7 +2606,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         from open_webui.models.skills import Skills as SkillsModel
 
         accessible_skill_ids = {s.id for s in await SkillsModel.get_skills_by_user_id(user.id, 'read')}
-        for sid in skill_ids:
+        # sorted: set order varies per process and byte-shuffles the prompt, breaking prompt caching
+        for sid in sorted(skill_ids):
             if sid in accessible_skill_ids:
                 s = await SkillsModel.get_skill_by_id(sid)
                 if s and s.is_active:
