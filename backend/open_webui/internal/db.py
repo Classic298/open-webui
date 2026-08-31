@@ -292,7 +292,6 @@ def _compile_sqlite_like(pattern: str, escape: str | None) -> re.Pattern | None:
 #              Alembic, peewee migration, health checks)
 # ============================================================
 
-
 # Handle SQLCipher URLs
 if SQLALCHEMY_DATABASE_URL.startswith('sqlite+sqlcipher://'):
     database_password = os.environ.get('DATABASE_PASSWORD')
