@@ -126,8 +126,8 @@ function isDoneStatus(status?: string): boolean {
 	return status === 'completed' || status === 'failed' || status === 'incomplete';
 }
 
-function getMessageText(item: OutputItem): string {
-	return getTextFromParts(item.content ?? []);
+function getMessageText(item?: OutputItem | null): string {
+	return getTextFromParts(item?.content ?? []);
 }
 
 function getReasoningText(item: OutputItem): string {
@@ -347,8 +347,11 @@ export function buildOutputDisplayItems(output: OutputItem[] = []): OutputDispla
 	const currentDetailTokens: OutputDetailToken[] = [];
 	const toolOutputByCallId: Record<string, OutputItem> = {};
 	const toolCallByCallId: Record<string, OutputItem> = {};
+	const safeOutput = output.filter((item): item is OutputItem =>
+		Boolean(item && typeof item === 'object')
+	);
 
-	for (const item of output) {
+	for (const item of safeOutput) {
 		if (item?.type === 'function_call_output' && item.call_id) {
 			toolOutputByCallId[item.call_id] = item;
 		} else if (item?.type === 'function_call' && (item.call_id || item.id)) {
@@ -373,8 +376,12 @@ export function buildOutputDisplayItems(output: OutputItem[] = []): OutputDispla
 		currentDetailTokens.length = 0;
 	};
 
-	output.forEach((item, index) => {
-		if (item?.type === 'function_call_output') {
+	safeOutput.forEach((item, index) => {
+		if (!item) {
+			return;
+		}
+
+		if (item.type === 'function_call_output') {
 			const inlineFile = getInlineFileFromToolOutput(toolCallByCallId[item.call_id ?? ''], item);
 			if (inlineFile) {
 				flushDetails();
@@ -395,8 +402,8 @@ export function buildOutputDisplayItems(output: OutputItem[] = []): OutputDispla
 			return;
 		}
 
-		if (item?.type && GROUPABLE_OUTPUT_TYPES.has(item.type)) {
-			const token = buildDetailToken(item, index === output.length - 1, toolOutputByCallId);
+		if (item.type && GROUPABLE_OUTPUT_TYPES.has(item.type)) {
+			const token = buildDetailToken(item, index === safeOutput.length - 1, toolOutputByCallId);
 			if (token) {
 				currentDetailTokens.push(token);
 			}
