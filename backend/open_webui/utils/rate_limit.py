@@ -1,5 +1,5 @@
 import time
-from typing import Dict, Optional
+from typing import Optional
 
 from open_webui.env import REDIS_KEY_PREFIX
 from redis.asyncio import Redis
@@ -10,9 +10,6 @@ class RateLimiter:
     General-purpose rate limiter using Redis with a rolling window strategy.
     Falls back to in-memory storage if Redis is not available.
     """
-
-    # In-memory fallback storage
-    _memory_store: Dict[str, Dict[int, int]] = {}
 
     def __init__(
         self,
@@ -32,12 +29,20 @@ class RateLimiter:
         self.bucket_size = bucket_size
         self.num_buckets = window // bucket_size
         self.enabled = enabled
+        # bucket index -> rate-limit key -> hits
+        self._memory_store: dict[int, dict[str, int]] = {}
 
     def _bucket_key(self, key: str, bucket_index: int) -> str:
         return f'{REDIS_KEY_PREFIX}:ratelimit:{key.lower()}:{bucket_index}'
 
     def _current_bucket(self) -> int:
         return int(time.time()) // self.bucket_size
+
+    def _prune_memory_store(self, now_bucket: int) -> None:
+        min_bucket = now_bucket - self.num_buckets
+        expired = [bucket_index for bucket_index in self._memory_store if bucket_index < min_bucket]
+        for bucket_index in expired:
+            del self._memory_store[bucket_index]
 
     async def is_limited(self, redis: Redis | None, key: str) -> bool:
         """
@@ -95,37 +100,15 @@ class RateLimiter:
 
     def _is_limited_memory(self, key: str) -> bool:
         now_bucket = self._current_bucket()
+        self._prune_memory_store(now_bucket)
 
-        # Init storage
-        if key not in self._memory_store:
-            self._memory_store[key] = {}
+        current_bucket_counts = self._memory_store.setdefault(now_bucket, {})
+        current_bucket_counts[key] = current_bucket_counts.get(key, 0) + 1
 
-        store = self._memory_store[key]
-
-        # Increment bucket
-        store[now_bucket] = store.get(now_bucket, 0) + 1
-
-        # Drop expired buckets
-        min_bucket = now_bucket - self.num_buckets
-        expired = [b for b in store if b < min_bucket]
-        for b in expired:
-            del store[b]
-
-        # Count totals
-        total = sum(store.values())
+        total = sum(bucket_counts.get(key, 0) for bucket_counts in self._memory_store.values())
         return total > self.limit
 
     def _get_count_memory(self, key: str) -> int:
         now_bucket = self._current_bucket()
-        if key not in self._memory_store:
-            return 0
-
-        store = self._memory_store[key]
-        min_bucket = now_bucket - self.num_buckets
-
-        # Remove expired
-        expired = [b for b in store if b < min_bucket]
-        for b in expired:
-            del store[b]
-
-        return sum(store.values())
+        self._prune_memory_store(now_bucket)
+        return sum(bucket_counts.get(key, 0) for bucket_counts in self._memory_store.values())
