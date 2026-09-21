@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { resolveLocalizedFunction } from '$lib/utils/localizedContent';
+	import { functions as localizedFunctions } from '$lib/stores';
 	import DOMPurify from 'dompurify';
 	import { toast } from 'svelte-sonner';
 
@@ -30,6 +32,7 @@
 		showCallOverlay,
 		tools,
 		skills,
+		terminalSkills,
 		toolServers,
 		terminalServers,
 		user as _user,
@@ -55,10 +58,11 @@
 		getUsageTokenCount,
 		getUserPosition,
 		getUserTimezone,
-		getWeekday
+		getWeekday,
+		isRasterImageContentType
 	} from '$lib/utils';
 	import { uploadFile } from '$lib/apis/files';
-	import { getCwd, uploadToTerminal } from '$lib/apis/terminal';
+	import { getCwd, uploadNewFileToTerminal } from '$lib/apis/terminal';
 	import { generateAutoCompletion } from '$lib/apis';
 	import { deleteFileById } from '$lib/apis/files';
 	import { getChatById } from '$lib/apis/chats';
@@ -68,6 +72,7 @@
 
 	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
 	import { matchKeybinding, Shortcut } from '$lib/shortcuts';
+	import { resolveLocalizedModelName } from '$lib/utils/localizedContent';
 
 	import { createNoteHandler } from '../notes/utils';
 	import { getSuggestionRenderer } from '../common/RichTextInput/suggestions';
@@ -170,6 +175,12 @@
 			(history.currentId && history.messages[history.currentId]?.done != true) ||
 			generating);
 	$: canCompact = !!history?.currentId;
+	$: hasChatContent = history?.currentId
+		? createMessagesList(history, history.currentId).some(
+				(message) =>
+					!!message?.content || !!message?.tool_calls || !!message?.files || !!message?.models
+			)
+		: false;
 	$: canToggleTemporary =
 		!embedded &&
 		!chatId &&
@@ -568,10 +579,16 @@
 		}
 
 		if ($temporaryChatEnabled) {
-			window.history.replaceState(null, '', '?temporary-chat=true');
+			window.history.replaceState(window.history.state, '', '?temporary-chat=true');
 		} else {
-			window.history.replaceState(null, '', location.pathname);
+			window.history.replaceState(window.history.state, '', location.pathname);
 		}
+	};
+
+	const createSkillHandler = async () => {
+		prompt = '/skills:create';
+		await tick();
+		dispatch('submit', prompt);
 	};
 
 	const insertTextAtCursor = async (text: string) => {
@@ -673,6 +690,7 @@
 	$: showCommands =
 		['/', '#', '@', '$', ':'].includes(command?.charAt(0)) || '\\#' === command?.slice(0, 2);
 	let suggestions = null;
+	$: atSelectedModelName = resolveLocalizedModelName(atSelectedModel, $i18n.language);
 
 	let showTools = false;
 	let showSkills = false;
@@ -799,7 +817,9 @@
 	$: showToolsButton = ($tools ?? []).length > 0 || ($toolServers ?? []).length > 0;
 
 	let showSkillsButton = false;
-	$: showSkillsButton = ($skills ?? []).some((skill) => skill.is_active);
+	$: showSkillsButton =
+		($skills ?? []).some((skill) => skill.is_active) ||
+		($terminalSkills ?? []).some((skill) => skill.is_active);
 
 	let showWebSearchButton = false;
 	$: showWebSearchButton =
@@ -943,7 +963,7 @@
 							chatId || undefined
 						)
 					)?.cwd || '/';
-				const uploadedFile = await uploadToTerminal(
+				const uploadedFile = await uploadNewFileToTerminal(
 					filesystemUploadTerminal.url,
 					filesystemUploadTerminal.key,
 					cwd,
@@ -954,6 +974,7 @@
 				if (uploadedFile) {
 					fileItem.type = 'filesystem';
 					fileItem.status = 'uploaded';
+					fileItem.name = uploadedFile.path.split('/').pop() || file.name;
 					fileItem.id = uploadedFile.path;
 					fileItem.path = uploadedFile.path;
 					fileItem.url = uploadedFile.path;
@@ -1102,7 +1123,7 @@
 				return;
 			}
 
-			if (file['type'].startsWith('image/')) {
+			if (isRasterImageContentType(file['type'])) {
 				if (visionCapableModels.length === 0) {
 					toast.error($i18n.t('Selected model(s) do not support image inputs'));
 					return;
@@ -1410,7 +1431,17 @@
 						return;
 					}
 
-					if (['compact', 'fork', 'status', 'model', 'settings', 'temporary'].includes(props?.id)) {
+					if (
+						[
+							'compact',
+							'fork',
+							'status',
+							'model',
+							'settings',
+							'temporary',
+							'skills:create'
+						].includes(props?.id)
+					) {
 						editor.chain().focus().deleteRange(range).run();
 						return;
 					}
@@ -1437,6 +1468,7 @@
 						($_user?.role === 'admin' || ($_user?.permissions?.chat?.import ?? true)),
 					forkDisabled: () => isActive,
 					canTemporary: () => canToggleTemporary,
+					hasChatContent: hasChatContent,
 					temporaryEnabled: () => $temporaryChatEnabled === true,
 					contextUsage: () => statusContextUsage,
 					onCompact: compactHandler,
@@ -1445,6 +1477,7 @@
 					onModel: () => modelSelector?.open(),
 					onSettings: () => showSettings.set(true),
 					onTemporary: temporaryHandler,
+					onCreateSkill: createSkillHandler,
 					onSelect: (e) => {
 						const { type, data } = e;
 
@@ -1535,7 +1568,10 @@
 				command: ({ editor, range, props }) => {
 					// Convert the Unicode hex codepoint (e.g. "1F44B") to the actual emoji character (👋)
 					const codepoint = props.id;
-					const emoji = String.fromCodePoint(parseInt(codepoint, 16));
+					const emoji = codepoint
+						.split('-')
+						.map((cp) => String.fromCodePoint(parseInt(cp, 16)))
+						.join('');
 					editor.chain().focus().deleteRange(range).insertContent(emoji).run();
 				},
 				render: getSuggestionRenderer(CommandSuggestionList, {
@@ -1729,6 +1765,7 @@
 					>
 						<button
 							id="generate-message-pair-button"
+							type="button"
 							aria-label={$i18n.t('Generate message pair')}
 							class="hidden"
 							on:click={() => createMessagePair(prompt)}
@@ -1874,7 +1911,7 @@
 												src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${$models.find((model) => model.id === atSelectedModel.id).id}&lang=${$i18n.language}`}
 											/>
 											<div class="translate-y-[0.5px]">
-												<span class="">{atSelectedModel.name}</span>
+												<span class="">{atSelectedModelName}</span>
 											</div>
 										</div>
 										<div>
@@ -1897,7 +1934,7 @@
 									dir={$settings?.chatDirection ?? 'auto'}
 								>
 									{#each files as file, fileIdx}
-										{#if file.type === 'image' || (file?.content_type ?? '').startsWith('image/')}
+										{#if file.type === 'image' || isRasterImageContentType(file?.content_type)}
 											{@const fileUrl =
 												file.url.startsWith('data') || file.url.startsWith('http')
 													? file.url
@@ -2024,6 +2061,11 @@
 													json={true}
 													richText={$settings?.richTextInput ?? true}
 													messageInput={true}
+													followUpSuggestion={!generating &&
+													history?.messages?.[history?.currentId]?.role === 'assistant' &&
+													history?.messages?.[history?.currentId]?.done
+														? (history.messages[history.currentId].followUps?.[0] ?? '')
+														: ''}
 													showFormattingToolbar={$settings?.showFormattingToolbar ?? false}
 													floatingMenuPlacement={'top-start'}
 													insertPromptAsRichText={$settings?.insertPromptAsRichText ?? false}
@@ -2371,7 +2413,14 @@
 											{#each selectedFilterIds as filterId (filterId)}
 												{@const filter = toggleFilters.find((f) => f.id === filterId)}
 												{#if filter}
-													<Tooltip content={filter?.name} placement="top">
+													<Tooltip
+														content={resolveLocalizedFunction(
+															filter,
+															$localizedFunctions,
+															$i18n.language
+														)}
+														placement="top"
+													>
 														<button
 															on:click|preventDefault={() => {
 																if (
@@ -2403,7 +2452,11 @@
 																			? 'dark:invert-[80%]'
 																			: ''}"
 																		style="fill: currentColor;"
-																		alt={filter.name}
+																		alt={resolveLocalizedFunction(
+																			filter,
+																			$localizedFunctions,
+																			$i18n.language
+																		)}
 																	/>
 																</div>
 															{:else}
