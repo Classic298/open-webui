@@ -3705,6 +3705,14 @@ def build_response_object(response, response_data):
     return response
 
 
+def contains_sse_done(raw):
+    line = raw.decode('utf-8', 'replace') if isinstance(raw, bytes) else raw
+    return isinstance(line, str) and any(
+        part.startswith('data:') and part.removeprefix('data:').strip() == '[DONE]'
+        for part in line.splitlines()
+    )
+
+
 def update_assistant_message_from_stream(assistant_message, raw):
     line = raw.decode('utf-8', 'replace') if isinstance(raw, bytes) else raw
     if not isinstance(line, str):
@@ -6648,6 +6656,12 @@ async def streaming_chat_response_handler(response, ctx):
             def wrap_item(item):
                 return f'data: {item}\n\n'
 
+            def log_outlet_failure(task):
+                if task.cancelled():
+                    log.warning('API outlet filter task was cancelled')
+                elif error := task.exception():
+                    log.error('API outlet filter task failed', exc_info=error)
+
             try:
                 assistant_message = {}
                 outlet_task = None
@@ -6704,12 +6718,10 @@ async def streaming_chat_response_handler(response, ctx):
 
                         # Clients may disconnect right after [DONE]; a task outlives that cancellation
                         if has_api_outlet_filters and assistant_message and outlet_task is None:
-                            line = data.decode('utf-8', 'replace') if isinstance(data, bytes) else data
-                            if isinstance(line, str) and any(
-                                part.removeprefix('data:').strip() == '[DONE]' for part in line.splitlines()
-                            ):
+                            if contains_sse_done(data):
                                 ctx['assistant_message'] = assistant_message
                                 outlet_task = asyncio.create_task(outlet_filter_handler(ctx))
+                                outlet_task.add_done_callback(log_outlet_failure)
 
                         yield data
 
@@ -6719,7 +6731,13 @@ async def streaming_chat_response_handler(response, ctx):
                     ctx['assistant_message'] = assistant_message
                     await outlet_filter_handler(ctx)
             except Exception as e:
-                log.exception('Chat completion stream failed mid-response: %s', e)
+                if not (
+                    outlet_task is not None
+                    and outlet_task.done()
+                    and not outlet_task.cancelled()
+                    and outlet_task.exception() is e
+                ):
+                    log.exception('Chat completion stream failed mid-response: %s', e)
                 # Separate the error frame from any unfinished upstream event.
                 yield f'\n\ndata: {JSONCodec.dumps({"error": {"message": "Chat completion stream failed"}})}\n\n'
                 yield 'data: [DONE]\n\n'
