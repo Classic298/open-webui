@@ -470,6 +470,7 @@ async def realtime_call(ws: WebSocket):
                 if kind == 'error' and event.get('error', {}).get('code') == 'response_cancel_not_active':
                     continue  # Server VAD may finish cancellation before our explicit cancel arrives.
                 if kind == 'error':
+                    log.warning('Provider error: %s', JSONCodec.dumps(event.get('error')))
                     # Provider error text can include prompts or credentials.
                     raise ValueError('Voice provider rejected a request')
                 protocol.observe(event)
