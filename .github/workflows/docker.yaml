@@ -35,24 +35,6 @@ jobs:
             suffix: ""
             build_args: ""
             free_disk: false
-          - name: cuda
-            suffix: "-cuda"
-            build_args: "USE_CUDA=true"
-            free_disk: true
-          - name: cuda126
-            suffix: "-cuda126"
-            build_args: |
-              USE_CUDA=true
-              USE_CUDA_VER=cu126
-            free_disk: true
-          - name: ollama
-            suffix: "-ollama"
-            build_args: "USE_OLLAMA=true"
-            free_disk: false
-          - name: slim
-            suffix: "-slim"
-            build_args: "USE_SLIM=true"
-            free_disk: false
 
     steps:
       - name: Prepare environment
@@ -166,14 +148,6 @@ jobs:
         variant:
           - name: main
             suffix: ""
-          - name: cuda
-            suffix: "-cuda"
-          - name: cuda126
-            suffix: "-cuda126"
-          - name: ollama
-            suffix: "-ollama"
-          - name: slim
-            suffix: "-slim"
 
     steps:
       - name: Prepare environment
