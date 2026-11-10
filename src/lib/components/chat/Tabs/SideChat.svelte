@@ -240,8 +240,13 @@
 		messages: Object.fromEntries(
 			messages.map((message, index) => [
 				message.id,
-				// The copied context belongs to saved history, outside this panel's visible branch.
-				index === 0 ? { ...message, parentId: null } : message
+				{
+					...message,
+					// The copied context belongs to saved history, outside this panel's visible branch.
+					...(index === 0 ? { parentId: null } : {}),
+					// Only this branch is loaded, so saved sibling branches cannot be opened here.
+					childrenIds: messages[index + 1] ? [messages[index + 1].id] : []
+				}
 			])
 		)
 	};
