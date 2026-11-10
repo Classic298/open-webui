@@ -728,6 +728,22 @@
 				data={pending.data}
 				onResponse={(value) => resolveInteraction(pending, value)}
 			/>
+		{:else if pending.type === 'confirmation' && pending.data.tool_call}
+			<ConfirmDialog
+				show={true}
+				title={pending.data.title ?? $i18n.t('Tool Permissions')}
+				on:confirm={() => resolveInteraction(pending, true)}
+				on:cancel={() => resolveInteraction(pending, false)}
+			>
+				<div class="text-sm text-gray-500">
+					<div class="font-medium break-all">{pending.data.tool_call.name}</div>
+					<pre class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(
+							pending.data.tool_call.arguments,
+							null,
+							2
+						)}</pre>
+				</div>
+			</ConfirmDialog>
 		{:else if pending.type === 'confirmation' || pending.type === 'input'}
 			<ConfirmDialog
 				show={true}
@@ -741,18 +757,7 @@
 				on:confirm={(event) =>
 					resolveInteraction(pending, pending.type === 'input' ? event.detail : true)}
 				on:cancel={() => resolveInteraction(pending, false)}
-			>
-				{#if pending.data.tool_call}
-					<div class="text-sm text-gray-500">
-						<div class="font-medium break-all">{pending.data.tool_call.name}</div>
-						<pre class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(
-								pending.data.tool_call.arguments,
-								null,
-								2
-							)}</pre>
-					</div>
-				{/if}
-			</ConfirmDialog>
+			/>
 		{/if}
 	{/key}
 {/if}
