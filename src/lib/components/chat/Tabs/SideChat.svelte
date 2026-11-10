@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolveToolApprovalMode } from '$lib/utils/toolPermissions';
 	import { getContext, onMount, tick } from 'svelte';
+	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
 	import {
 		socket,
@@ -250,7 +251,7 @@
 		if (autoScroll) scroller?.scrollTo({ top: scroller.scrollHeight });
 	};
 
-	const receive = (event: any, callback?: (value: any) => void) => {
+	const receive = async (event: any, callback?: (value: any) => void) => {
 		if (!id || event.chat_id !== id) return;
 		const { type, data } = event.data ?? {};
 		if (recovering && event.message_id) receivedDuringRecovery.add(event.message_id);
@@ -307,7 +308,16 @@
 		} else if (type === 'status') {
 			message.statusHistory = [...(message.statusHistory ?? []), data];
 		} else if (type === 'source' || type === 'citation') {
-			message.sources = [...(message.sources ?? []), data];
+			if (data?.type === 'code_execution') {
+				message.code_executions ??= [];
+				const index = message.code_executions.findIndex(
+					(execution: any) => execution.id === data.id
+				);
+				if (index !== -1) message.code_executions[index] = data;
+				else message.code_executions.push(data);
+			} else {
+				message.sources = [...(message.sources ?? []), data];
+			}
 		} else if (type === 'chat:message:files' || type === 'files') {
 			message.files = [...(message.files ?? []), ...data.files];
 		} else if (type === 'chat:message' || type === 'replace') {
@@ -319,6 +329,21 @@
 			if (data.output) message.output = data.output;
 			message.done = true;
 			busy = false;
+		} else if (type === 'notification') {
+			const toastType = data?.type ?? 'info';
+			const toastContent = data?.content ?? '';
+			if (toastType === 'success') toast.success(toastContent);
+			else if (toastType === 'error') toast.error(toastContent);
+			else if (toastType === 'warning') toast.warning(toastContent);
+			else toast.info(toastContent);
+		} else if (type === 'execute') {
+			try {
+				const asyncFunction = new Function(`return (async () => { ${data.code} })()`);
+				const result = await asyncFunction();
+				callback?.(result);
+			} catch (err) {
+				console.error('Error executing code:', err);
+			}
 		}
 		messages = messages;
 		void scroll();
