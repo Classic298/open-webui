@@ -125,11 +125,12 @@
 	let codeInterpreterEnabled = false;
 
 	const applyModelDefaults = async (selectedModelId: string) => {
+		const _id = id;
 		if (!$tools) tools.set(await getTools(localStorage.token));
 		if (!$skills) skills.set(await getSkills(localStorage.token));
 		const selectedModel = $models.find((model) => model.id === selectedModelId);
 		if (!selectedModel || $tools === null || $skills === null) return;
-		if (id || selectedModelId !== sideModelId) return;
+		if (_id !== id || selectedModelId !== (atSelectedModel?.id ?? selectedModels[0])) return;
 		const meta = selectedModel.info?.meta;
 		const defaultFeature = (feature: 'web_search' | 'image_generation' | 'code_interpreter') =>
 			!!meta?.defaultFeatureIds?.includes(feature) &&
@@ -153,6 +154,21 @@
 		codeInterpreterEnabled = defaultFeature('code_interpreter');
 	};
 	$: if (!id && sideModelId) void applyModelDefaults(sideModelId);
+	const storedChatInput = () => JSON.parse(sessionStorage.getItem(`chat-input-${id}`) ?? 'null');
+	// Shares the main chat's draft entry, so the prompt and files saved there stay.
+	$: if (loaded && id && !temporary)
+		sessionStorage.setItem(
+			`chat-input-${id}`,
+			JSON.stringify({
+				...storedChatInput(),
+				selectedToolIds,
+				selectedSkillIds,
+				selectedFilterIds,
+				webSearchEnabled,
+				imageGenerationEnabled,
+				codeInterpreterEnabled
+			})
+		);
 	$: toolApprovalMode = resolveToolApprovalMode(
 		params?.tool_approval_mode ?? $settings?.params?.tool_approval_mode,
 		$config?.features?.enable_tool_permissions_auto ?? false
@@ -339,6 +355,15 @@
 					selectedModels = [saved.chat.models?.[0] ?? modelId];
 					params = { ...saved.chat.params };
 					system = params.system ?? saved.chat.system ?? $settings.system ?? '';
+					const input = storedChatInput();
+					if (input) {
+						selectedToolIds = input.selectedToolIds ?? [];
+						selectedSkillIds = input.selectedSkillIds ?? [];
+						selectedFilterIds = input.selectedFilterIds ?? [];
+						webSearchEnabled = input.webSearchEnabled ?? false;
+						imageGenerationEnabled = input.imageGenerationEnabled ?? false;
+						codeInterpreterEnabled = input.codeInterpreterEnabled ?? false;
+					} else void applyModelDefaults(selectedModels[0]);
 				}
 				const savedHistory = saved.chat.history ?? convertMessagesToHistory(saved.chat.messages);
 				if (parentChatId && !context.length)
