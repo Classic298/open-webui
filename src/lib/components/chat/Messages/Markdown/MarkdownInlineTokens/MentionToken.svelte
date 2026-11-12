@@ -152,7 +152,7 @@
 								console.log('Clicked user mention', id);
 							} else if (idType === 'M') {
 								console.log('Clicked model mention', id);
-								await goto(`/?model=${id}`);
+								await goto(`/?model=${encodeURIComponent(id)}`);
 							}
 						} else if (triggerChar === '#') {
 							if (idType === 'C') {
