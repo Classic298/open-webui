@@ -105,7 +105,7 @@ from open_webui.utils.filter import (
 )
 from open_webui.utils.json_codec import JSONCodec, dumps_bytes
 from open_webui.utils.mcp.apps import MCPAppResult
-from open_webui.utils.memory import add_memory_context, recall_memories, review_memory_after_turn
+from open_webui.utils.memory import add_memory_context, format_memory_context, recall_memories, review_memory_after_turn
 from open_webui.utils.misc import (
     add_or_update_system_message,
     add_or_update_user_message,
@@ -2369,6 +2369,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         except Exception as e:
             raise Exception(f'{e}')
 
+    memory_sections = {}
     features = form_data.pop('features', None) or {}
     extra_params['__features__'] = features
     if features:
@@ -2397,7 +2398,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             ):
                 if use_builtin_tools:
                     if not metadata.get('assistant_message_id'):
-                        initial_output.extend(await preload_memory(request, form_data['messages'], user, model))
+                        memory_sections = await recall_memories(request, form_data['messages'], user, model)
                 else:
                     form_data = await add_memory_context(request, form_data, user, model)
 
@@ -3010,6 +3011,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     metadata['context_summary'] = context_summary
 
     # Added after compaction: it can summarize away the copy the model had, and it should not summarize this turn's.
+    initial_output.extend(await preload_memory(memory_sections, form_data['messages']))
     for name, manifest in manifests.items():
         if get_last_tool_result(form_data['messages'], name) != manifest:
             initial_output.extend(hidden_tool_result(name, manifest))
@@ -3030,13 +3032,33 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     return form_data, metadata, events, False
 
 
-async def preload_memory(request, messages: list[dict], user, model: dict) -> list[dict]:
+async def preload_memory(sections: dict[str, list[dict]], messages: list[dict]) -> list[dict]:
     """Keep automatic recall in ordinary tool history so later turns replay it unchanged."""
-    result = await recall_memories(request, messages, user, model)
-    return hidden_tool_result('recall_memories', result) if result else []
+    if not any(sections.values()):
+        return []
+    completed = {
+        message.get('tool_call_id')
+        for message in messages
+        if message.get('role') == 'tool' and not _is_tool_result_error(message.get('content', ''))
+    }
+    sent_versions = set()
+    for message in messages:
+        for call in message.get('tool_calls') or []:
+            function = call.get('function') or {}
+            if function.get('name') == 'recall_memories' and call.get('id') in completed:
+                try:
+                    sent_versions.update(JSONCodec.loads(function.get('arguments', '{}')).get('memories', []))
+                except (ValueError, TypeError, AttributeError):
+                    pass
+    unsent = {
+        key: [entry for entry in entries if entry['version'] not in sent_versions] for key, entries in sections.items()
+    }
+    result, shown = await format_memory_context(unsent)
+    arguments = JSONCodec.dumps({'memories': [entry['version'] for entry in shown if entry['version']]})
+    return hidden_tool_result('recall_memories', result, arguments) if result else []
 
 
-def hidden_tool_result(name: str, result: str) -> list[dict]:
+def hidden_tool_result(name: str, result: str, arguments: str = '{}') -> list[dict]:
     """Use ordinary saved tool output for internal context without displaying it in chat."""
     call_id = output_id('fc')
     return [
@@ -3046,7 +3068,7 @@ def hidden_tool_result(name: str, result: str) -> list[dict]:
             'call_id': call_id,
             'name': name,
             'hidden': True,
-            'arguments': '{}',
+            'arguments': arguments,
             'status': 'completed',
         },
         {
