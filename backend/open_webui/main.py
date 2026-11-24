@@ -2420,7 +2420,7 @@ async def get_app_config(request: Request):
         )
         if group_defaults:
             try:
-                if not request.app.state.MODELS:
+                if any(model_id not in request.app.state.MODELS for model_id in group_defaults):
                     await get_all_models(request, user=user)
                 models = await get_filtered_models(list(request.app.state.MODELS.values()), user)
                 available = {
