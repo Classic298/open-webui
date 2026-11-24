@@ -2,6 +2,7 @@
 	import { v4 as uuidv4 } from 'uuid';
 	import { config, settings, user as _user, mobile } from '$lib/stores';
 	import { refreshChatList } from '$lib/stores/chatList';
+	import { getUnsavedMessages, markMessagesSaved } from '$lib/stores/chatCache';
 	import { tick, getContext, onMount, onDestroy, createEventDispatcher } from 'svelte';
 	const dispatch = createEventDispatcher();
 
@@ -202,10 +203,12 @@
 		if (!$temporary) {
 			history = history;
 			await tick();
+			const changedMessages = getUnsavedMessages(chatId, history.messages);
 			const res = await updateChatById(localStorage.token, chatId, {
-				history: history,
+				history: { currentId: history.currentId, messages: changedMessages },
 				messages: messages
 			});
+			markMessagesSaved(chatId, changedMessages);
 
 			// Keep local plain-content edits aligned with the saved chat response.
 			if (res?.chat?.history?.messages) {

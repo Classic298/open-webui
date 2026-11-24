@@ -78,6 +78,8 @@
 		cacheChat,
 		cachedChats,
 		getCachedChat,
+		getUnsavedMessages,
+		markMessagesSaved,
 		pendingChatRequest,
 		requestChat
 	} from '$lib/stores/chatCache';
@@ -2158,6 +2160,13 @@
 				}
 
 				if (message) history.messages[event.message_id] = message;
+				// The server saved these itself, so this copy of the message is up to date.
+				if (
+					message &&
+					['status', 'source', 'citation', 'embeds', 'files'].includes(type) &&
+					!data?.type
+				)
+					markMessagesSaved(event.chat_id, { [event.message_id]: structuredClone(message) });
 			}
 		} else {
 			// Non-active chat completion: queue stays in the global store.
@@ -3553,6 +3562,7 @@
 				// Sanitize history: repair orphaned references and structurally-malformed
 				// nodes from failed regenerations (#24424, #24157, #20474)
 				sanitizeHistory(history);
+				markMessagesSaved(id, structuredClone(history.messages));
 				cachedHistory = cached ? { ...history, messages: { ...history.messages } } : null;
 
 				chatTitle.set(chatContent.title);
@@ -3987,12 +3997,14 @@
 		}
 
 		if (changed && !$temporaryChat) {
+			const changedMessages = getUnsavedMessages(_chatId, history.messages);
 			chat = await updateChatById(localStorage.token, _chatId, {
 				models: selectedModels,
 				messages: createMessagesList(history, responseMessageId),
-				history: history,
+				history: { currentId: history.currentId, messages: changedMessages },
 				files: chatFiles
 			});
+			markMessagesSaved(_chatId, changedMessages);
 
 			await refreshChatList(localStorage.token);
 		}
@@ -5841,12 +5853,14 @@
 		if (isShared) return;
 		if ($chatId == _chatId) {
 			if (!$temporaryChat) {
+				const changedMessages = getUnsavedMessages(_chatId, history.messages);
 				chat = await updateChatById(localStorage.token, _chatId, {
 					models: selectedModels,
-					history: history,
+					history: { currentId: history.currentId, messages: changedMessages },
 					messages: createMessagesList(history, history.currentId),
 					files: chatFiles
 				});
+				markMessagesSaved(_chatId, changedMessages);
 			}
 		}
 	};

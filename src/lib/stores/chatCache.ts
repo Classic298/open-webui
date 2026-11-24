@@ -1,3 +1,4 @@
+import equal from 'fast-deep-equal';
 import { get, writable } from 'svelte/store';
 import { getChatById } from '$lib/apis/chats';
 import { user } from '$lib/stores';
@@ -37,4 +38,28 @@ export const getCachedChat = (id: string) => {
 		messages.some((message) => message.role === 'assistant' && message.done === false) ||
 		(current?.role === 'assistant' && !current.done);
 	return replying ? undefined : chat;
+};
+
+/** Each chat's messages as last loaded or saved; a save sends only the ones changed since. */
+const savedMessages = new Map<string, Record<string, any>>();
+
+export const markMessagesSaved = (chatId: string, messages: Record<string, any>) => {
+	const saved = { ...savedMessages.get(chatId), ...messages };
+	savedMessages.delete(chatId);
+	savedMessages.set(chatId, saved);
+	if (savedMessages.size > MAX_CACHED_CHATS)
+		savedMessages.delete(savedMessages.keys().next().value!);
+};
+
+export const getUnsavedMessages = (chatId: string, messages: Record<string, any>) => {
+	const saved = savedMessages.get(chatId) ?? {};
+	return structuredClone(
+		Object.fromEntries(
+			Object.entries(messages).filter(
+				([id, message]) =>
+					!saved[id] ||
+					!equal({ ...message, childrenIds: null }, { ...saved[id], childrenIds: null })
+			)
+		)
+	);
 };
