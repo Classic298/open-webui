@@ -23,6 +23,8 @@ from open_webui.utils.tool_calling import prepare_tool_call
 
 log = logging.getLogger(__name__)
 SURROGATE_RE = re.compile('[\ud800-\udfff]')
+# Attachment references added by add_file_context, not typed by the user.
+FILE_CONTEXT_RE = re.compile(r'^<attached_files>\n.*?\n</attached_files>\n\n', re.DOTALL)
 MAX_DIFF_LINES = 5000
 
 
@@ -238,14 +240,20 @@ def get_last_user_message_item(messages: list[dict]) -> dict | None:
     return None
 
 
+def is_user_text_part(item: object) -> bool:
+    return (
+        isinstance(item, dict) and item.get('type') == 'text' and not FILE_CONTEXT_RE.fullmatch(item.get('text') or '')
+    )
+
+
 def get_content_from_message(message: dict) -> str | None:
     content = message.get('content')
     if isinstance(content, list):
         for item in content:
-            if isinstance(item, dict) and item.get('type') == 'text':
+            if is_user_text_part(item):
                 return item.get('text')
     elif content:
-        return content
+        return FILE_CONTEXT_RE.sub('', content)
 
     output_text = get_output_text(message.get('output'))
     return output_text or (content if isinstance(content, str) else None)
@@ -711,11 +719,12 @@ def set_last_user_message_content(content: str, messages: list[dict]) -> list[di
         if message.get('role') == 'user':
             if isinstance(message.get('content'), list):
                 for item in message['content']:
-                    if item.get('type') == 'text':
+                    if is_user_text_part(item):
                         item['text'] = content
                         break
             else:
-                message['content'] = content
+                file_context_match = FILE_CONTEXT_RE.match(message.get('content') or '')
+                message['content'] = (file_context_match.group(0) if file_context_match else '') + content
             break
     return messages
 
