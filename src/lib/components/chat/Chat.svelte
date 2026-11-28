@@ -1206,7 +1206,6 @@
 		videoGenerationEnabled = false;
 		selectedVideoModelId = '';
 		prompt = '';
-		messageInput?.setText('');
 		await chatId.set('');
 		await chatTitle.set('');
 		if (embeddedDraft) {
@@ -1225,7 +1224,7 @@
 		await tick();
 		if (embeddedDraft) {
 			({ prompt, files } = embeddedDraft);
-			messageInput?.setText(prompt);
+			if (prompt) messageInput?.setText(prompt);
 		}
 		if (!$mobile) messageInput?.focus({ preventScroll: true });
 		if (embeddedDraft?.submit || initialPrompt) {
